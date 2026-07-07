@@ -52,6 +52,7 @@
 - [日线行情数据导入](./docs/日线行情数据导入.md)
 - [趋势强度基础因子](./docs/趋势强度基础因子.md)
 - [趋势强度策略筛选](./docs/趋势强度策略筛选.md)
+- [观察池报告](./docs/观察池报告.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -104,6 +105,14 @@ python3 tools/screen_trend_strength.py \
   --factors data/processed/trend_factors.csv \
   --output data/processed/trend_candidates.csv \
   --metadata-output data/metadata/trend_candidates.json
+```
+
+### 生成观察池报告
+
+```bash
+python3 tools/generate_watchlist_report.py \
+  --candidates data/processed/trend_candidates.csv \
+  --output reports/watchlist.md
 ```
 
 ### 交易计划风控校验

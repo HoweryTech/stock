@@ -16,3 +16,5 @@ data/metadata/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/metadata/.gitkeep
+reports/*.md
+!reports/.gitkeep
