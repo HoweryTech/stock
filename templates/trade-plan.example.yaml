@@ -1,0 +1,78 @@
+# 交易计划示例
+# 本文件用于描述买入前必须填写的信息，后续可作为 Web 表单或 API 入参的基础。
+
+trade_plan:
+  id: "TP-YYYYMMDD-0001"
+  status: "draft"
+  created_at: "YYYY-MM-DD"
+  market: "A_SHARE"
+
+stock:
+  code: "000001"
+  name: "示例股票"
+  exchange: "SZSE"
+  industry: "示例行业"
+  is_st: false
+  is_suspended: false
+  has_delisting_risk: false
+  abnormal_trading_status: false
+
+strategy:
+  source: "trend_strength"
+  timeframe: "swing"
+  buy_reason: "示例：股价回踩关键均线后企稳，成交额温和放大，相对指数强度保持领先。"
+  key_evidence:
+    - type: "price_volume"
+      description: "示例：近 20 日成交额高于过去 60 日均值。"
+    - type: "relative_strength"
+      description: "示例：近 60 日涨幅强于沪深 300。"
+  counter_evidence_and_risks:
+    - type: "market_regime"
+      description: "示例：大盘短期仍处于震荡环境。"
+    - type: "valuation"
+      description: "示例：估值不低，若业绩不及预期可能回撤。"
+
+price_plan:
+  planned_buy_price: 20.0
+  current_price: 20.2
+  max_acceptable_buy_price: 20.6
+  stop_loss_price: 18.5
+
+position_plan:
+  planned_position_pct_of_total_assets: 8.0
+  current_stock_position_pct: 0.0
+  current_industry_position_pct: 12.0
+  current_total_position_pct: 45.0
+  expected_stock_position_pct_after_buy: 8.0
+  expected_industry_position_pct_after_buy: 20.0
+  expected_total_position_pct_after_buy: 53.0
+
+risk_calculation:
+  max_loss_pct_of_total_assets: 0.6
+  reward_risk_notes: "示例：止损空间约 7.5%，目标观察区至少覆盖 2 倍风险。"
+
+exit_plan:
+  stop_loss_conditions:
+    - "收盘价跌破 18.5。"
+    - "趋势结构破坏且无法在两个交易日内收复。"
+  take_profit_conditions:
+    - "达到计划目标区后根据量价和市场环境分批止盈。"
+  invalidation_conditions:
+    - "买入时依赖的趋势强度消失。"
+    - "出现重大负面公告。"
+  observation_items:
+    - "成交额是否持续支持趋势。"
+    - "所属行业指数是否继续强于大盘。"
+
+risk_check_expectation:
+  expected_result: "pass"
+  user_confirmation_required: true
+  confirmation_text: "我确认本次交易符合计划，已阅读关键证据、反证和风险，并接受按止损价计算的最大亏损。"
+
+review_seed:
+  planned_review_after_exit: true
+  review_focus:
+    - "是否按计划价格买入。"
+    - "是否按止损和止盈规则执行。"
+    - "买入理由是否被市场证实。"
+

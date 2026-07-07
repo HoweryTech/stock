@@ -1,0 +1,181 @@
+# 个人投资体系配置示例
+# 后续系统应读取本文件生成选股约束、交易计划校验和复盘归因规则。
+
+profile:
+  name: "personal-a-share-investment-profile"
+  market_scope:
+    - "A_SHARE"
+  decision_mode: "human_confirmed"
+  primary_goal: "risk_controlled_return"
+  default_timeframes:
+    - "swing"
+    - "mid_term"
+  preferred_styles:
+    - "value_quality"
+    - "trend_strength"
+    - "event_catalyst"
+
+risk:
+  max_loss_per_trade_pct_of_total_assets: 1.0
+  max_position_pct_per_stock: 10.0
+  max_position_pct_per_industry: 25.0
+  max_total_position_pct: 80.0
+  max_total_position_pct_in_weak_market: 30.0
+  min_cash_pct: 20.0
+  chase_limit_pct_above_plan_price: 3.0
+  losing_streak_cooldown:
+    enabled: true
+    consecutive_losing_trades: 3
+    cooldown_trading_days: 5
+
+market_regime:
+  weak_market_rules:
+    enabled: true
+    max_total_position_pct: 30.0
+    require_stronger_signal: true
+
+universe_filters:
+  exclude_st: true
+  exclude_delisting_risk: true
+  exclude_suspended: true
+  exclude_abnormal_trading_status: true
+  min_listing_days: 180
+  min_average_daily_turnover_cny: 100000000
+  min_average_daily_volume_cny_lookback_days: 20
+
+forbidden_buy_rules:
+  - code: "no_strategy_source"
+    severity: "block"
+    description: "买入理由无法对应到已定义策略。"
+  - code: "no_stop_loss"
+    severity: "block"
+    description: "没有明确止损价。"
+  - code: "position_limit_exceeded"
+    severity: "block"
+    description: "单票、行业或总仓位超过上限。"
+  - code: "risk_per_trade_exceeded"
+    severity: "block"
+    description: "按止损价计算的单笔亏损超过阈值。"
+  - code: "price_too_far_above_plan"
+    severity: "block"
+    description: "当前价格较计划买入价偏离过大。"
+  - code: "major_unresolved_risk"
+    severity: "block"
+    description: "存在未处理的重大公告、财务或监管风险。"
+  - code: "cooldown_active"
+    severity: "block"
+    description: "连续亏损后处于冷静期。"
+
+strategies:
+  value_quality:
+    enabled: true
+    timeframe: "mid_term"
+    required_evidence:
+      - "roe"
+      - "operating_cash_flow"
+      - "debt_ratio"
+      - "gross_margin"
+      - "net_margin"
+      - "revenue_growth_yoy"
+      - "deducted_net_profit_growth_yoy"
+      - "valuation_percentile"
+    hard_checks:
+      operating_cash_flow_quality_required: true
+      avoid_extreme_high_valuation: true
+      avoid_major_financial_risk: true
+
+  trend_strength:
+    enabled: true
+    timeframe: "swing"
+    required_evidence:
+      - "moving_average_structure"
+      - "relative_strength_vs_index"
+      - "turnover_change"
+      - "breakout_or_pullback"
+      - "industry_strength"
+      - "volatility"
+    hard_checks:
+      stop_loss_required: true
+      avoid_chasing: true
+      volume_confirmation_required: true
+
+  event_catalyst:
+    enabled: true
+    timeframe: "swing"
+    required_evidence:
+      - "announcement"
+      - "event_type"
+      - "expected_impact"
+      - "counter_evidence"
+      - "risk_disclosure"
+    supported_event_types:
+      - "earnings_forecast"
+      - "share_repurchase"
+      - "shareholder_increase"
+      - "policy_catalyst"
+      - "merger_restructuring"
+      - "major_order"
+      - "new_product"
+
+trade_plan_required_fields:
+  - "stock_code"
+  - "stock_name"
+  - "strategy_source"
+  - "buy_reason"
+  - "key_evidence"
+  - "counter_evidence_and_risks"
+  - "planned_buy_price"
+  - "max_acceptable_buy_price"
+  - "stop_loss_price"
+  - "planned_position_pct"
+  - "max_loss_pct_of_total_assets"
+  - "exit_conditions"
+  - "invalidation_conditions"
+
+holding_statuses:
+  - "normal"
+  - "near_stop_loss"
+  - "stop_loss_triggered"
+  - "take_profit_watch"
+  - "thesis_pending_validation"
+  - "thesis_invalidated"
+  - "review_required"
+
+exit_rules:
+  - code: "stop_loss_triggered"
+    description: "触发止损。"
+  - code: "trend_broken"
+    description: "趋势结构破坏。"
+  - code: "fundamental_thesis_invalidated"
+    description: "基本面假设被证伪。"
+  - code: "event_catalyst_failed"
+    description: "事件催化落空。"
+  - code: "take_profit_triggered"
+    description: "达到计划止盈条件。"
+  - code: "higher_priority_risk"
+    description: "出现更高优先级风险。"
+  - code: "portfolio_deleveraging"
+    description: "组合需要降仓。"
+
+review:
+  required_after_exit: true
+  result_categories:
+    - "strategy_profit"
+    - "strategy_loss"
+    - "execution_error_profit"
+    - "execution_error_loss"
+    - "random_noise"
+    - "rule_design_defect"
+    - "data_or_information_gap"
+  error_tags:
+    - "chasing"
+    - "oversized_position"
+    - "unplanned_trade"
+    - "late_stop_loss"
+    - "early_take_profit"
+    - "ignored_announcement_risk"
+    - "ignored_market_regime"
+    - "weak_buy_reason"
+    - "strategy_mismatch"
+    - "emotional_trade"
+
