@@ -66,6 +66,7 @@
 - [交易计划准入门禁](./docs/交易计划准入门禁.md)
 - [候选股到交易计划门禁流程](./docs/候选股到交易计划门禁流程.md)
 - [交易执行记录](./docs/交易执行记录.md)
+- [执行记录生成持仓](./docs/执行记录生成持仓.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -293,6 +294,16 @@ python3 tools/new_trade_execution.py \
   --position-pct 5 \
   --user-confirmed \
   --note "按计划模拟成交。"
+```
+
+### 从执行记录生成持仓
+
+```bash
+python3 tools/new_position_from_execution.py \
+  --execution executions/EXEC-示例.yaml \
+  --current-price 201 \
+  --days-held 1 \
+  --note "从执行记录生成持仓。"
 ```
 
 ### 新建持仓记录
