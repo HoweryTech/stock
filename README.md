@@ -104,6 +104,20 @@ python3 tools/new_position.py \
 
 默认输出到 `positions/` 目录。真实持仓记录默认不提交到 Git。
 
+### 持仓风险检查
+
+```bash
+python3 tools/position_check.py \
+  --profile config/investment-profile.example.yaml \
+  --position positions/POS-示例.yaml
+```
+
+输出 JSON：
+
+```bash
+python3 tools/position_check.py --position positions/POS-示例.yaml --json
+```
+
 ### 新建交易复盘草稿
 
 ```bash
