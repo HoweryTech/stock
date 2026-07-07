@@ -116,6 +116,7 @@ python3 tools/import_valuation_metrics.py \
 python3 tools/screen_value_quality.py \
   --profile config/investment-profile.example.yaml \
   --financial-metrics data/processed/financial_metrics.csv \
+  --valuation-metrics data/processed/valuation_metrics.csv \
   --output data/processed/value_quality_candidates.csv \
   --metadata-output data/metadata/value_quality_candidates.json
 ```
@@ -165,6 +166,7 @@ python3 tools/generate_watchlist_report.py \
 python3 tools/run_watchlist_pipeline.py \
   --daily-bars data/processed/daily_bars.csv \
   --financial-metrics data/processed/financial_metrics.csv \
+  --valuation-metrics data/processed/valuation_metrics.csv \
   --universe data/processed/tradable_universe.csv \
   --report-output reports/watchlist.md
 ```

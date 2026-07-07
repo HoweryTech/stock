@@ -20,6 +20,7 @@ except ModuleNotFoundError:
 OUTPUT_FIELDS = [
     "code",
     "report_period",
+    "valuation_trade_date",
     "score",
     "roe",
     "roa",
@@ -31,6 +32,10 @@ OUTPUT_FIELDS = [
     "net_profit_growth_yoy",
     "deducted_net_profit_growth_yoy",
     "eps",
+    "pe_ttm",
+    "pb",
+    "pe_percentile",
+    "pb_percentile",
     "reasons",
     "risks",
 ]
@@ -43,11 +48,19 @@ DEFAULT_SCREENING_CONFIG = {
     "min_revenue_growth_yoy": 0.0,
     "min_deducted_net_profit_growth_yoy": 0.0,
     "min_gross_margin": 0.0,
+    "require_valuation": True,
+    "max_pe_percentile": 80.0,
+    "max_pb_percentile": 80.0,
     "max_candidates": 20,
 }
 
 
 def read_financial_metrics(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
+        return list(csv.DictReader(file))
+
+
+def read_valuation_metrics(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as file:
         return list(csv.DictReader(file))
 
@@ -59,13 +72,33 @@ def value_quality_screening_config(profile: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def latest_rows_by_code(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+def latest_rows_by_code(rows: list[dict[str, str]], date_field: str = "report_period") -> list[dict[str, str]]:
     latest: dict[str, dict[str, str]] = {}
-    for row in sorted(rows, key=lambda item: (item.get("code", ""), item.get("report_period", ""))):
+    for row in sorted(rows, key=lambda item: (item.get("code", ""), item.get(date_field, ""))):
         code = row.get("code", "")
         if code:
             latest[code] = row
     return list(latest.values())
+
+
+def merge_valuation_rows(metric_rows: list[dict[str, str]], valuation_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    valuations = {row.get("code", ""): row for row in latest_rows_by_code(valuation_rows, "trade_date")}
+    merged: list[dict[str, str]] = []
+    for row in latest_rows_by_code(metric_rows):
+        valuation = valuations.get(row.get("code", ""))
+        merged_row = dict(row)
+        if valuation:
+            merged_row.update(
+                {
+                    "valuation_trade_date": valuation.get("trade_date", ""),
+                    "pe_ttm": valuation.get("pe_ttm", ""),
+                    "pb": valuation.get("pb", ""),
+                    "pe_percentile": valuation.get("pe_percentile", ""),
+                    "pb_percentile": valuation.get("pb_percentile", ""),
+                }
+            )
+        merged.append(merged_row)
+    return merged
 
 
 def number_from_row(row: dict[str, str], field: str) -> float | None:
@@ -98,12 +131,16 @@ def score_candidate(row: dict[str, str]) -> float:
     revenue_growth = number_from_row(row, "revenue_growth_yoy") or 0.0
     deducted_growth = number_from_row(row, "deducted_net_profit_growth_yoy") or 0.0
     operating_cash_flow = number_from_row(row, "operating_cash_flow") or 0.0
+    pe_percentile = number_from_row(row, "pe_percentile") or 0.0
+    pb_percentile = number_from_row(row, "pb_percentile") or 0.0
 
     score = roe + roa
     score += max(gross_margin, 0.0) * 0.05
     score += max(revenue_growth, 0.0) * 0.2
     score += max(deducted_growth, 0.0) * 0.2
     score -= max(debt_ratio - 60.0, 0.0) * 0.1
+    score -= max(pe_percentile - 50.0, 0.0) * 0.05
+    score -= max(pb_percentile - 50.0, 0.0) * 0.05
     if operating_cash_flow > 0:
         score += 2.0
     return round(score, 6)
@@ -119,6 +156,13 @@ def candidate_from_row(row: dict[str, str], config: dict[str, Any]) -> tuple[dic
         require_min(row, "deducted_net_profit_growth_yoy", float(config["min_deducted_net_profit_growth_yoy"]), "扣非净利润同比"),
         require_min(row, "gross_margin", float(config["min_gross_margin"]), "毛利率"),
     ]
+    if config.get("require_valuation", True):
+        checks.extend(
+            [
+                require_max(row, "pe_percentile", float(config["max_pe_percentile"]), "PE 分位"),
+                require_max(row, "pb_percentile", float(config["max_pb_percentile"]), "PB 分位"),
+            ]
+        )
     exclusions = [check for check in checks if check]
     if exclusions:
         return None, exclusions
@@ -130,6 +174,8 @@ def candidate_from_row(row: dict[str, str], config: dict[str, Any]) -> tuple[dic
     revenue_growth = number_from_row(row, "revenue_growth_yoy") or 0.0
     deducted_growth = number_from_row(row, "deducted_net_profit_growth_yoy") or 0.0
     gross_margin = number_from_row(row, "gross_margin") or 0.0
+    pe_percentile = number_from_row(row, "pe_percentile")
+    pb_percentile = number_from_row(row, "pb_percentile")
 
     reasons = [
         f"ROE {roe:.2f}% >= {float(config['min_roe']):.2f}%。",
@@ -139,16 +185,25 @@ def candidate_from_row(row: dict[str, str], config: dict[str, Any]) -> tuple[dic
         f"营收同比 {revenue_growth:.2f}% >= {float(config['min_revenue_growth_yoy']):.2f}%。",
         f"扣非净利润同比 {deducted_growth:.2f}% >= {float(config['min_deducted_net_profit_growth_yoy']):.2f}%。",
     ]
+    if pe_percentile is not None:
+        reasons.append(f"PE 分位 {pe_percentile:.2f} <= {float(config['max_pe_percentile']):.2f}。")
+    if pb_percentile is not None:
+        reasons.append(f"PB 分位 {pb_percentile:.2f} <= {float(config['max_pb_percentile']):.2f}。")
     risks: list[str] = []
     if debt_ratio > 70:
         risks.append("资产负债率接近上限，需核查行业属性和偿债压力。")
     if gross_margin == 0:
         risks.append("毛利率为 0，需确认是否为金融行业口径或数据缺失。")
+    if pe_percentile is None or pb_percentile is None:
+        risks.append("估值分位缺失，需人工确认价格是否过高。")
+    elif pe_percentile > 70 or pb_percentile > 70:
+        risks.append("估值分位接近上限，需确认安全边际。")
 
     return (
         {
             "code": row.get("code", ""),
             "report_period": row.get("report_period", ""),
+            "valuation_trade_date": row.get("valuation_trade_date", ""),
             "score": score_candidate(row),
             "roe": row.get("roe", ""),
             "roa": row.get("roa", ""),
@@ -160,6 +215,10 @@ def candidate_from_row(row: dict[str, str], config: dict[str, Any]) -> tuple[dic
             "net_profit_growth_yoy": row.get("net_profit_growth_yoy", ""),
             "deducted_net_profit_growth_yoy": row.get("deducted_net_profit_growth_yoy", ""),
             "eps": row.get("eps", ""),
+            "pe_ttm": row.get("pe_ttm", ""),
+            "pb": row.get("pb", ""),
+            "pe_percentile": row.get("pe_percentile", ""),
+            "pb_percentile": row.get("pb_percentile", ""),
             "reasons": " | ".join(reasons),
             "risks": " | ".join(risks),
         },
@@ -167,11 +226,16 @@ def candidate_from_row(row: dict[str, str], config: dict[str, Any]) -> tuple[dic
     )
 
 
-def screen_candidates(metric_rows: list[dict[str, str]], config: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def screen_candidates(
+    metric_rows: list[dict[str, str]],
+    config: dict[str, Any],
+    valuation_rows: list[dict[str, str]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     candidates: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
+    rows = merge_valuation_rows(metric_rows, valuation_rows or [])
 
-    for row in latest_rows_by_code(metric_rows):
+    for row in rows:
         candidate, reasons = candidate_from_row(row, config)
         if candidate is None:
             exclusions.append({"code": row.get("code", ""), "report_period": row.get("report_period", ""), "reasons": reasons})
@@ -194,9 +258,11 @@ def write_candidates(path: Path, candidates: list[dict[str, Any]]) -> None:
 def build_metadata(
     profile_path: Path,
     metrics_path: Path,
+    valuation_path: Path | None,
     output_path: Path,
     config: dict[str, Any],
     metric_rows: list[dict[str, str]],
+    valuation_rows: list[dict[str, str]],
     candidates: list[dict[str, Any]],
     exclusions: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -205,10 +271,12 @@ def build_metadata(
         "screened_at": datetime.now().isoformat(timespec="seconds"),
         "profile": str(profile_path),
         "financial_metrics": str(metrics_path),
+        "valuation_metrics": str(valuation_path) if valuation_path else None,
         "output": str(output_path),
         "strategy": "value_quality",
         "config": config,
         "input_count": len(metric_rows),
+        "valuation_input_count": len(valuation_rows),
         "latest_code_count": len(latest_rows_by_code(metric_rows)),
         "candidate_count": len(candidates),
         "excluded_count": len(exclusions),
@@ -230,6 +298,7 @@ def run_screen(
     metrics_path: Path,
     output_path: Path,
     metadata_path: Path,
+    valuation_path: Path | None = None,
     max_candidates_override: int | None = None,
 ) -> dict[str, Any]:
     profile = load_yaml(profile_path)
@@ -237,9 +306,10 @@ def run_screen(
     if max_candidates_override is not None:
         config["max_candidates"] = max_candidates_override
     metric_rows = read_financial_metrics(metrics_path)
-    candidates, exclusions = screen_candidates(metric_rows, config)
+    valuation_rows = read_valuation_metrics(valuation_path) if valuation_path else []
+    candidates, exclusions = screen_candidates(metric_rows, config, valuation_rows)
     write_candidates(output_path, candidates)
-    metadata = build_metadata(profile_path, metrics_path, output_path, config, metric_rows, candidates, exclusions)
+    metadata = build_metadata(profile_path, metrics_path, valuation_path, output_path, config, metric_rows, valuation_rows, candidates, exclusions)
     write_metadata(metadata_path, metadata)
     return metadata
 
@@ -247,6 +317,7 @@ def run_screen(
 def print_summary(metadata: dict[str, Any]) -> None:
     print(f"strategy: {metadata['strategy']}")
     print(f"input rows: {metadata['input_count']}")
+    print(f"valuation rows: {metadata['valuation_input_count']}")
     print(f"latest codes: {metadata['latest_code_count']}")
     print(f"candidate rows: {metadata['candidate_count']}")
     print(f"excluded rows: {metadata['excluded_count']}")
@@ -257,6 +328,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Screen value quality candidates.")
     parser.add_argument("--profile", default="config/investment-profile.example.yaml", help="Path to investment profile YAML.")
     parser.add_argument("--financial-metrics", default="data/processed/financial_metrics.csv", help="Input financial metrics CSV.")
+    parser.add_argument("--valuation-metrics", default="data/processed/valuation_metrics.csv", help="Input valuation metrics CSV.")
     parser.add_argument("--output", default="data/processed/value_quality_candidates.csv", help="Output value quality candidates CSV.")
     parser.add_argument("--metadata-output", default="data/metadata/value_quality_candidates.json", help="Screen metadata JSON.")
     parser.add_argument("--max-candidates", type=int, help="Override max candidates.")
@@ -272,6 +344,7 @@ def main() -> int:
             Path(args.financial_metrics),
             Path(args.output),
             Path(args.metadata_output),
+            Path(args.valuation_metrics),
             args.max_candidates,
         )
     except Exception as exc:

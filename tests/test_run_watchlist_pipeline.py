@@ -23,6 +23,7 @@ class RunWatchlistPipelineTest(unittest.TestCase):
                 ROOT / "config/investment-profile.example.yaml",
                 ROOT / "samples/daily_bars.sample.csv",
                 ROOT / "samples/financial_metrics.sample.csv",
+                ROOT / "samples/valuation_metrics.sample.csv",
                 None,
                 None,
                 base / "trend_factors.csv",

@@ -38,6 +38,11 @@ class ScreenValueQualityTest(unittest.TestCase):
             "net_profit_growth_yoy": "21.6",
             "deducted_net_profit_growth_yoy": "19.4",
             "eps": "2.35",
+            "valuation_trade_date": "2026-07-02",
+            "pe_ttm": "28.5",
+            "pb": "4.6",
+            "pe_percentile": "68",
+            "pb_percentile": "72",
         }
         config = value_quality_screening_config(load_yaml(ROOT / "config/investment-profile.example.yaml"))
 
@@ -47,6 +52,8 @@ class ScreenValueQualityTest(unittest.TestCase):
         self.assertIsNotNone(candidate)
         self.assertEqual(candidate["code"], "300750")
         self.assertIn("ROE 6.90%", candidate["reasons"])
+        self.assertIn("PE 分位 68.00", candidate["reasons"])
+        self.assertIn("估值分位接近上限", candidate["risks"])
         self.assertGreater(candidate["score"], 0)
 
     def test_excludes_high_debt_or_weak_profitability(self) -> None:
@@ -60,6 +67,8 @@ class ScreenValueQualityTest(unittest.TestCase):
             "operating_cash_flow": "48200000000",
             "revenue_growth_yoy": "2.1",
             "deducted_net_profit_growth_yoy": "2.9",
+            "pe_percentile": "18",
+            "pb_percentile": "12",
         }
         config = value_quality_screening_config(load_yaml(ROOT / "config/investment-profile.example.yaml"))
 
@@ -68,6 +77,27 @@ class ScreenValueQualityTest(unittest.TestCase):
         self.assertIsNone(candidate)
         self.assertTrue(any("ROE" in reason for reason in exclusions))
         self.assertTrue(any("资产负债率" in reason for reason in exclusions))
+
+    def test_excludes_extreme_high_valuation(self) -> None:
+        row = {
+            "report_period": "2026-03-31",
+            "code": "300750",
+            "roe": "6.9",
+            "roa": "3.9",
+            "gross_margin": "27.5",
+            "debt_ratio": "68.4",
+            "operating_cash_flow": "14500000000",
+            "revenue_growth_yoy": "18.2",
+            "deducted_net_profit_growth_yoy": "19.4",
+            "pe_percentile": "91",
+            "pb_percentile": "72",
+        }
+        config = value_quality_screening_config(load_yaml(ROOT / "config/investment-profile.example.yaml"))
+
+        candidate, exclusions = candidate_from_row(row, config)
+
+        self.assertIsNone(candidate)
+        self.assertTrue(any("PE 分位" in reason for reason in exclusions))
 
     def test_uses_latest_report_per_code_and_limits_candidates(self) -> None:
         rows = [
@@ -97,7 +127,7 @@ class ScreenValueQualityTest(unittest.TestCase):
         config = value_quality_screening_config(load_yaml(ROOT / "config/investment-profile.example.yaml"))
         config["max_candidates"] = 1
 
-        candidates, exclusions = screen_candidates(rows, config)
+        candidates, exclusions = screen_candidates(rows, config, [{"trade_date": "2026-07-02", "code": "300750", "pe_percentile": "68", "pb_percentile": "72"}])
 
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["report_period"], "2026-03-31")
@@ -113,6 +143,7 @@ class ScreenValueQualityTest(unittest.TestCase):
                 ROOT / "samples/financial_metrics.sample.csv",
                 output,
                 metadata_output,
+                ROOT / "samples/valuation_metrics.sample.csv",
             )
 
             with output.open(encoding="utf-8", newline="") as file:
@@ -120,6 +151,7 @@ class ScreenValueQualityTest(unittest.TestCase):
 
         self.assertEqual(metadata["strategy"], "value_quality")
         self.assertEqual(metadata["input_count"], 3)
+        self.assertEqual(metadata["valuation_input_count"], 3)
         self.assertEqual(metadata["candidate_count"], 1)
         self.assertEqual(metadata["excluded_count"], 2)
         self.assertEqual(rows[0]["code"], "300750")

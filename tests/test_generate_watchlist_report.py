@@ -137,6 +137,7 @@ class GenerateWatchlistReportTest(unittest.TestCase):
                 ROOT / "samples/financial_metrics.sample.csv",
                 value_candidates,
                 value_metadata,
+                ROOT / "samples/valuation_metrics.sample.csv",
             )
             run_merge(trend_candidates, value_candidates, candidate_pool, pool_metadata)
             result = run_report(candidate_pool, report)

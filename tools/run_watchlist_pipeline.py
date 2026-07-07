@@ -46,6 +46,7 @@ def run_pipeline(
     profile_path: Path,
     daily_bars_path: Path,
     financial_metrics_path: Path,
+    valuation_metrics_path: Path,
     universe_path: Path | None,
     windows_override: str | None,
     trend_factors_output: Path,
@@ -69,6 +70,7 @@ def run_pipeline(
         financial_metrics_path,
         value_quality_candidates_output,
         value_quality_candidates_metadata,
+        valuation_metrics_path,
     )
     candidate_pool = run_merge(
         trend_candidates_output,
@@ -84,6 +86,7 @@ def run_pipeline(
         "inputs": {
             "daily_bars": str(daily_bars_path),
             "financial_metrics": str(financial_metrics_path),
+            "valuation_metrics": str(valuation_metrics_path),
             "universe": str(universe_path) if universe_path else None,
         },
         "windows": windows,
@@ -121,6 +124,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile", default="config/investment-profile.example.yaml", help="Path to investment profile YAML.")
     parser.add_argument("--daily-bars", default="data/processed/daily_bars.csv", help="Input normalized daily bars CSV.")
     parser.add_argument("--financial-metrics", default="data/processed/financial_metrics.csv", help="Input normalized financial metrics CSV.")
+    parser.add_argument("--valuation-metrics", default="data/processed/valuation_metrics.csv", help="Input normalized valuation metrics CSV.")
     parser.add_argument("--universe", help="Optional tradable universe CSV.")
     parser.add_argument("--windows", help="Optional comma-separated trend factor windows. Defaults to the trend screening window.")
     parser.add_argument("--trend-factors-output", default="data/processed/trend_factors.csv", help="Output trend factors CSV.")
@@ -152,6 +156,7 @@ def main() -> int:
             Path(args.profile),
             Path(args.daily_bars),
             Path(args.financial_metrics),
+            Path(args.valuation_metrics),
             Path(args.universe) if args.universe else None,
             args.windows,
             Path(args.trend_factors_output),
