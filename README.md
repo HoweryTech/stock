@@ -56,6 +56,7 @@
 - [趋势强度策略筛选](./docs/趋势强度策略筛选.md)
 - [多策略候选池合并](./docs/多策略候选池合并.md)
 - [观察池报告](./docs/观察池报告.md)
+- [观察池流水线](./docs/观察池流水线.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -145,6 +146,16 @@ python3 tools/merge_candidate_pool.py \
 python3 tools/generate_watchlist_report.py \
   --candidates data/processed/candidate_pool.csv \
   --output reports/watchlist.md
+```
+
+### 一键生成观察池
+
+```bash
+python3 tools/run_watchlist_pipeline.py \
+  --daily-bars data/processed/daily_bars.csv \
+  --financial-metrics data/processed/financial_metrics.csv \
+  --universe data/processed/tradable_universe.csv \
+  --report-output reports/watchlist.md
 ```
 
 ### 交易计划风控校验
