@@ -51,6 +51,7 @@
 - [数据目录与股票基础信息导入](./docs/数据目录与股票基础信息导入.md)
 - [日线行情数据导入](./docs/日线行情数据导入.md)
 - [财务核心指标导入](./docs/财务核心指标导入.md)
+- [估值指标导入](./docs/估值指标导入.md)
 - [价值质量策略筛选](./docs/价值质量策略筛选.md)
 - [趋势强度基础因子](./docs/趋势强度基础因子.md)
 - [趋势强度策略筛选](./docs/趋势强度策略筛选.md)
@@ -98,6 +99,15 @@ python3 tools/import_financial_metrics.py \
   --input samples/financial_metrics.sample.csv \
   --output data/processed/financial_metrics.csv \
   --metadata-output data/metadata/financial_metrics.import.json
+```
+
+### 导入估值指标
+
+```bash
+python3 tools/import_valuation_metrics.py \
+  --input samples/valuation_metrics.sample.csv \
+  --output data/processed/valuation_metrics.csv \
+  --metadata-output data/metadata/valuation_metrics.import.json
 ```
 
 ### 筛选价值质量候选股
