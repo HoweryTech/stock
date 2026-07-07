@@ -60,6 +60,7 @@
 - [观察池流水线](./docs/观察池流水线.md)
 - [候选池质量检查](./docs/候选池质量检查.md)
 - [候选股生成交易计划草稿](./docs/候选股生成交易计划草稿.md)
+- [交易计划补全辅助](./docs/交易计划补全辅助.md)
 - [交易计划草稿质量检查](./docs/交易计划草稿质量检查.md)
 - [交易计划准入门禁](./docs/交易计划准入门禁.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
@@ -245,6 +246,18 @@ python3 tools/new_trade_plan_from_candidate.py \
 ```
 
 生成后仍必须补充止盈、失效条件，并执行风控校验。
+
+### 补全交易计划草稿
+
+```bash
+python3 tools/complete_trade_plan.py \
+  --plan plans/TP-示例.yaml \
+  --stop-loss-condition "收盘价跌破止损价。" \
+  --take-profit-condition "达到计划目标区后根据量价分批止盈。" \
+  --invalidation-condition "趋势或基本面证据失效。" \
+  --review-focus "候选池证据是否被市场验证。" \
+  --mark-ready
+```
 
 ### 新建持仓记录
 
