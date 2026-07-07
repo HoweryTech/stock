@@ -75,6 +75,7 @@
 - [退出计划检查](./docs/退出计划检查.md)
 - [卖出执行记录](./docs/卖出执行记录.md)
 - [卖出执行生成复盘](./docs/卖出执行生成复盘.md)
+- [交易复盘质量检查](./docs/交易复盘质量检查.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -409,6 +410,13 @@ python3 tools/new_exit_execution.py \
 python3 tools/new_trade_review_from_exit_execution.py \
   --exit-execution exit-executions/EXITEXEC-示例.yaml \
   --output reviews/TR-示例.yaml
+```
+
+检查交易复盘质量：
+
+```bash
+python3 tools/check_trade_review_quality.py \
+  --review reviews/TR-示例.yaml
 ```
 
 ### 新建交易复盘草稿

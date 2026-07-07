@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.check_trade_review_quality import check_trade_review_quality
     from tools.risk_check import load_yaml, value_at
 except ModuleNotFoundError:
+    from check_trade_review_quality import check_trade_review_quality
     from risk_check import load_yaml, value_at
 
 
@@ -135,11 +137,18 @@ def summarize_exit_executions(executions: list[dict[str, Any]]) -> dict[str, Any
 def summarize_reviews(reviews: list[dict[str, Any]]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     drafts = 0
+    quality_needs_review = 0
+    quality_blocked = 0
     for item in reviews:
         data = item["data"]
         status = value_at(data, "review.status")
+        quality = check_trade_review_quality(data)
         if status == "draft":
             drafts += 1
+        if quality["conclusion"] == "blocked":
+            quality_blocked += 1
+        elif quality["conclusion"] == "needs_review":
+            quality_needs_review += 1
         rows.append(
             {
                 "path": item["path"],
@@ -149,9 +158,16 @@ def summarize_reviews(reviews: list[dict[str, Any]]) -> dict[str, Any]:
                 "category": value_at(data, "result.result_category"),
                 "trade_return_pct": value_at(data, "result.trade_return_pct"),
                 "lesson": value_at(data, "review_questions.lesson"),
+                "quality_conclusion": quality["conclusion"],
             }
         )
-    return {"count": len(rows), "draft_count": drafts, "rows": rows}
+    return {
+        "count": len(rows),
+        "draft_count": drafts,
+        "quality_blocked_count": quality_blocked,
+        "quality_needs_review_count": quality_needs_review,
+        "rows": rows,
+    }
 
 
 def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
@@ -178,6 +194,10 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
         actions.append(f"处理 {len(urgent_exits)} 个紧急退出计划。")
     if reviews["draft_count"]:
         actions.append(f"补全 {reviews['draft_count']} 份复盘草稿。")
+    if reviews["quality_blocked_count"]:
+        actions.append(f"修正 {reviews['quality_blocked_count']} 份阻断级复盘。")
+    if reviews["quality_needs_review_count"]:
+        actions.append(f"完善 {reviews['quality_needs_review_count']} 份需复核复盘。")
     if not actions:
         actions.append("当前没有阻断项；保持观察，不因空闲而交易。")
     return actions
@@ -264,6 +284,8 @@ def render_summary(summary: dict[str, Any]) -> str:
             "",
             f"- 复盘记录数量：{reviews['count']}",
             f"- 草稿数量：{reviews['draft_count']}",
+            f"- 阻断级复盘：{reviews['quality_blocked_count']}",
+            f"- 需复核复盘：{reviews['quality_needs_review_count']}",
             "",
         ]
     )
@@ -271,7 +293,9 @@ def render_summary(summary: dict[str, Any]) -> str:
         lines.append("复盘草稿：")
         for row in reviews["rows"]:
             lesson = row["lesson"] or "待补充"
-            lines.append(f"- {row['id']} {row['stock']} {row['category']} return={row['trade_return_pct']}% lesson={lesson}")
+            lines.append(
+                f"- {row['id']} {row['stock']} {row['category']} quality={row['quality_conclusion']} return={row['trade_return_pct']}% lesson={lesson}"
+            )
         lines.append("")
 
     return "\n".join(lines)
