@@ -57,6 +57,7 @@
 - [多策略候选池合并](./docs/多策略候选池合并.md)
 - [观察池报告](./docs/观察池报告.md)
 - [观察池流水线](./docs/观察池流水线.md)
+- [候选股生成交易计划草稿](./docs/候选股生成交易计划草稿.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -193,6 +194,22 @@ python3 tools/new_trade_plan.py \
 ```
 
 默认输出到 `plans/` 目录。真实交易计划默认不提交到 Git。
+
+### 从候选池生成交易计划草稿
+
+```bash
+python3 tools/new_trade_plan_from_candidate.py \
+  --candidates data/processed/candidate_pool.csv \
+  --code 300750 \
+  --name 宁德时代 \
+  --exchange SZSE \
+  --industry 电力设备 \
+  --planned-buy-price 200 \
+  --stop-loss-price 185 \
+  --position-pct 5
+```
+
+生成后仍必须补充止盈、失效条件，并执行风控校验。
 
 ### 新建持仓记录
 
