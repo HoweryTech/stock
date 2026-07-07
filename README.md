@@ -143,7 +143,7 @@ python3 tools/merge_candidate_pool.py \
 
 ```bash
 python3 tools/generate_watchlist_report.py \
-  --candidates data/processed/trend_candidates.csv \
+  --candidates data/processed/candidate_pool.csv \
   --output reports/watchlist.md
 ```
 

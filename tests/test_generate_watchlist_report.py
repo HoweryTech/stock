@@ -6,7 +6,9 @@ from pathlib import Path
 
 from tools.calc_trend_factors import run_calculation
 from tools.generate_watchlist_report import generate_report, run_report
+from tools.merge_candidate_pool import run_merge
 from tools.screen_trend_strength import run_screen
+from tools.screen_value_quality import run_screen as run_value_quality_screen
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +44,30 @@ class GenerateWatchlistReportTest(unittest.TestCase):
 
         self.assertIn("候选数量：0", report)
         self.assertIn("当前没有候选股", report)
+
+    def test_generate_report_supports_unified_candidate_pool(self) -> None:
+        candidates = [
+            {
+                "code": "300750",
+                "strategies": "trend_strength|value_quality",
+                "strategy_count": "2",
+                "combined_score": "232.377248",
+                "primary_strategy": "multi_strategy",
+                "trend_score": "11.522248",
+                "value_quality_score": "20.855",
+                "trade_date": "2026-07-02",
+                "report_period": "2026-03-31",
+                "reasons": "[trend_strength] 趋势强。 | [value_quality] 质量好。",
+                "risks": "",
+            }
+        ]
+
+        report = generate_report(candidates, generated_at=datetime(2026, 7, 7, 10, 0, 0))
+
+        self.assertIn("主策略：多策略共振", report)
+        self.assertIn("策略来源：趋势强度, 价值质量", report)
+        self.assertIn("综合排序分：232.377248", report)
+        self.assertIn("[value_quality] 质量好。", report)
 
     def test_run_report_writes_markdown_from_candidate_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -91,6 +117,35 @@ class GenerateWatchlistReportTest(unittest.TestCase):
         self.assertEqual(result["candidate_count"], 3)
         self.assertIn("## 1. 300750", content)
         self.assertIn("交易计划入口", content)
+
+    def test_unified_report_generation_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            factors = Path(tmp_dir) / "trend_factors.csv"
+            factor_metadata = Path(tmp_dir) / "trend_factors.json"
+            trend_candidates = Path(tmp_dir) / "trend_candidates.csv"
+            trend_metadata = Path(tmp_dir) / "trend_candidates.json"
+            value_candidates = Path(tmp_dir) / "value_quality_candidates.csv"
+            value_metadata = Path(tmp_dir) / "value_quality_candidates.json"
+            candidate_pool = Path(tmp_dir) / "candidate_pool.csv"
+            pool_metadata = Path(tmp_dir) / "candidate_pool.json"
+            report = Path(tmp_dir) / "watchlist.md"
+
+            run_calculation(ROOT / "samples/daily_bars.sample.csv", None, factors, factor_metadata, [2])
+            run_screen(ROOT / "config/investment-profile.example.yaml", factors, trend_candidates, trend_metadata)
+            run_value_quality_screen(
+                ROOT / "config/investment-profile.example.yaml",
+                ROOT / "samples/financial_metrics.sample.csv",
+                value_candidates,
+                value_metadata,
+            )
+            run_merge(trend_candidates, value_candidates, candidate_pool, pool_metadata)
+            result = run_report(candidate_pool, report)
+
+            content = report.read_text(encoding="utf-8")
+
+        self.assertEqual(result["candidate_count"], 3)
+        self.assertIn("主策略：多策略共振", content)
+        self.assertIn("策略来源：趋势强度, 价值质量", content)
 
 
 if __name__ == "__main__":
