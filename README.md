@@ -48,10 +48,20 @@
 - [投资体系配置](./docs/投资体系配置.md)
 - [投资体系配置文件](./config/investment-profile.example.yaml)
 - [交易计划与风控校验](./docs/交易计划与风控校验.md)
+- [数据目录与股票基础信息导入](./docs/数据目录与股票基础信息导入.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
 ## 当前可执行工具
+
+### 导入股票基础信息
+
+```bash
+python3 tools/import_stock_universe.py \
+  --input samples/stock_universe.sample.csv \
+  --output data/processed/stock_universe.csv \
+  --metadata-output data/metadata/stock_universe.import.json
+```
 
 ### 交易计划风控校验
 

@@ -1,0 +1,4 @@
+code,name,exchange,industry,is_st,is_suspended,has_delisting_risk,abnormal_trading_status,listing_date,avg_daily_turnover_cny,data_source,updated_at
+600000,浦发银行,SSE,银行,false,false,false,false,1999-11-10,512300000,sample,2026-07-07
+000001,平安银行,SZSE,银行,false,false,false,false,1991-04-03,635800000,sample,2026-07-07
+300750,宁德时代,SZSE,电力设备,false,false,false,false,2018-06-11,2850000000,sample,2026-07-07

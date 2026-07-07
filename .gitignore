@@ -10,3 +10,9 @@ reviews/*.yaml
 reviews/*.yml
 positions/*.yaml
 positions/*.yml
+data/raw/*
+data/processed/*
+data/metadata/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/metadata/.gitkeep
