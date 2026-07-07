@@ -82,6 +82,7 @@ def position_args(execution_path: Path, output: Path):
         status="normal",
         temp_plan_path=None,
         keep_temp_plan=False,
+        allow_blocked_execution=False,
         entry_date=None,
         entry_price=None,
         current_price=10.3,
@@ -149,7 +150,33 @@ class NewPositionFromExecutionTest(unittest.TestCase):
         self.assertEqual(position["entry"]["shares"], 1000)
         self.assertEqual(position["tracking"]["current_return_pct"], 1.9802)
         self.assertEqual(position["execution_snapshot"]["execution"]["id"], "EXEC-POS-0001")
+        self.assertEqual(position["execution_check_snapshot"]["conclusion"], "needs_review")
         self.assertTrue(any("来源执行记录" in note for note in position["tracking"]["notes"]))
+
+    def test_blocks_position_creation_from_blocked_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution_path = self.write_execution(tmp_dir)
+            execution = load_yaml(execution_path)
+            execution["order"]["execution_price"] = 11.0
+            execution["order"]["price_within_max_acceptable"] = False
+            write_yaml(execution_path, execution, overwrite=True)
+
+            with self.assertRaises(ValueError):
+                create_position_from_execution(position_args(execution_path, Path(tmp_dir) / "position.yaml"))
+
+    def test_can_override_blocked_execution_for_correction_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution_path = self.write_execution(tmp_dir)
+            execution = load_yaml(execution_path)
+            execution["order"]["execution_price"] = 11.0
+            execution["order"]["price_within_max_acceptable"] = False
+            write_yaml(execution_path, execution, overwrite=True)
+            args = position_args(execution_path, Path(tmp_dir) / "position.yaml")
+            args.allow_blocked_execution = True
+
+            position, _ = create_position_from_execution(args)
+
+        self.assertEqual(position["execution_check_snapshot"]["conclusion"], "blocked")
 
 
 if __name__ == "__main__":

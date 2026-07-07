@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.check_trade_execution import check_execution
     from tools.new_position import create_position
     from tools.new_trade_plan import write_yaml
     from tools.risk_check import load_yaml, value_at
 except ModuleNotFoundError:
+    from check_trade_execution import check_execution
     from new_position import create_position
     from new_trade_plan import write_yaml
     from risk_check import load_yaml, value_at
@@ -28,6 +30,9 @@ def extract_plan_from_execution(execution: dict[str, Any]) -> dict[str, Any]:
 
 def create_position_from_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     execution = load_yaml(Path(args.execution))
+    execution_check = check_execution(execution)
+    if execution_check["conclusion"] == "blocked" and not args.allow_blocked_execution:
+        raise ValueError("execution check is blocked; pass --allow-blocked-execution only for explicit correction workflows")
     plan = extract_plan_from_execution(execution)
     execution_id = value_at(execution, "execution.id")
 
@@ -55,6 +60,7 @@ def create_position_from_execution(args: argparse.Namespace) -> tuple[dict[str, 
     )
     position, output_path = create_position(position_args)
     position["execution_snapshot"] = execution
+    position["execution_check_snapshot"] = execution_check
     if not args.keep_temp_plan and temp_plan_path.exists():
         temp_plan_path.unlink()
     return position, output_path
@@ -71,6 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--status", default="normal", help="Initial position status.")
     parser.add_argument("--temp-plan-path", help="Optional temp path for extracted plan snapshot.")
     parser.add_argument("--keep-temp-plan", action="store_true", help="Keep extracted temp plan YAML for debugging.")
+    parser.add_argument("--allow-blocked-execution", action="store_true", help="Allow position creation even when execution check is blocked.")
 
     parser.add_argument("--entry-date", help="Override entry date. Defaults to execution date.")
     parser.add_argument("--entry-price", type=float, help="Override entry price. Defaults to execution price.")
