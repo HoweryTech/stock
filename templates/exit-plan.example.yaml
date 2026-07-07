@@ -1,0 +1,49 @@
+# 退出计划示例
+# 本文件描述持仓退出前必须确认的信息。
+
+exit_plan:
+  id: "EXIT-YYYYMMDD-0001"
+  status: "draft"
+  created_at: "YYYY-MM-DD"
+  source_position_id: "POS-YYYYMMDD-0001"
+  source_trade_plan_id: "TP-YYYYMMDD-0001"
+  exit_type: "take_profit"
+  urgency: "normal"
+
+stock:
+  code: "000001"
+  name: "示例股票"
+  exchange: "SZSE"
+  industry: "示例行业"
+
+position_snapshot:
+  entry_price: 20.0
+  current_price: 21.0
+  position_pct_of_total_assets: 8.0
+  current_return_pct: 5.0
+  current_portfolio_return_pct: 0.4
+  stop_loss_price: 18.5
+
+decision:
+  exit_reason: "示例：达到计划止盈区。"
+  evidence:
+    - "示例：价格达到目标区。"
+  risks_if_hold:
+    - "示例：继续持有可能回撤。"
+  planned_exit_price: null
+  exit_position_pct: 8.0
+  min_acceptable_exit_price: null
+  must_exit: false
+
+checks:
+  matched_original_plan: true
+  triggered_by_daily_check: false
+  daily_check_conclusion: null
+  source_action_codes: []
+
+next_steps:
+  execution_note: ""
+  review_required_after_exit: true
+
+position_full_snapshot: {}
+daily_check_snapshot: {}

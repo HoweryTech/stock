@@ -70,6 +70,7 @@
 - [执行记录生成持仓](./docs/执行记录生成持仓.md)
 - [持仓日检](./docs/持仓日检.md)
 - [组合持仓日检](./docs/组合持仓日检.md)
+- [退出计划](./docs/退出计划.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -362,6 +363,15 @@ python3 tools/position_check.py \
 
 ```bash
 python3 tools/position_check.py --position positions/POS-示例.yaml --json
+```
+
+### 新建退出计划
+
+```bash
+python3 tools/new_exit_plan.py \
+  --position positions/POS-示例.yaml \
+  --daily-check data/metadata/POS-示例.daily-check.json \
+  --output exit-plans/EXIT-示例.yaml
 ```
 
 ### 新建交易复盘草稿
