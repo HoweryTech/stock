@@ -63,6 +63,7 @@
 - [交易计划补全辅助](./docs/交易计划补全辅助.md)
 - [交易计划草稿质量检查](./docs/交易计划草稿质量检查.md)
 - [交易计划准入门禁](./docs/交易计划准入门禁.md)
+- [候选股到交易计划门禁流程](./docs/候选股到交易计划门禁流程.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -255,6 +256,25 @@ python3 tools/complete_trade_plan.py \
   --stop-loss-condition "收盘价跌破止损价。" \
   --take-profit-condition "达到计划目标区后根据量价分批止盈。" \
   --invalidation-condition "趋势或基本面证据失效。" \
+  --review-focus "候选池证据是否被市场验证。" \
+  --mark-ready
+```
+
+### 从候选股直接准备交易计划并执行门禁
+
+```bash
+python3 tools/prepare_trade_plan_from_candidate.py \
+  --candidates data/processed/candidate_pool.csv \
+  --code 300750 \
+  --name 宁德时代 \
+  --exchange SZSE \
+  --industry 电力设备 \
+  --planned-buy-price 200 \
+  --stop-loss-price 185 \
+  --position-pct 5 \
+  --stop-loss-condition "收盘价跌破 185。" \
+  --take-profit-condition "达到计划目标区后分批止盈。" \
+  --invalidation-condition "趋势或估值证据失效。" \
   --review-focus "候选池证据是否被市场验证。" \
   --mark-ready
 ```
