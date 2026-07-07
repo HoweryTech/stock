@@ -60,6 +60,7 @@
 - [观察池流水线](./docs/观察池流水线.md)
 - [候选池质量检查](./docs/候选池质量检查.md)
 - [候选股生成交易计划草稿](./docs/候选股生成交易计划草稿.md)
+- [交易计划草稿质量检查](./docs/交易计划草稿质量检查.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -180,6 +181,11 @@ python3 tools/run_watchlist_pipeline.py \
 ```
 
 ### 交易计划风控校验
+
+```bash
+python3 tools/check_trade_plan_quality.py \
+  --plan plans/TP-示例.yaml
+```
 
 ```bash
 python3 tools/risk_check.py \
