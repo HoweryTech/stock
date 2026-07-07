@@ -88,6 +88,24 @@ python3 tools/new_trade_plan.py \
 
 默认输出到 `plans/` 目录。真实交易计划默认不提交到 Git。
 
+### 新建交易复盘草稿
+
+```bash
+python3 tools/new_trade_review.py \
+  --plan plans/TP-示例.yaml \
+  --entry-date 2026-07-01 \
+  --exit-date 2026-07-07 \
+  --entry-price 10 \
+  --exit-price 10.8 \
+  --position-pct 5 \
+  --exit-reason "达到计划止盈区后退出" \
+  --followed-plan \
+  --lesson "按计划执行" \
+  --next-action "归档并继续观察"
+```
+
+默认输出到 `reviews/` 目录。真实复盘记录默认不提交到 Git。
+
 运行测试：
 
 ```bash

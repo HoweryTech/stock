@@ -1,0 +1,39 @@
+# 交易复盘示例
+# 本文件描述一次交易退出后的复盘结构。
+
+review:
+  id: "TR-YYYYMMDD-0001"
+  status: "draft"
+  created_at: "YYYY-MM-DD"
+  source_trade_plan_id: "TP-YYYYMMDD-0001"
+
+stock:
+  code: "000001"
+  name: "示例股票"
+  exchange: "SZSE"
+  industry: "示例行业"
+
+execution:
+  entry_date: "YYYY-MM-DD"
+  exit_date: "YYYY-MM-DD"
+  entry_price: 20.0
+  exit_price: 21.0
+  position_pct_of_total_assets: 8.0
+  exit_reason: "示例：达到计划止盈区。"
+  followed_plan: true
+
+result:
+  trade_return_pct: 5.0
+  portfolio_return_pct: 0.4
+  result_category: "strategy_profit"
+  error_tags: []
+
+review_questions:
+  buy_reason_still_valid: null
+  exit_reason_matches_plan: null
+  risk_control_followed: null
+  position_sizing_followed: null
+  lesson: ""
+  next_action: ""
+
+trade_plan_snapshot: {}

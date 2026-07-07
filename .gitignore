@@ -6,3 +6,5 @@ __pycache__/
 venv/
 plans/*.yaml
 plans/*.yml
+reviews/*.yaml
+reviews/*.yml
