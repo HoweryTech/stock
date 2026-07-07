@@ -49,3 +49,25 @@
 - [投资体系配置文件](./config/investment-profile.example.yaml)
 - [交易计划与风控校验](./docs/交易计划与风控校验.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
+
+## 当前可执行工具
+
+### 交易计划风控校验
+
+```bash
+python3 tools/risk_check.py \
+  --profile config/investment-profile.example.yaml \
+  --plan templates/trade-plan.example.yaml
+```
+
+输出 JSON：
+
+```bash
+python3 tools/risk_check.py --json
+```
+
+运行测试：
+
+```bash
+python3 -m unittest discover -s tests
+```
