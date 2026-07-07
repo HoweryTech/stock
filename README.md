@@ -69,6 +69,7 @@
 - [交易执行偏差检查](./docs/交易执行偏差检查.md)
 - [执行记录生成持仓](./docs/执行记录生成持仓.md)
 - [持仓日检](./docs/持仓日检.md)
+- [组合持仓日检](./docs/组合持仓日检.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -339,6 +340,14 @@ python3 tools/update_position_daily.py \
   --days-held 1 \
   --note "成交额继续放大，趋势仍在。" \
   --check-output data/metadata/POS-示例.daily-check.json
+```
+
+### 组合持仓日检
+
+```bash
+python3 tools/check_portfolio_positions.py \
+  --positions positions/*.yaml \
+  --output data/metadata/portfolio_positions.check.json
 ```
 
 ### 持仓风险检查
