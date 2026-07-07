@@ -66,6 +66,28 @@ python3 tools/risk_check.py \
 python3 tools/risk_check.py --json
 ```
 
+### 新建交易计划草稿
+
+```bash
+python3 tools/new_trade_plan.py \
+  --code 600000 \
+  --name 示例股票 \
+  --exchange SSE \
+  --industry 示例行业 \
+  --strategy trend_strength \
+  --planned-buy-price 10 \
+  --stop-loss-price 9.2 \
+  --position-pct 5 \
+  --buy-reason "填写你的买入假设" \
+  --key-evidence "填写关键证据" \
+  --risk "填写反证和风险" \
+  --stop-loss-condition "填写止损条件" \
+  --take-profit-condition "填写止盈条件" \
+  --invalidation-condition "填写失效条件"
+```
+
+默认输出到 `plans/` 目录。真实交易计划默认不提交到 Git。
+
 运行测试：
 
 ```bash
