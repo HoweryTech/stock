@@ -72,6 +72,7 @@
 - [组合持仓日检](./docs/组合持仓日检.md)
 - [退出计划](./docs/退出计划.md)
 - [退出计划检查](./docs/退出计划检查.md)
+- [卖出执行记录](./docs/卖出执行记录.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -380,6 +381,16 @@ python3 tools/new_exit_plan.py \
 ```bash
 python3 tools/check_exit_plan.py \
   --exit-plan exit-plans/EXIT-示例.yaml
+```
+
+新建卖出执行记录：
+
+```bash
+python3 tools/new_exit_execution.py \
+  --exit-plan exit-plans/EXIT-示例.yaml \
+  --execution-date 2026-07-08 \
+  --execution-price 9.1 \
+  --output exit-executions/EXITEXEC-示例.yaml
 ```
 
 ### 新建交易复盘草稿

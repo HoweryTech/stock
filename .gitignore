@@ -12,6 +12,8 @@ positions/*.yaml
 positions/*.yml
 executions/*.yaml
 executions/*.yml
+exit-executions/*.yaml
+exit-executions/*.yml
 exit-plans/*.yaml
 exit-plans/*.yml
 data/raw/*

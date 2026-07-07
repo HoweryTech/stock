@@ -1,0 +1,52 @@
+# 卖出执行记录示例
+# 本文件描述退出计划通过检查后的实际或模拟卖出情况。
+
+execution:
+  id: "EXITEXEC-YYYYMMDD-0001"
+  status: "recorded"
+  created_at: "YYYY-MM-DD"
+  mode: "paper"
+  side: "sell"
+  source_exit_plan_id: "EXIT-YYYYMMDD-0001"
+  source_position_id: "POS-YYYYMMDD-0001"
+  source_trade_plan_id: "TP-YYYYMMDD-0001"
+  exit_check_conclusion: "pass"
+  user_confirmed: true
+  confirmation_text: "我确认本次卖出符合退出计划，已阅读退出证据、继续持有风险和仓位影响。"
+
+stock:
+  code: "000001"
+  name: "示例股票"
+  exchange: "SZSE"
+  industry: "示例行业"
+
+order:
+  execution_date: "YYYY-MM-DD"
+  execution_price: 21.0
+  shares: null
+  exited_position_pct_of_total_assets: 8.0
+  fees: 0.0
+  slippage_pct_vs_plan: 0.0
+  price_above_min_acceptable: true
+
+exit_snapshot:
+  exit_type: "take_profit"
+  urgency: "normal"
+  planned_exit_price: 21.0
+  min_acceptable_exit_price: null
+  must_exit: false
+  exit_reason: "示例：达到计划止盈区。"
+  matched_original_plan: true
+  daily_check_conclusion: null
+  source_action_codes: []
+
+result_estimate:
+  entry_price: 20.0
+  trade_return_pct: 5.0
+  portfolio_return_pct: 0.4
+
+notes:
+  - "按退出计划执行。"
+
+exit_check_snapshot: {}
+exit_plan_snapshot: {}
