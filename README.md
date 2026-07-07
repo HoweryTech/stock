@@ -54,6 +54,7 @@
 - [价值质量策略筛选](./docs/价值质量策略筛选.md)
 - [趋势强度基础因子](./docs/趋势强度基础因子.md)
 - [趋势强度策略筛选](./docs/趋势强度策略筛选.md)
+- [多策略候选池合并](./docs/多策略候选池合并.md)
 - [观察池报告](./docs/观察池报告.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
@@ -126,6 +127,16 @@ python3 tools/screen_trend_strength.py \
   --factors data/processed/trend_factors.csv \
   --output data/processed/trend_candidates.csv \
   --metadata-output data/metadata/trend_candidates.json
+```
+
+### 合并多策略候选池
+
+```bash
+python3 tools/merge_candidate_pool.py \
+  --trend-candidates data/processed/trend_candidates.csv \
+  --value-quality-candidates data/processed/value_quality_candidates.csv \
+  --output data/processed/candidate_pool.csv \
+  --metadata-output data/metadata/candidate_pool.json
 ```
 
 ### 生成观察池报告
