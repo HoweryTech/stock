@@ -58,6 +58,7 @@
 - [多策略候选池合并](./docs/多策略候选池合并.md)
 - [观察池报告](./docs/观察池报告.md)
 - [观察池流水线](./docs/观察池流水线.md)
+- [候选池质量检查](./docs/候选池质量检查.md)
 - [候选股生成交易计划草稿](./docs/候选股生成交易计划草稿.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
@@ -158,6 +159,13 @@ python3 tools/merge_candidate_pool.py \
 python3 tools/generate_watchlist_report.py \
   --candidates data/processed/candidate_pool.csv \
   --output reports/watchlist.md
+```
+
+### 检查候选池质量
+
+```bash
+python3 tools/check_candidate_pool.py \
+  --candidates data/processed/candidate_pool.csv
 ```
 
 ### 一键生成观察池
