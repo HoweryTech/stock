@@ -45,6 +45,8 @@ class RunWatchlistPipelineTest(unittest.TestCase):
         self.assertEqual(metadata["steps"]["trend_candidates"]["candidate_count"], 3)
         self.assertEqual(metadata["steps"]["value_quality_candidates"]["candidate_count"], 1)
         self.assertEqual(metadata["steps"]["candidate_pool"]["candidate_count"], 3)
+        self.assertEqual(metadata["steps"]["candidate_pool_check"]["conclusion"], "needs_review")
+        self.assertEqual(metadata["steps"]["candidate_pool_check"]["blockers"], [])
         self.assertIn("主策略：多策略共振", report)
 
 

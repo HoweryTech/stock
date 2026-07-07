@@ -12,6 +12,7 @@ from typing import Any
 
 try:
     from tools.calc_trend_factors import parse_windows, run_calculation
+    from tools.check_candidate_pool import run_check as run_candidate_pool_check
     from tools.generate_watchlist_report import run_report
     from tools.merge_candidate_pool import run_merge
     from tools.risk_check import load_yaml
@@ -20,6 +21,7 @@ try:
     from tools.screen_value_quality import run_screen as run_value_quality_screen
 except ModuleNotFoundError:
     from calc_trend_factors import parse_windows, run_calculation
+    from check_candidate_pool import run_check as run_candidate_pool_check
     from generate_watchlist_report import run_report
     from merge_candidate_pool import run_merge
     from risk_check import load_yaml
@@ -78,6 +80,7 @@ def run_pipeline(
         candidate_pool_output,
         candidate_pool_metadata,
     )
+    candidate_pool_check = run_candidate_pool_check(candidate_pool_output)
     report = run_report(candidate_pool_output, report_output)
 
     metadata = {
@@ -95,6 +98,7 @@ def run_pipeline(
             "trend_candidates": trend_candidates,
             "value_quality_candidates": value_quality_candidates,
             "candidate_pool": candidate_pool,
+            "candidate_pool_check": candidate_pool_check,
             "watchlist_report": report,
         },
         "outputs": {
@@ -116,6 +120,7 @@ def print_summary(metadata: dict[str, Any]) -> None:
     print(f"trend candidates: {steps['trend_candidates']['candidate_count']}")
     print(f"value quality candidates: {steps['value_quality_candidates']['candidate_count']}")
     print(f"candidate pool: {steps['candidate_pool']['candidate_count']}")
+    print(f"candidate pool check: {steps['candidate_pool_check']['conclusion']}")
     print(f"watchlist report: {metadata['outputs']['watchlist_report']}")
 
 
