@@ -51,6 +51,7 @@
 - [数据目录与股票基础信息导入](./docs/数据目录与股票基础信息导入.md)
 - [日线行情数据导入](./docs/日线行情数据导入.md)
 - [趋势强度基础因子](./docs/趋势强度基础因子.md)
+- [趋势强度策略筛选](./docs/趋势强度策略筛选.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -93,6 +94,16 @@ python3 tools/calc_trend_factors.py \
   --output data/processed/trend_factors.csv \
   --metadata-output data/metadata/trend_factors.json \
   --windows 5,20
+```
+
+### 筛选趋势强度候选股
+
+```bash
+python3 tools/screen_trend_strength.py \
+  --profile config/investment-profile.example.yaml \
+  --factors data/processed/trend_factors.csv \
+  --output data/processed/trend_candidates.csv \
+  --metadata-output data/metadata/trend_candidates.json
 ```
 
 ### 交易计划风控校验

@@ -98,6 +98,14 @@ strategies:
       stop_loss_required: true
       avoid_chasing: true
       volume_confirmation_required: true
+    screening:
+      window: 2
+      min_return_pct: 1.0
+      require_above_ma: true
+      exclude_suspended: true
+      exclude_limit_up: false
+      exclude_limit_down: true
+      max_candidates: 20
 
   event_catalyst:
     enabled: true
@@ -178,4 +186,3 @@ review:
     - "weak_buy_reason"
     - "strategy_mismatch"
     - "emotional_trade"
-
