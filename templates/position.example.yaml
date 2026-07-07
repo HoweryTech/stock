@@ -1,0 +1,48 @@
+# 持仓记录示例
+# 本文件描述交易计划执行后的持仓跟踪结构。
+
+position:
+  id: "POS-YYYYMMDD-0001"
+  status: "normal"
+  created_at: "YYYY-MM-DD"
+  source_trade_plan_id: "TP-YYYYMMDD-0001"
+
+stock:
+  code: "000001"
+  name: "示例股票"
+  exchange: "SZSE"
+  industry: "示例行业"
+
+entry:
+  entry_date: "YYYY-MM-DD"
+  entry_price: 20.0
+  shares: null
+  position_pct_of_total_assets: 8.0
+  planned_buy_price: 20.0
+  max_acceptable_buy_price: 20.6
+
+risk:
+  stop_loss_price: 18.5
+  max_loss_pct_of_total_assets: 0.6
+  take_profit_conditions:
+    - "达到计划目标区后根据量价和市场环境分批止盈。"
+  invalidation_conditions:
+    - "买入时依赖的趋势强度消失。"
+  observation_items:
+    - "成交额是否持续支持趋势。"
+
+strategy:
+  source: "trend_strength"
+  timeframe: "swing"
+  buy_reason: "示例：股价回踩关键均线后企稳。"
+  key_evidence: []
+  counter_evidence_and_risks: []
+
+tracking:
+  current_price: 20.0
+  current_return_pct: 0.0
+  current_portfolio_return_pct: 0.0
+  days_held: 0
+  notes: []
+
+trade_plan_snapshot: {}

@@ -8,3 +8,5 @@ plans/*.yaml
 plans/*.yml
 reviews/*.yaml
 reviews/*.yml
+positions/*.yaml
+positions/*.yml

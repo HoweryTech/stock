@@ -49,6 +49,7 @@
 - [投资体系配置文件](./config/investment-profile.example.yaml)
 - [交易计划与风控校验](./docs/交易计划与风控校验.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
+- [持仓记录示例文件](./templates/position.example.yaml)
 
 ## 当前可执行工具
 
@@ -87,6 +88,21 @@ python3 tools/new_trade_plan.py \
 ```
 
 默认输出到 `plans/` 目录。真实交易计划默认不提交到 Git。
+
+### 新建持仓记录
+
+```bash
+python3 tools/new_position.py \
+  --plan plans/TP-示例.yaml \
+  --entry-date 2026-07-07 \
+  --entry-price 10 \
+  --current-price 10.5 \
+  --position-pct 5 \
+  --shares 1000 \
+  --note "按计划建仓"
+```
+
+默认输出到 `positions/` 目录。真实持仓记录默认不提交到 Git。
 
 ### 新建交易复盘草稿
 
