@@ -63,6 +63,16 @@ python3 tools/import_stock_universe.py \
   --metadata-output data/metadata/stock_universe.import.json
 ```
 
+### 过滤可交易股票池
+
+```bash
+python3 tools/filter_universe.py \
+  --profile config/investment-profile.example.yaml \
+  --input data/processed/stock_universe.csv \
+  --output data/processed/tradable_universe.csv \
+  --report-output data/metadata/tradable_universe.filter.json
+```
+
 ### 交易计划风控校验
 
 ```bash
