@@ -83,6 +83,15 @@ strategies:
       operating_cash_flow_quality_required: true
       avoid_extreme_high_valuation: true
       avoid_major_financial_risk: true
+    screening:
+      min_roe: 4.0
+      min_roa: 1.0
+      min_operating_cash_flow: 0
+      max_debt_ratio: 75.0
+      min_revenue_growth_yoy: 0.0
+      min_deducted_net_profit_growth_yoy: 0.0
+      min_gross_margin: 0.0
+      max_candidates: 20
 
   trend_strength:
     enabled: true

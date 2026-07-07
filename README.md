@@ -51,6 +51,7 @@
 - [数据目录与股票基础信息导入](./docs/数据目录与股票基础信息导入.md)
 - [日线行情数据导入](./docs/日线行情数据导入.md)
 - [财务核心指标导入](./docs/财务核心指标导入.md)
+- [价值质量策略筛选](./docs/价值质量策略筛选.md)
 - [趋势强度基础因子](./docs/趋势强度基础因子.md)
 - [趋势强度策略筛选](./docs/趋势强度策略筛选.md)
 - [观察池报告](./docs/观察池报告.md)
@@ -94,6 +95,16 @@ python3 tools/import_financial_metrics.py \
   --input samples/financial_metrics.sample.csv \
   --output data/processed/financial_metrics.csv \
   --metadata-output data/metadata/financial_metrics.import.json
+```
+
+### 筛选价值质量候选股
+
+```bash
+python3 tools/screen_value_quality.py \
+  --profile config/investment-profile.example.yaml \
+  --financial-metrics data/processed/financial_metrics.csv \
+  --output data/processed/value_quality_candidates.csv \
+  --metadata-output data/metadata/value_quality_candidates.json
 ```
 
 ### 计算趋势强度基础因子
