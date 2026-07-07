@@ -1,0 +1,146 @@
+import tempfile
+import unittest
+from argparse import Namespace
+from pathlib import Path
+
+from tools.complete_trade_plan import apply_completion
+from tools.new_trade_execution import create_execution, validate_execution_allowed
+from tools.new_trade_plan import create_trade_plan, write_yaml
+from tools.risk_check import load_yaml
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def plan_args(**overrides):
+    defaults = {
+        "profile": str(ROOT / "config/investment-profile.example.yaml"),
+        "template": str(ROOT / "templates/trade-plan.example.yaml"),
+        "output_dir": "plans",
+        "output": None,
+        "overwrite": False,
+        "id": "TP-EXEC-0001",
+        "code": "600000",
+        "name": "测试股票",
+        "exchange": "SSE",
+        "industry": "银行",
+        "is_st": False,
+        "is_suspended": False,
+        "has_delisting_risk": False,
+        "abnormal_trading_status": False,
+        "strategy": "trend_strength",
+        "timeframe": "swing",
+        "buy_reason": "来自观察池候选，趋势证据明确。",
+        "key_evidence": ["[trend_strength] 趋势强。", "[trend_strength] 成交额支持。"],
+        "risk": ["[trend_strength] 若跌破止损价说明趋势失效。"],
+        "stop_loss_condition": ["收盘价跌破 9.2。"],
+        "take_profit_condition": ["达到目标区后分批止盈。"],
+        "invalidation_condition": ["趋势强度消失。"],
+        "observation_item": ["观察成交额。"],
+        "planned_buy_price": 10.0,
+        "current_price": None,
+        "stop_loss_price": 9.2,
+        "position_pct": 5.0,
+        "current_stock_pct": 0.0,
+        "current_industry_pct": 10.0,
+        "current_total_pct": 40.0,
+    }
+    defaults.update(overrides)
+    return Namespace(**defaults)
+
+
+def execution_args(plan_path: Path, **overrides):
+    defaults = {
+        "template": str(ROOT / "templates/trade-execution.example.yaml"),
+        "profile": str(ROOT / "config/investment-profile.example.yaml"),
+        "plan": str(plan_path),
+        "gate": None,
+        "output_dir": "executions",
+        "output": None,
+        "overwrite": False,
+        "id": "EXEC-TEST-0001",
+        "status": "recorded",
+        "mode": "paper",
+        "side": "buy",
+        "execution_date": "2026-07-07",
+        "execution_price": 10.1,
+        "shares": 1000,
+        "position_pct": 5.0,
+        "fees": 5.0,
+        "user_confirmed": True,
+        "note": ["模拟成交。"],
+    }
+    defaults.update(overrides)
+    return Namespace(**defaults)
+
+
+class NewTradeExecutionTest(unittest.TestCase):
+    def write_ready_plan(self, tmp_dir: str) -> Path:
+        plan, _ = create_trade_plan(plan_args())
+        profile = load_yaml(ROOT / "config/investment-profile.example.yaml")
+        plan = apply_completion(
+            plan,
+            profile,
+            Namespace(
+                status=None,
+                mark_ready=True,
+                buy_reason=None,
+                key_evidence=[],
+                risk=[],
+                stop_loss_condition=[],
+                take_profit_condition=[],
+                invalidation_condition=[],
+                observation_item=[],
+                review_focus=["执行是否符合计划。"],
+                replace_evidence=False,
+                replace_risks=False,
+                replace_exit_rules=False,
+                replace_observation_items=False,
+                replace_review_focus=False,
+                planned_buy_price=None,
+                current_price=None,
+                stop_loss_price=None,
+                position_pct=None,
+                current_stock_pct=None,
+                current_industry_pct=None,
+                current_total_pct=None,
+            ),
+        )
+        plan_path = Path(tmp_dir) / "plan.yaml"
+        write_yaml(plan_path, plan)
+        return plan_path
+
+    def test_creates_execution_from_ready_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plan_path = self.write_ready_plan(tmp_dir)
+
+            execution, output_path = create_execution(execution_args(plan_path))
+
+        self.assertEqual(output_path, Path("executions/EXEC-TEST-0001.yaml"))
+        self.assertEqual(execution["execution"]["source_trade_plan_id"], "TP-EXEC-0001")
+        self.assertEqual(execution["execution"]["gate_conclusion"], "needs_confirmation")
+        self.assertEqual(execution["order"]["slippage_pct_vs_plan"], 1.0)
+        self.assertTrue(execution["order"]["price_within_max_acceptable"])
+        self.assertEqual(execution["trade_plan_snapshot"]["trade_plan"]["id"], "TP-EXEC-0001")
+
+    def test_rejects_unconfirmed_needs_confirmation_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plan_path = self.write_ready_plan(tmp_dir)
+
+            with self.assertRaises(ValueError):
+                create_execution(execution_args(plan_path, user_confirmed=False))
+
+    def test_rejects_blocked_gate(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_execution_allowed({"conclusion": "blocked_by_quality"}, True, "paper")
+
+    def test_rejects_execution_price_not_positive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plan_path = self.write_ready_plan(tmp_dir)
+
+            with self.assertRaises(ValueError):
+                create_execution(execution_args(plan_path, execution_price=0))
+
+
+if __name__ == "__main__":
+    unittest.main()

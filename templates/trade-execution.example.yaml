@@ -1,0 +1,40 @@
+# 交易执行记录示例
+# 本文件描述交易计划通过门禁和人工确认后的实际或模拟执行情况。
+
+execution:
+  id: "EXEC-YYYYMMDD-0001"
+  status: "recorded"
+  created_at: "YYYY-MM-DD"
+  mode: "paper"
+  source_trade_plan_id: "TP-YYYYMMDD-0001"
+  gate_conclusion: "needs_confirmation"
+  user_confirmed: true
+  confirmation_text: "我确认本次交易符合计划，已阅读关键证据、反证和风险，并接受按止损价计算的最大亏损。"
+
+stock:
+  code: "000001"
+  name: "示例股票"
+  exchange: "SZSE"
+  industry: "示例行业"
+
+order:
+  side: "buy"
+  execution_date: "YYYY-MM-DD"
+  execution_price: 20.0
+  shares: null
+  position_pct_of_total_assets: 8.0
+  fees: 0.0
+  slippage_pct_vs_plan: 0.0
+  price_within_max_acceptable: true
+
+risk_snapshot:
+  planned_buy_price: 20.0
+  max_acceptable_buy_price: 20.6
+  stop_loss_price: 18.5
+  max_loss_pct_of_total_assets: 0.6
+
+notes:
+  - "按计划执行。"
+
+gate_snapshot: {}
+trade_plan_snapshot: {}

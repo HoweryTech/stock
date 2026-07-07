@@ -65,6 +65,7 @@
 - [交易计划草稿质量检查](./docs/交易计划草稿质量检查.md)
 - [交易计划准入门禁](./docs/交易计划准入门禁.md)
 - [候选股到交易计划门禁流程](./docs/候选股到交易计划门禁流程.md)
+- [交易执行记录](./docs/交易执行记录.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -278,6 +279,20 @@ python3 tools/prepare_trade_plan_from_candidate.py \
   --invalidation-condition "趋势或估值证据失效。" \
   --review-focus "候选池证据是否被市场验证。" \
   --mark-ready
+```
+
+### 新建交易执行记录
+
+```bash
+python3 tools/new_trade_execution.py \
+  --plan plans/TP-示例.yaml \
+  --mode paper \
+  --execution-date 2026-07-07 \
+  --execution-price 200 \
+  --shares 100 \
+  --position-pct 5 \
+  --user-confirmed \
+  --note "按计划模拟成交。"
 ```
 
 ### 新建持仓记录
