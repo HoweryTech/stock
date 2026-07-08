@@ -27,6 +27,7 @@ def args(tmp_dir: str) -> Namespace:
         strategy_review_tasks=str(base / "strategy-review-tasks.json"),
         strategy_config_changes=str(base / "strategy-config-changes.json"),
         strategy_config_patch=str(base / "strategy-config-patch.json"),
+        strategy_config_patch_audit=str(base / "strategy-config-patch.apply.json"),
         output=str(base / "daily-summary.md"),
         json_output=None,
         json=False,
@@ -274,6 +275,37 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("人工复核 1 个待应用策略配置补丁。", summary["operating_actions"])
         self.assertIn("risk.max_position_pct_per_stock", content)
         self.assertIn("CONFIG-CHANGE-RISK", content)
+
+    def test_daily_summary_shows_applied_strategy_config_patch_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-config-patch.apply.json",
+                {
+                    "applied_at": "2026-07-08T15:00:00",
+                    "applied_by": "lihongwei",
+                    "backup": "data/backups/investment-profile.20260708-150000.yaml",
+                    "operation_count": 1,
+                    "operations": [
+                        {
+                            "op": "replace",
+                            "path": "risk.max_position_pct_per_stock",
+                            "old_value": 10.0,
+                            "new_value": 8.0,
+                            "source_change_id": "CONFIG-CHANGE-RISK",
+                        }
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 16, 0, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["strategy_config_patch_audit"]["operation_count"], 1)
+        self.assertEqual(summary["strategy_config_patch_audit"]["applied_by"], "lihongwei")
+        self.assertIn("已应用配置操作数：1", content)
+        self.assertIn("配置应用人：lihongwei", content)
+        self.assertIn("data/backups/investment-profile.20260708-150000.yaml", content)
 
 
 if __name__ == "__main__":
