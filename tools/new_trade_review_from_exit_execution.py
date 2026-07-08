@@ -99,6 +99,16 @@ def create_trade_review_from_exit_execution(args: argparse.Namespace) -> tuple[d
     set_value(review, "result.result_category", result_category)
     set_value(review, "result.error_tags", error_tags)
 
+    entry_execution = value_at(exit_execution, "exit_plan_snapshot.position_full_snapshot.execution_snapshot") or {}
+    cooldown_conclusion = value_at(entry_execution, "execution.cooldown_conclusion")
+    strategy_health_conclusion = value_at(entry_execution, "execution.strategy_health_conclusion")
+    exception_reason = value_at(entry_execution, "execution.cooldown_exception_reason") or ""
+    set_value(review, "discipline.cooldown_conclusion_at_entry", cooldown_conclusion)
+    set_value(review, "discipline.strategy_health_conclusion_at_entry", strategy_health_conclusion)
+    set_value(review, "discipline.was_cooldown_exception", cooldown_conclusion == "cooldown_required" and bool(exception_reason))
+    set_value(review, "discipline.was_strategy_health_exception", strategy_health_conclusion == "pause_required" and bool(exception_reason))
+    set_value(review, "discipline.exception_reason", exception_reason)
+
     if args.lesson:
         set_value(review, "review_questions.lesson", args.lesson)
     if args.next_action:

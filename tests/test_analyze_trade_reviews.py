@@ -37,6 +37,18 @@ def review(review_id: str, strategy: str, trade_return: float, portfolio_return:
     return data
 
 
+def exception_review() -> dict:
+    data = review("TR-EXCEPTION", "trend_strength", -2.0, -0.1, "strategy_loss")
+    data["discipline"] = {
+        "cooldown_conclusion_at_entry": "cooldown_required",
+        "strategy_health_conclusion_at_entry": "pause_required",
+        "was_cooldown_exception": True,
+        "was_strategy_health_exception": True,
+        "exception_reason": "策略暂停期小仓位例外。",
+    }
+    return data
+
+
 class AnalyzeTradeReviewsTest(unittest.TestCase):
     def test_analyzes_reviews_by_strategy_and_error_tag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -65,6 +77,21 @@ class AnalyzeTradeReviewsTest(unittest.TestCase):
         self.assertEqual(analysis["review_count"], 0)
         self.assertEqual(analysis["overall"]["count"], 0)
         self.assertIn("复盘数量：0", content)
+
+    def test_analyzes_discipline_exceptions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "review.yaml"
+            write_yaml(path, exception_review())
+
+            analysis = analyze_reviews([path])
+            content = render_analysis(analysis)
+
+        self.assertEqual(analysis["discipline"]["cooldown_exception_count"], 1)
+        self.assertEqual(analysis["discipline"]["strategy_health_exception_count"], 1)
+        self.assertEqual(analysis["discipline"]["exception_avg_trade_return_pct"], -2.0)
+        self.assertEqual(analysis["discipline"]["exception_total_portfolio_return_pct"], -0.1)
+        self.assertIn("纪律例外", content)
+        self.assertIn("TR-EXCEPTION", content)
 
 
 if __name__ == "__main__":

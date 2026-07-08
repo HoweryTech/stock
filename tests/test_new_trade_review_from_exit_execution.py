@@ -33,6 +33,7 @@ def exit_execution_record() -> dict:
         "position_full_snapshot": {
             "entry": {"entry_date": "2026-07-01"},
             "trade_plan_snapshot": {"trade_plan": {"id": "TP-REVIEW-0001"}},
+            "execution_snapshot": {},
         }
     }
     return execution
@@ -97,6 +98,24 @@ class NewTradeReviewFromExitExecutionTest(unittest.TestCase):
 
         self.assertEqual(review["review_questions"]["lesson"], "止损执行及时。")
         self.assertEqual(review["review_questions"]["next_action"], "复查策略。")
+
+    def test_carries_entry_discipline_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = exit_execution_record()
+            execution["exit_plan_snapshot"]["position_full_snapshot"]["execution_snapshot"] = {
+                "execution": {
+                    "cooldown_conclusion": "cooldown_required",
+                    "strategy_health_conclusion": "pause_required",
+                    "cooldown_exception_reason": "策略暂停期小仓位例外。",
+                }
+            }
+            path = self.write_execution(tmp_dir, execution)
+
+            review, _ = create_trade_review_from_exit_execution(args(path))
+
+        self.assertTrue(review["discipline"]["was_cooldown_exception"])
+        self.assertTrue(review["discipline"]["was_strategy_health_exception"])
+        self.assertEqual(review["discipline"]["exception_reason"], "策略暂停期小仓位例外。")
 
     def test_requires_entry_price(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

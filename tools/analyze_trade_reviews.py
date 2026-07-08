@@ -78,6 +78,13 @@ def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
     result_categories: Counter[str] = Counter()
     error_tags: Counter[str] = Counter()
     quality: Counter[str] = Counter()
+    discipline: dict[str, Any] = {
+        "cooldown_exception_count": 0,
+        "strategy_health_exception_count": 0,
+        "exception_trade_return_sum": 0.0,
+        "exception_portfolio_return_sum": 0.0,
+        "exceptions": [],
+    }
     rows: list[dict[str, Any]] = []
 
     for path in review_paths:
@@ -88,6 +95,9 @@ def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
         portfolio_return_pct = as_float(value_at(review, "result.portfolio_return_pct"))
         category = value_at(review, "result.result_category") or "UNKNOWN"
         tags = value_at(review, "result.error_tags") or []
+        was_cooldown_exception = bool(value_at(review, "discipline.was_cooldown_exception"))
+        was_strategy_health_exception = bool(value_at(review, "discipline.was_strategy_health_exception"))
+        is_exception = was_cooldown_exception or was_strategy_health_exception
 
         add_numeric(overall, trade_return_pct, portfolio_return_pct)
         add_numeric(by_strategy[strategy], trade_return_pct, portfolio_return_pct)
@@ -95,6 +105,22 @@ def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
         quality[review_quality["conclusion"]] += 1
         for tag in tags:
             error_tags[str(tag)] += 1
+        if was_cooldown_exception:
+            discipline["cooldown_exception_count"] += 1
+        if was_strategy_health_exception:
+            discipline["strategy_health_exception_count"] += 1
+        if is_exception:
+            discipline["exception_trade_return_sum"] += trade_return_pct or 0.0
+            discipline["exception_portfolio_return_sum"] += portfolio_return_pct or 0.0
+            discipline["exceptions"].append(
+                {
+                    "review_id": value_at(review, "review.id"),
+                    "strategy": strategy,
+                    "trade_return_pct": trade_return_pct,
+                    "portfolio_return_pct": portfolio_return_pct,
+                    "exception_reason": value_at(review, "discipline.exception_reason"),
+                }
+            )
 
         rows.append(
             {
@@ -107,8 +133,16 @@ def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
                 "portfolio_return_pct": portfolio_return_pct,
                 "quality_conclusion": review_quality["conclusion"],
                 "lesson": value_at(review, "review_questions.lesson"),
+                "was_cooldown_exception": was_cooldown_exception,
+                "was_strategy_health_exception": was_strategy_health_exception,
             }
         )
+
+    exception_count = len(discipline["exceptions"])
+    discipline["exception_avg_trade_return_pct"] = round(discipline["exception_trade_return_sum"] / exception_count, 4) if exception_count else None
+    discipline["exception_total_portfolio_return_pct"] = round(discipline["exception_portfolio_return_sum"], 4)
+    discipline["exception_trade_return_sum"] = round(discipline["exception_trade_return_sum"], 4)
+    discipline["exception_portfolio_return_sum"] = round(discipline["exception_portfolio_return_sum"], 4)
 
     return {
         "review_count": len(review_paths),
@@ -117,6 +151,7 @@ def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
         "result_categories": dict(sorted(result_categories.items())),
         "error_tags": dict(sorted(error_tags.items())),
         "quality": dict(sorted(quality.items())),
+        "discipline": discipline,
         "reviews": rows,
     }
 
@@ -151,7 +186,27 @@ def render_analysis(analysis: dict[str, Any]) -> str:
             )
 
     lines.extend(["", "## 结果分类", "", *render_counter(analysis["result_categories"]), "", "## 错误标签", "", *render_counter(analysis["error_tags"]), ""])
-    lines.extend(["## 复盘质量", "", *render_counter(analysis["quality"]), "", "## 明细", ""])
+    lines.extend(["## 复盘质量", "", *render_counter(analysis["quality"]), ""])
+    discipline = analysis.get("discipline", {})
+    lines.extend(
+        [
+            "## 纪律例外",
+            "",
+            f"- 冷静期例外交易数：{discipline.get('cooldown_exception_count', 0)}",
+            f"- 策略健康例外交易数：{discipline.get('strategy_health_exception_count', 0)}",
+            f"- 例外交易平均收益率：{discipline.get('exception_avg_trade_return_pct') if discipline.get('exception_avg_trade_return_pct') is not None else '-'}%",
+            f"- 例外交易组合贡献合计：{discipline.get('exception_total_portfolio_return_pct', 0.0)}%",
+            "",
+        ]
+    )
+    if discipline.get("exceptions"):
+        lines.append("例外交易明细：")
+        for item in discipline["exceptions"]:
+            lines.append(
+                f"- {item['review_id']} strategy={item['strategy']} return={item['trade_return_pct']}% portfolio={item['portfolio_return_pct']}% reason={item.get('exception_reason') or '未记录'}"
+            )
+        lines.append("")
+    lines.extend(["## 明细", ""])
     if not analysis["reviews"]:
         lines.append("- 无。")
     else:

@@ -28,6 +28,13 @@ result:
   result_category: "strategy_profit"
   error_tags: []
 
+discipline:
+  cooldown_conclusion_at_entry: null
+  strategy_health_conclusion_at_entry: null
+  was_cooldown_exception: false
+  was_strategy_health_exception: false
+  exception_reason: ""
+
 review_questions:
   buy_reason_still_valid: null
   exit_reason_matches_plan: null
