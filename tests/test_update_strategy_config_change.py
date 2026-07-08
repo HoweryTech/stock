@@ -19,6 +19,7 @@ def changes_doc() -> dict:
                     "required": True,
                     "approved_by": "",
                     "approved_at": None,
+                    "approval_reason": "",
                     "rejected_by": "",
                     "rejected_at": None,
                     "rejected_reason": "",
@@ -47,6 +48,7 @@ class UpdateStrategyConfigChangeTest(unittest.TestCase):
         self.assertEqual(draft["effective_date"], "2026-07-09")
         self.assertEqual(draft["approval"]["approved_by"], "lihongwei")
         self.assertEqual(draft["approval"]["approved_at"], "2026-07-08T13:00:00")
+        self.assertEqual(draft["approval"]["approval_reason"], "复核通过。")
         self.assertEqual(len(draft["history"]), 1)
         self.assertEqual(draft["history"][0]["action"], "approve")
         self.assertEqual(data["approved_count"], 1)
@@ -95,12 +97,28 @@ class UpdateStrategyConfigChangeTest(unittest.TestCase):
         self.assertEqual(draft["status"], "draft")
         self.assertEqual(draft["approval"]["approved_by"], "")
         self.assertIsNone(draft["approval"]["approved_at"])
+        self.assertEqual(draft["approval"]["approval_reason"], "")
         self.assertEqual(len(draft["history"]), 2)
         self.assertEqual(data["pending_approval_count"], 1)
 
     def test_missing_change_raises_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "not found"):
             update_change(changes_doc(), change_id="UNKNOWN", action="approve", actor="lihongwei")
+
+    def test_config_version_approval_requires_reason(self) -> None:
+        data = changes_doc()
+        draft = data["drafts"][0]
+        draft["source_task_type"] = "config_version"
+        draft["config_version_id"] = "CONFIG-VERSION-RISK"
+
+        with self.assertRaisesRegex(ValueError, "config version approval requires"):
+            update_change(
+                data,
+                change_id="CONFIG-CHANGE-TREND",
+                action="approve",
+                actor="lihongwei",
+                updated_at=datetime(2026, 7, 8, 13, 0, 0),
+            )
 
 
 if __name__ == "__main__":

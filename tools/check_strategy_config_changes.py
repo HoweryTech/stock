@@ -70,11 +70,29 @@ def validate_change(profile: dict[str, Any], draft: dict[str, Any]) -> tuple[lis
     warnings: list[CheckItem] = []
     info: list[CheckItem] = []
     change_id = draft.get("id") or "UNKNOWN"
+    approval = draft.get("approval") or {}
 
     if draft.get("status") != "approved":
         blockers.append(CheckItem("change_not_approved", f"配置变更 {change_id} 尚未审批通过。", change_id))
+    else:
+        if not approval.get("approved_by"):
+            blockers.append(CheckItem("missing_approval_actor", f"配置变更 {change_id} 缺少审批人。", change_id))
+        if not approval.get("approved_at"):
+            blockers.append(CheckItem("missing_approval_time", f"配置变更 {change_id} 缺少审批时间。", change_id))
     if not draft.get("effective_date"):
         warnings.append(CheckItem("missing_effective_date", f"配置变更 {change_id} 未填写生效日期。", change_id))
+    if draft.get("source_task_type") == "config_version":
+        review_evidence = draft.get("review_evidence") or {}
+        if not draft.get("config_version_id"):
+            blockers.append(CheckItem("missing_config_version_id", f"配置版本变更 {change_id} 缺少 config_version_id。", change_id))
+        if not draft.get("profile_hash"):
+            blockers.append(CheckItem("missing_config_version_profile_hash", f"配置版本变更 {change_id} 缺少 profile_hash。", change_id))
+        if not (draft.get("resolution") or "").strip():
+            blockers.append(CheckItem("missing_config_version_resolution", f"配置版本变更 {change_id} 缺少人工复核结论。", change_id))
+        if not review_evidence or (not review_evidence.get("actions") and not review_evidence.get("stats")):
+            blockers.append(CheckItem("missing_config_version_review_evidence", f"配置版本变更 {change_id} 缺少可复盘的复核证据。", change_id))
+        if draft.get("status") == "approved" and not (approval.get("approval_reason") or "").strip():
+            blockers.append(CheckItem("missing_config_version_approval_reason", f"配置版本变更 {change_id} 缺少审批理由。", change_id))
 
     change_items = draft.get("change_items") or []
     if not change_items:

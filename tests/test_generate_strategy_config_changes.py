@@ -61,6 +61,7 @@ class GenerateStrategyConfigChangesTest(unittest.TestCase):
         self.assertEqual(draft["source_task_id"], "STRATEGY-REVIEW-TREND-STRENGTH-NEEDS-REVIEW")
         self.assertEqual(draft["approval"]["required"], True)
         self.assertEqual(draft["approval"]["approved_by"], "")
+        self.assertEqual(draft["approval"]["approval_reason"], "")
         self.assertEqual(draft["approval"]["rejected_by"], "")
         self.assertEqual(draft["approval"]["rejected_reason"], "")
         self.assertEqual(draft["history"], [])

@@ -56,12 +56,15 @@ def update_change(
         raise ValueError(f"action must be one of: {', '.join(sorted(ACTIONS))}")
     if not actor.strip():
         raise ValueError("actor is required")
+
+    draft = find_draft(changes_doc, change_id)
+    if action == "approve" and draft.get("source_task_type") == "config_version" and not reason.strip():
+        raise ValueError("config version approval requires a non-empty reason")
     if action == "reject" and not reason.strip():
         raise ValueError("reject requires a non-empty reason")
 
     updated_at = updated_at or datetime.now()
     timestamp = updated_at.isoformat(timespec="seconds")
-    draft = find_draft(changes_doc, change_id)
     previous_status = draft.get("status") or "draft"
     approval = draft.setdefault("approval", {"required": True})
 
@@ -71,6 +74,7 @@ def update_change(
             draft["effective_date"] = effective_date
         approval["approved_by"] = actor
         approval["approved_at"] = timestamp
+        approval["approval_reason"] = reason
         approval["rejected_by"] = ""
         approval["rejected_at"] = None
         approval["rejected_reason"] = ""
@@ -81,10 +85,12 @@ def update_change(
         approval["rejected_reason"] = reason
         approval["approved_by"] = ""
         approval["approved_at"] = None
+        approval["approval_reason"] = ""
     else:
         draft["status"] = "draft"
         approval["approved_by"] = ""
         approval["approved_at"] = None
+        approval["approval_reason"] = ""
         approval["rejected_by"] = ""
         approval["rejected_at"] = None
         approval["rejected_reason"] = ""

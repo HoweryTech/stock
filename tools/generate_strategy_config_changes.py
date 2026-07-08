@@ -141,6 +141,7 @@ def build_change_drafts(tasks_doc: dict[str, Any], generated_at: datetime | None
                     "required": True,
                     "approved_by": "",
                     "approved_at": None,
+                    "approval_reason": "",
                     "rejected_by": "",
                     "rejected_at": None,
                     "rejected_reason": "",
@@ -186,7 +187,7 @@ def render_change_drafts(result: dict[str, Any]) -> str:
         )
         for item in draft["change_items"]:
             lines.append(f"- `{item['path']}`：{item['proposed_change']} 原因：{item['reason']}")
-        lines.extend(["", "审批：", "- required: true", "- approved_by: 待填写", ""])
+        lines.extend(["", "审批：", "- required: true", "- approved_by: 待填写", "- approval_reason: 待填写", ""])
     return "\n".join(lines).rstrip()
 
 
