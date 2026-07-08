@@ -74,6 +74,7 @@
 - [退出计划](./docs/退出计划.md)
 - [退出计划检查](./docs/退出计划检查.md)
 - [卖出执行记录](./docs/卖出执行记录.md)
+- [卖出执行检查](./docs/卖出执行检查.md)
 - [卖出执行生成复盘](./docs/卖出执行生成复盘.md)
 - [交易复盘质量检查](./docs/交易复盘质量检查.md)
 - [交易复盘分析](./docs/交易复盘分析.md)
@@ -412,6 +413,13 @@ python3 tools/new_exit_execution.py \
   --execution-date 2026-07-08 \
   --execution-price 9.1 \
   --output exit-executions/EXITEXEC-示例.yaml
+```
+
+检查卖出执行记录：
+
+```bash
+python3 tools/check_exit_execution.py \
+  --exit-execution exit-executions/EXITEXEC-示例.yaml
 ```
 
 从卖出执行生成复盘草稿：
