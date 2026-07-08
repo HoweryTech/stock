@@ -76,6 +76,7 @@
 - [卖出执行记录](./docs/卖出执行记录.md)
 - [卖出执行生成复盘](./docs/卖出执行生成复盘.md)
 - [交易复盘质量检查](./docs/交易复盘质量检查.md)
+- [交易复盘分析](./docs/交易复盘分析.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -417,6 +418,15 @@ python3 tools/new_trade_review_from_exit_execution.py \
 ```bash
 python3 tools/check_trade_review_quality.py \
   --review reviews/TR-示例.yaml
+```
+
+生成交易复盘分析：
+
+```bash
+python3 tools/analyze_trade_reviews.py \
+  --reviews reviews/*.yaml \
+  --output reports/review-analysis.md \
+  --json-output data/metadata/review-analysis.json
 ```
 
 ### 新建交易复盘草稿
