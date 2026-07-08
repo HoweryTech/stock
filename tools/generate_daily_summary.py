@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -59,6 +60,11 @@ def collect_codes(items: list[dict[str, Any]], key: str) -> list[str]:
         elif message:
             codes.append(str(message))
     return codes
+
+
+def slug(value: Any) -> str:
+    normalized = re.sub(r"[^A-Z0-9]+", "-", str(value or "UNKNOWN").upper()).strip("-")
+    return normalized or "UNKNOWN"
 
 
 def summarize_watchlist(metadata: dict[str, Any] | None) -> dict[str, Any]:
@@ -333,6 +339,20 @@ def summarize_strategy_config_patch(patch_doc: dict[str, Any] | None) -> dict[st
     }
 
 
+def summarize_manual_confirmation_records(records_doc: dict[str, Any] | None) -> dict[str, Any]:
+    if not records_doc:
+        return {"available": False, "confirmation_count": 0, "open_count": 0, "confirmed_count": 0, "rejected_count": 0, "by_id": {}}
+    confirmations = records_doc.get("confirmations", []) or []
+    return {
+        "available": True,
+        "confirmation_count": len(confirmations),
+        "open_count": sum(1 for item in confirmations if item.get("status") == "open"),
+        "confirmed_count": sum(1 for item in confirmations if item.get("status") == "confirmed"),
+        "rejected_count": sum(1 for item in confirmations if item.get("status") == "rejected"),
+        "by_id": {item.get("id"): item for item in confirmations if item.get("id")},
+    }
+
+
 def summarize_strategy_config_patch_audit(audit_doc: dict[str, Any] | None) -> dict[str, Any]:
     if not audit_doc:
         return {"available": False, "operation_count": 0, "applied_by": None, "applied_at": None, "backup": None, "operations": []}
@@ -498,8 +518,41 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
     return actions
 
 
-def derive_manual_confirmations(summary: dict[str, Any]) -> list[str]:
-    confirmations: list[str] = []
+def manual_confirmation_item(
+    records: dict[str, Any],
+    *,
+    confirmation_id: str,
+    text: str,
+    subject_type: str,
+    subject_id: str,
+) -> dict[str, Any]:
+    record = records["by_id"].get(confirmation_id) or {}
+    status = record.get("status") or "open"
+    return {
+        "id": confirmation_id,
+        "text": text,
+        "subject_type": subject_type,
+        "subject_id": subject_id,
+        "status": status,
+        "confirmed_by": record.get("confirmed_by") or "",
+        "confirmed_at": record.get("confirmed_at"),
+        "confirmation_reason": record.get("confirmation_reason") or "",
+        "rejected_by": record.get("rejected_by") or "",
+        "rejected_at": record.get("rejected_at"),
+        "rejected_reason": record.get("rejected_reason") or "",
+    }
+
+
+def format_manual_confirmation(item: dict[str, Any]) -> str:
+    if item["status"] == "confirmed":
+        return f"已确认：{item['text']} confirmation_id={item['id']} confirmed_by={item['confirmed_by']} confirmed_at={item['confirmed_at']}"
+    if item["status"] == "rejected":
+        return f"已驳回：{item['text']} confirmation_id={item['id']} rejected_by={item['rejected_by']} reason={item['rejected_reason']}"
+    return f"待确认：{item['text']} confirmation_id={item['id']}"
+
+
+def derive_manual_confirmation_items(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    confirmations: list[dict[str, Any]] = []
     exits = summary["exit_plans"]
     reviews = summary["reviews"]
     strategy_health = summary["strategy_health"]
@@ -507,29 +560,97 @@ def derive_manual_confirmations(summary: dict[str, Any]) -> list[str]:
     strategy_config_patch = summary["strategy_config_patch"]
     strategy_config_regression = summary["strategy_config_regression"]
     strategy_config_pipeline = summary["strategy_config_pipeline"]
+    records = summary["manual_confirmation_records"]
 
     urgent_exits = [row for row in exits["rows"] if row["must_exit"] or row["urgency"] == "immediate"]
     for row in urgent_exits:
-        confirmations.append(f"确认紧急退出计划：{row['id']} stock={row['stock']} type={row['type']}。")
-    if reviews["quality_blocked_count"]:
-        confirmations.append(f"确认 {reviews['quality_blocked_count']} 份阻断级复盘的修正结论。")
+        text = f"确认紧急退出计划：{row['id']} stock={row['stock']} type={row['type']}。"
+        confirmations.append(
+            manual_confirmation_item(
+                records,
+                confirmation_id=f"CONFIRM-EXIT-PLAN-{slug(row['id'])}",
+                text=text,
+                subject_type="exit_plan",
+                subject_id=row["id"] or "",
+            )
+        )
+    for row in reviews["rows"]:
+        if row["quality_conclusion"] == "blocked":
+            text = f"确认阻断级复盘修正结论：{row['id']} stock={row['stock']}。"
+            confirmations.append(
+                manual_confirmation_item(
+                    records,
+                    confirmation_id=f"CONFIRM-BLOCKED-REVIEW-{slug(row['id'])}",
+                    text=text,
+                    subject_type="trade_review",
+                    subject_id=row["id"] or "",
+                )
+            )
     if strategy_health["pause_count"]:
-        confirmations.append(f"确认 {strategy_health['pause_count']} 个暂停新开仓策略的执行边界。")
+        confirmations.append(
+            manual_confirmation_item(
+                records,
+                confirmation_id="CONFIRM-STRATEGY-PAUSE-BOUNDARY",
+                text=f"确认 {strategy_health['pause_count']} 个暂停新开仓策略的执行边界。",
+                subject_type="strategy_health",
+                subject_id="pause_required",
+            )
+        )
     for item in strategy_config_changes["drafts"]:
         if item["source_task_type"] == "config_version":
-            confirmations.append(f"审批或驳回配置版本变更草稿：{item['id']} config_version={item['config_version_id']}。")
+            text = f"审批或驳回配置版本变更草稿：{item['id']} config_version={item['config_version_id']}。"
         else:
-            confirmations.append(f"审批或驳回策略配置变更草稿：{item['id']} strategy={item['strategy']}。")
+            text = f"审批或驳回策略配置变更草稿：{item['id']} strategy={item['strategy']}。"
+        confirmations.append(
+            manual_confirmation_item(
+                records,
+                confirmation_id=f"CONFIRM-CONFIG-CHANGE-{slug(item['id'])}",
+                text=text,
+                subject_type="config_change",
+                subject_id=item["id"] or "",
+            )
+        )
     for item in strategy_config_patch["operations"]:
-        confirmations.append(f"人工复核待应用配置补丁：{item['source_change_id']} path={item['path']} old={item['old_value']} new={item['new_value']}。")
+        text = f"人工复核待应用配置补丁：{item['source_change_id']} path={item['path']} old={item['old_value']} new={item['new_value']}。"
+        confirmations.append(
+            manual_confirmation_item(
+                records,
+                confirmation_id=f"CONFIRM-CONFIG-PATCH-{slug(item['source_change_id'])}-{slug(item['path'])}",
+                text=text,
+                subject_type="config_patch",
+                subject_id=item["source_change_id"] or "",
+            )
+        )
     if strategy_config_regression["conclusion"] == "blocked":
-        confirmations.append("确认配置回归阻断后的回滚或修复方案。")
+        confirmations.append(
+            manual_confirmation_item(
+                records,
+                confirmation_id="CONFIRM-CONFIG-REGRESSION-BLOCKED",
+                text="确认配置回归阻断后的回滚或修复方案。",
+                subject_type="config_regression",
+                subject_id="blocked",
+            )
+        )
     if strategy_config_pipeline["change_check_conclusion"] == "blocked":
-        confirmations.append("确认配置变更流水线校验阻断的修正方案。")
+        confirmations.append(
+            manual_confirmation_item(
+                records,
+                confirmation_id="CONFIRM-CONFIG-PIPELINE-CHECK-BLOCKED",
+                text="确认配置变更流水线校验阻断的修正方案。",
+                subject_type="config_pipeline",
+                subject_id="change_check_blocked",
+            )
+        )
     if strategy_config_pipeline["regression_conclusion"] == "blocked":
-        confirmations.append("确认配置变更流水线回归阻断后的回滚或修复方案。")
-    if not confirmations:
-        confirmations.append("今日无必须人工确认事项。")
+        confirmations.append(
+            manual_confirmation_item(
+                records,
+                confirmation_id="CONFIRM-CONFIG-PIPELINE-REGRESSION-BLOCKED",
+                text="确认配置变更流水线回归阻断后的回滚或修复方案。",
+                subject_type="config_pipeline",
+                subject_id="regression_blocked",
+            )
+        )
     return confirmations
 
 
@@ -552,9 +673,11 @@ def build_summary(args: argparse.Namespace, generated_at: datetime | None = None
         "strategy_config_regression": summarize_strategy_config_regression(load_json_if_exists(Path(args.strategy_config_regression))),
         "strategy_config_pipeline": summarize_strategy_config_pipeline(load_json_if_exists(Path(args.strategy_config_pipeline))),
         "strategy_config_snapshot": summarize_strategy_config_snapshot(load_json_if_exists(Path(args.strategy_config_snapshot))),
+        "manual_confirmation_records": summarize_manual_confirmation_records(load_json_if_exists(Path(args.manual_confirmations))),
     }
     summary["operating_actions"] = derive_operating_actions(summary)
-    summary["manual_confirmations"] = derive_manual_confirmations(summary)
+    summary["manual_confirmation_items"] = derive_manual_confirmation_items(summary)
+    summary["manual_confirmations"] = [format_manual_confirmation(item) for item in summary["manual_confirmation_items"]] or ["今日无必须人工确认事项。"]
     return summary
 
 
@@ -770,6 +893,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strategy-config-regression", default="data/metadata/strategy-config-regression.json", help="Strategy config regression JSON generated by check_strategy_config_regression.py.")
     parser.add_argument("--strategy-config-pipeline", default="data/metadata/strategy-config-change-pipeline.json", help="Strategy config change pipeline metadata JSON.")
     parser.add_argument("--strategy-config-snapshot", default="data/metadata/strategy-config-snapshot.json", help="Strategy config version snapshot JSON generated by create_strategy_config_snapshot.py.")
+    parser.add_argument("--manual-confirmations", default="data/metadata/manual-confirmations.json", help="Manual confirmation record JSON generated by update_manual_confirmation.py.")
     parser.add_argument("--output", default="reports/daily-summary.md", help="Output Markdown report.")
     parser.add_argument("--json-output", help="Optional output JSON summary.")
     parser.add_argument("--json", action="store_true", help="Print JSON summary instead of text status.")

@@ -31,6 +31,7 @@ def args(tmp_dir: str) -> Namespace:
         strategy_config_regression=str(base / "strategy-config-regression.json"),
         strategy_config_pipeline=str(base / "strategy-config-change-pipeline.json"),
         strategy_config_snapshot=str(base / "strategy-config-snapshot.json"),
+        manual_confirmations=str(base / "manual-confirmations.json"),
         output=str(base / "daily-summary.md"),
         json_output=None,
         json=False,
@@ -108,7 +109,7 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertEqual(summary["reviews"]["quality_needs_review_count"], 1)
         self.assertIn("优先处理组合或持仓日检中的 needs_action。", summary["operating_actions"])
         self.assertIn("处理 1 个紧急退出计划。", summary["operating_actions"])
-        self.assertIn("确认紧急退出计划：EXIT-SUMMARY-0001 stock=600000 type=stop_loss。", summary["manual_confirmations"])
+        self.assertIn("待确认：确认紧急退出计划：EXIT-SUMMARY-0001 stock=600000 type=stop_loss。 confirmation_id=CONFIRM-EXIT-PLAN-EXIT-SUMMARY-0001", summary["manual_confirmations"])
         self.assertIn("补全 1 份复盘草稿。", summary["operating_actions"])
         self.assertIn("完善 1 份需复核复盘。", summary["operating_actions"])
         self.assertIn("生成或刷新交易复盘分析。", summary["operating_actions"])
@@ -354,9 +355,10 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertNotIn("审批或驳回 1 个策略配置变更草稿。", summary["operating_actions"])
         self.assertIn("审批或驳回 1 个配置版本变更草稿。", summary["operating_actions"])
         self.assertIn(
-            "审批或驳回配置版本变更草稿：CONFIG-CHANGE-CONFIG-VERSION-RISK config_version=CONFIG-VERSION-RISK。",
+            "待确认：审批或驳回配置版本变更草稿：CONFIG-CHANGE-CONFIG-VERSION-RISK config_version=CONFIG-VERSION-RISK。 confirmation_id=CONFIRM-CONFIG-CHANGE-CONFIG-CHANGE-CONFIG-VERSION-RISK",
             summary["manual_confirmations"],
         )
+        self.assertEqual(summary["manual_confirmation_items"][0]["status"], "open")
         self.assertIn("## 今日必须人工确认事项", content)
         self.assertIn("config_version=CONFIG-VERSION-RISK", content)
 
@@ -385,11 +387,52 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertEqual(summary["strategy_config_patch"]["operation_count"], 1)
         self.assertIn("人工复核 1 个待应用策略配置补丁。", summary["operating_actions"])
         self.assertIn(
-            "人工复核待应用配置补丁：CONFIG-CHANGE-RISK path=risk.max_position_pct_per_stock old=10.0 new=8.0。",
+            "待确认：人工复核待应用配置补丁：CONFIG-CHANGE-RISK path=risk.max_position_pct_per_stock old=10.0 new=8.0。 confirmation_id=CONFIRM-CONFIG-PATCH-CONFIG-CHANGE-RISK-RISK-MAX-POSITION-PCT-PER-STOCK",
             summary["manual_confirmations"],
         )
         self.assertIn("risk.max_position_pct_per_stock", content)
         self.assertIn("CONFIG-CHANGE-RISK", content)
+
+    def test_daily_summary_marks_confirmed_manual_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-config-patch.json",
+                {
+                    "operations": [
+                        {
+                            "path": "risk.max_position_pct_per_stock",
+                            "old_value": 10.0,
+                            "new_value": 8.0,
+                            "source_change_id": "CONFIG-CHANGE-RISK",
+                        }
+                    ],
+                },
+            )
+            write_json(
+                base / "manual-confirmations.json",
+                {
+                    "confirmations": [
+                        {
+                            "id": "CONFIRM-CONFIG-PATCH-CONFIG-CHANGE-RISK-RISK-MAX-POSITION-PCT-PER-STOCK",
+                            "status": "confirmed",
+                            "confirmed_by": "lihongwei",
+                            "confirmed_at": "2026-07-08T14:00:00",
+                            "confirmation_reason": "已核对旧值、新值和来源证据。",
+                        }
+                    ]
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 11, 45, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["manual_confirmation_items"][0]["status"], "confirmed")
+        self.assertIn(
+            "已确认：人工复核待应用配置补丁：CONFIG-CHANGE-RISK path=risk.max_position_pct_per_stock old=10.0 new=8.0。 confirmation_id=CONFIRM-CONFIG-PATCH-CONFIG-CHANGE-RISK-RISK-MAX-POSITION-PCT-PER-STOCK confirmed_by=lihongwei confirmed_at=2026-07-08T14:00:00",
+            summary["manual_confirmations"],
+        )
+        self.assertIn("已确认：人工复核待应用配置补丁", content)
 
     def test_daily_summary_shows_applied_strategy_config_patch_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
