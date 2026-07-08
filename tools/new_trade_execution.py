@@ -52,6 +52,25 @@ def load_cooldown_result(cooldown_path: Path | None) -> dict[str, Any]:
     return data
 
 
+def load_strategy_health(health_path: Path | None) -> dict[str, Any]:
+    if health_path is None:
+        return {"available": False, "conclusion": "missing", "strategies": []}
+    if not health_path.exists():
+        return {"available": False, "conclusion": "missing", "path": str(health_path), "strategies": []}
+    data = json.loads(health_path.read_text(encoding="utf-8"))
+    data["available"] = True
+    return data
+
+
+def strategy_status(health: dict[str, Any], strategy: str | None) -> str | None:
+    if not strategy:
+        return None
+    for item in health.get("strategies", []) or []:
+        if item.get("strategy") == strategy:
+            return item.get("status")
+    return None
+
+
 def validate_execution_allowed(gate: dict[str, Any], user_confirmed: bool, mode: str) -> None:
     conclusion = gate.get("conclusion")
     if conclusion not in ALLOWED_GATE_CONCLUSIONS:
@@ -79,6 +98,24 @@ def validate_cooldown_allowed(
         raise ValueError("cooldown exception requires --cooldown-exception-reason")
 
 
+def validate_strategy_health_allowed(
+    health: dict[str, Any],
+    strategy: str | None,
+    side: str,
+    allow_exception: bool,
+    exception_reason: str | None,
+    user_confirmed: bool,
+) -> None:
+    if side != "buy" or strategy_status(health, strategy) != "pause_new_entries":
+        return
+    if not allow_exception:
+        raise ValueError(f"strategy {strategy} is paused by strategy health check; new buy execution is blocked")
+    if not user_confirmed:
+        raise ValueError("strategy health exception requires --user-confirmed")
+    if not exception_reason or not exception_reason.strip():
+        raise ValueError("strategy health exception requires --cooldown-exception-reason")
+
+
 def calculate_slippage_pct(execution_price: float, planned_buy_price: float | None) -> float | None:
     if not planned_buy_price:
         return None
@@ -93,9 +130,20 @@ def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     gate = load_gate_result(profile_path, plan_path, Path(args.gate) if args.gate else None)
     cooldown_check = getattr(args, "cooldown_check", None)
     cooldown = load_cooldown_result(Path(cooldown_check) if cooldown_check else None)
+    strategy_health_path = getattr(args, "strategy_health", None)
+    strategy_health = load_strategy_health(Path(strategy_health_path) if strategy_health_path else None)
+    plan_strategy = value_at(plan, "strategy.source")
     validate_execution_allowed(gate, args.user_confirmed, args.mode)
     validate_cooldown_allowed(
         cooldown,
+        args.side,
+        bool(getattr(args, "allow_cooldown_exception", False)),
+        getattr(args, "cooldown_exception_reason", None),
+        args.user_confirmed,
+    )
+    validate_strategy_health_allowed(
+        strategy_health,
+        plan_strategy,
         args.side,
         bool(getattr(args, "allow_cooldown_exception", False)),
         getattr(args, "cooldown_exception_reason", None),
@@ -122,6 +170,7 @@ def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     set_value(execution, "execution.source_trade_plan_id", value_at(plan, "trade_plan.id"))
     set_value(execution, "execution.gate_conclusion", gate.get("conclusion"))
     set_value(execution, "execution.cooldown_conclusion", cooldown.get("conclusion"))
+    set_value(execution, "execution.strategy_health_conclusion", strategy_health.get("conclusion"))
     set_value(execution, "execution.user_confirmed", args.user_confirmed)
     set_value(execution, "execution.confirmation_text", value_at(plan, "risk_check_expectation.confirmation_text"))
     set_value(execution, "execution.cooldown_exception_reason", getattr(args, "cooldown_exception_reason", None) or "")
@@ -148,6 +197,7 @@ def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     set_value(execution, "notes", args.note or [])
     set_value(execution, "gate_snapshot", gate)
     set_value(execution, "cooldown_snapshot", cooldown)
+    set_value(execution, "strategy_health_snapshot", strategy_health)
     set_value(execution, "trade_plan_snapshot", plan)
 
     output_path = build_output_path(Path(args.output_dir), execution_id, args.output)
@@ -161,6 +211,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--plan", required=True, help="Path to trade plan YAML.")
     parser.add_argument("--gate", help="Optional gate JSON from check_trade_plan_gate.py or prepare_trade_plan_from_candidate.py.")
     parser.add_argument("--cooldown-check", default="data/metadata/review-cooldown.json", help="Optional cooldown JSON from check_review_cooldown.py.")
+    parser.add_argument("--strategy-health", default="data/metadata/strategy-health.json", help="Optional strategy health JSON from check_strategy_health.py.")
     parser.add_argument("--output-dir", default="executions", help="Directory for generated execution records.")
     parser.add_argument("--output", help="Explicit output file path.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite output file if it already exists.")
@@ -193,6 +244,7 @@ def main() -> int:
     print(f"created trade execution: {output_path}")
     print(f"gate conclusion: {execution['execution']['gate_conclusion']}")
     print(f"cooldown conclusion: {execution['execution']['cooldown_conclusion']}")
+    print(f"strategy health conclusion: {execution['execution']['strategy_health_conclusion']}")
     print(f"slippage pct vs plan: {execution['order']['slippage_pct_vs_plan']}")
     print(f"price within max acceptable: {execution['order']['price_within_max_acceptable']}")
     return 0

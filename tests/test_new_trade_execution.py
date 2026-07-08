@@ -4,7 +4,7 @@ from argparse import Namespace
 from pathlib import Path
 
 from tools.complete_trade_plan import apply_completion
-from tools.new_trade_execution import create_execution, validate_cooldown_allowed, validate_execution_allowed
+from tools.new_trade_execution import create_execution, validate_cooldown_allowed, validate_execution_allowed, validate_strategy_health_allowed
 from tools.new_trade_plan import create_trade_plan, write_yaml
 from tools.risk_check import load_yaml
 
@@ -56,6 +56,7 @@ def execution_args(plan_path: Path, **overrides):
         "plan": str(plan_path),
         "gate": None,
         "cooldown_check": None,
+        "strategy_health": None,
         "output_dir": "executions",
         "output": None,
         "overwrite": False,
@@ -123,6 +124,7 @@ class NewTradeExecutionTest(unittest.TestCase):
         self.assertEqual(execution["execution"]["source_trade_plan_id"], "TP-EXEC-0001")
         self.assertEqual(execution["execution"]["gate_conclusion"], "needs_confirmation")
         self.assertEqual(execution["execution"]["cooldown_conclusion"], "missing")
+        self.assertEqual(execution["execution"]["strategy_health_conclusion"], "missing")
         self.assertEqual(execution["order"]["slippage_pct_vs_plan"], 1.0)
         self.assertTrue(execution["order"]["price_within_max_acceptable"])
         self.assertEqual(execution["trade_plan_snapshot"]["trade_plan"]["id"], "TP-EXEC-0001")
@@ -153,6 +155,43 @@ class NewTradeExecutionTest(unittest.TestCase):
 
     def test_sell_is_not_blocked_by_cooldown(self) -> None:
         validate_cooldown_allowed({"conclusion": "cooldown_required"}, "sell", False, None, False)
+
+    def test_rejects_buy_when_strategy_is_paused(self) -> None:
+        health = {"conclusion": "pause_required", "strategies": [{"strategy": "trend_strength", "status": "pause_new_entries"}]}
+        with self.assertRaisesRegex(ValueError, "strategy trend_strength"):
+            validate_strategy_health_allowed(health, "trend_strength", "buy", False, None, True)
+
+    def test_strategy_health_exception_requires_confirmation_and_reason(self) -> None:
+        health = {"conclusion": "pause_required", "strategies": [{"strategy": "trend_strength", "status": "pause_new_entries"}]}
+        with self.assertRaisesRegex(ValueError, "user-confirmed"):
+            validate_strategy_health_allowed(health, "trend_strength", "buy", True, "例外原因。", False)
+        with self.assertRaisesRegex(ValueError, "cooldown-exception-reason"):
+            validate_strategy_health_allowed(health, "trend_strength", "buy", True, "", True)
+
+    def test_strategy_health_allows_unpaused_strategy(self) -> None:
+        health = {"conclusion": "needs_review", "strategies": [{"strategy": "trend_strength", "status": "needs_review"}]}
+        validate_strategy_health_allowed(health, "trend_strength", "buy", False, None, True)
+
+    def test_records_strategy_health_exception_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plan_path = self.write_ready_plan(tmp_dir)
+            health_path = Path(tmp_dir) / "strategy-health.json"
+            health_path.write_text(
+                '{"conclusion":"pause_required","strategies":[{"strategy":"trend_strength","status":"pause_new_entries"}]}',
+                encoding="utf-8",
+            )
+
+            execution, _ = create_execution(
+                execution_args(
+                    plan_path,
+                    strategy_health=str(health_path),
+                    allow_cooldown_exception=True,
+                    cooldown_exception_reason="策略暂停期小仓位例外。",
+                )
+            )
+
+        self.assertEqual(execution["execution"]["strategy_health_conclusion"], "pause_required")
+        self.assertEqual(execution["strategy_health_snapshot"]["strategies"][0]["status"], "pause_new_entries")
 
     def test_records_cooldown_exception_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
