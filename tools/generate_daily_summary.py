@@ -188,7 +188,14 @@ def summarize_strategy_health(health: dict[str, Any] | None) -> dict[str, Any]:
     actions: list[str] = []
     for row in health.get("strategies", []) or []:
         if row.get("status") in {"pause_new_entries", "needs_review"}:
-            actions.append(f"{row.get('strategy')}: {row.get('status')}")
+            strategy = row.get("strategy")
+            status = row.get("status")
+            row_actions = row.get("actions") or []
+            if row_actions:
+                for item in row_actions:
+                    actions.append(f"{strategy}: {status} [{item.get('code')}] {item.get('message')}")
+            else:
+                actions.append(f"{strategy}: {status}")
     return {
         "available": True,
         "conclusion": health.get("conclusion") or "unknown",

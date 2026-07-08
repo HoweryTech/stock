@@ -120,6 +120,38 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("执行组合持仓日检。", summary["operating_actions"])
         self.assertIn("元数据状态：缺失", content)
 
+    def test_daily_summary_shows_strategy_health_action_reasons(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-health.json",
+                {
+                    "conclusion": "needs_review",
+                    "pause_count": 0,
+                    "needs_review_count": 1,
+                    "strategies": [
+                        {
+                            "strategy": "trend_strength",
+                            "status": "needs_review",
+                            "actions": [
+                                {
+                                    "code": "loss_making_discipline_exception",
+                                    "message": "策略 trend_strength 存在 1 笔亏损纪律例外交易，需要复查破例规则。",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 9, 30, 0))
+            content = render_summary(summary)
+
+        self.assertIn("存在需复核的策略。", summary["operating_actions"])
+        self.assertEqual(summary["strategy_health"]["needs_review_count"], 1)
+        self.assertIn("loss_making_discipline_exception", summary["strategy_health"]["actions"][0])
+        self.assertIn("亏损纪律例外交易", content)
+
 
 if __name__ == "__main__":
     unittest.main()
