@@ -115,7 +115,11 @@ def build_change_drafts(tasks_doc: dict[str, Any], generated_at: datetime | None
                     "required": True,
                     "approved_by": "",
                     "approved_at": None,
+                    "rejected_by": "",
+                    "rejected_at": None,
+                    "rejected_reason": "",
                 },
+                "history": [],
             }
         )
     return {
