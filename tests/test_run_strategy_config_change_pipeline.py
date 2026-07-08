@@ -24,6 +24,7 @@ def args(tmp_dir: str, *, apply: bool = False, applied_by: str | None = None) ->
         backup_dir=str(base / "backups"),
         audit_output=str(base / "strategy-config-patch.apply.json"),
         applied_by=applied_by,
+        manual_confirmations=str(base / "manual-confirmations.json"),
         regression_output=str(base / "strategy-config-regression.json"),
         metadata_output=str(base / "strategy-config-change-pipeline.json"),
         json=False,
@@ -57,6 +58,20 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def manual_confirmations_doc() -> dict:
+    return {
+        "confirmations": [
+            {
+                "id": "CONFIRM-CONFIG-PATCH-CONFIG-CHANGE-RISK-RISK-MAX-POSITION-PCT-PER-STOCK",
+                "status": "confirmed",
+                "confirmed_by": "lihongwei",
+                "confirmed_at": "2026-07-08T14:00:00",
+                "confirmation_reason": "已核对旧值、新值和来源证据。",
+            }
+        ]
+    }
+
+
 class RunStrategyConfigChangePipelineTest(unittest.TestCase):
     def test_runs_check_and_patch_without_apply_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -78,14 +93,26 @@ class RunStrategyConfigChangePipelineTest(unittest.TestCase):
             base = Path(tmp_dir)
             write_yaml(base / "investment-profile.yaml", load_yaml(ROOT / "config/investment-profile.example.yaml"), overwrite=True)
             write_json(base / "strategy-config-changes.json", changes_doc())
+            write_json(base / "manual-confirmations.json", manual_confirmations_doc())
 
             metadata = run_pipeline(args(tmp_dir, apply=True, applied_by="lihongwei"))
             profile = load_yaml(base / "investment-profile.yaml")
 
         self.assertFalse(metadata["steps"]["apply"]["skipped"])
+        self.assertEqual(metadata["steps"]["manual_confirmations"]["conclusion"], "pass")
+        self.assertEqual(metadata["steps"]["manual_confirmations"]["confirmed_count"], 1)
         self.assertEqual(metadata["steps"]["apply"]["operation_count"], 1)
         self.assertEqual(metadata["steps"]["regression"]["conclusion"], "pass")
         self.assertEqual(profile["risk"]["max_position_pct_per_stock"], 8.0)
+
+    def test_blocks_apply_without_manual_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_yaml(base / "investment-profile.yaml", load_yaml(ROOT / "config/investment-profile.example.yaml"), overwrite=True)
+            write_json(base / "strategy-config-changes.json", changes_doc())
+
+            with self.assertRaisesRegex(ValueError, "manual confirmation required"):
+                run_pipeline(args(tmp_dir, apply=True, applied_by="lihongwei"))
 
     def test_blocks_apply_without_actor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

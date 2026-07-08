@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -37,6 +38,49 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def load_json_if_exists(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"confirmations": []}
+    return load_json(path)
+
+
+def slug(value: Any) -> str:
+    normalized = re.sub(r"[^A-Z0-9]+", "-", str(value or "UNKNOWN").upper()).strip("-")
+    return normalized or "UNKNOWN"
+
+
+def patch_confirmation_id(operation: dict[str, Any]) -> str:
+    return f"CONFIRM-CONFIG-PATCH-{slug(operation.get('source_change_id'))}-{slug(operation.get('path'))}"
+
+
+def check_patch_manual_confirmations(patch: dict[str, Any], confirmations_doc: dict[str, Any]) -> dict[str, Any]:
+    records = {item.get("id"): item for item in confirmations_doc.get("confirmations", []) or [] if item.get("id")}
+    required: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for operation in patch.get("operations", []) or []:
+        confirmation_id = patch_confirmation_id(operation)
+        record = records.get(confirmation_id) or {}
+        item = {
+            "confirmation_id": confirmation_id,
+            "source_change_id": operation.get("source_change_id"),
+            "path": operation.get("path"),
+            "status": record.get("status") or "open",
+            "confirmed_by": record.get("confirmed_by") or "",
+            "confirmed_at": record.get("confirmed_at"),
+        }
+        required.append(item)
+        if item["status"] != "confirmed":
+            missing.append(item)
+    return {
+        "required_count": len(required),
+        "confirmed_count": len(required) - len(missing),
+        "missing_count": len(missing),
+        "required": required,
+        "missing": missing,
+        "conclusion": "pass" if not missing else "blocked",
+    }
+
+
 def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     if args.apply and not args.applied_by:
         raise ValueError("--applied-by is required when --apply is set")
@@ -56,9 +100,14 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     audit = None
     regression = None
+    manual_confirmation_check = {"conclusion": "skipped", "required_count": 0, "confirmed_count": 0, "missing_count": 0, "required": [], "missing": []}
     if args.apply:
         if check_result["conclusion"] != "pass":
             raise ValueError("cannot apply config patch when change check did not pass")
+        manual_confirmation_check = check_patch_manual_confirmations(patch or {"operations": []}, load_json_if_exists(Path(args.manual_confirmations)))
+        if manual_confirmation_check["conclusion"] != "pass":
+            missing_ids = ", ".join(item["confirmation_id"] for item in manual_confirmation_check["missing"])
+            raise ValueError(f"manual confirmation required before applying config patch: {missing_ids}")
         audit = apply_patch_file(
             profile_path,
             Path(args.patch_json_output),
@@ -92,6 +141,13 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 "operation_count": audit["operation_count"] if audit else 0,
                 "skipped": audit is None,
             },
+            "manual_confirmations": {
+                "input": args.manual_confirmations,
+                "conclusion": manual_confirmation_check["conclusion"],
+                "required_count": manual_confirmation_check["required_count"],
+                "confirmed_count": manual_confirmation_check["confirmed_count"],
+                "missing_count": manual_confirmation_check["missing_count"],
+            },
             "regression": {
                 "output": args.regression_output if regression else None,
                 "conclusion": regression["conclusion"] if regression else "skipped",
@@ -116,6 +172,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backup-dir", default="data/backups", help="Directory for profile backups when applying.")
     parser.add_argument("--audit-output", default="data/metadata/strategy-config-patch.apply.json", help="Output patch apply audit JSON.")
     parser.add_argument("--applied-by", help="Person applying the patch. Required with --apply.")
+    parser.add_argument("--manual-confirmations", default="data/metadata/manual-confirmations.json", help="Manual confirmation record JSON required before applying patch operations.")
     parser.add_argument("--regression-output", default="data/metadata/strategy-config-regression.json", help="Output regression check JSON.")
     parser.add_argument("--metadata-output", default="data/metadata/strategy-config-change-pipeline.json", help="Output pipeline metadata JSON.")
     parser.add_argument("--json", action="store_true", help="Print pipeline metadata as JSON.")
