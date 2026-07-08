@@ -25,6 +25,7 @@ def args(tmp_dir: str) -> Namespace:
         cooldown_check=str(base / "review-cooldown.json"),
         strategy_health=str(base / "strategy-health.json"),
         strategy_review_tasks=str(base / "strategy-review-tasks.json"),
+        strategy_config_changes=str(base / "strategy-config-changes.json"),
         output=str(base / "daily-summary.md"),
         json_output=None,
         json=False,
@@ -196,6 +197,43 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("处理 1 个未完成策略复核任务。", summary["operating_actions"])
         self.assertIn("复查 1 个暂缓策略复核任务。", summary["operating_actions"])
         self.assertIn("STRATEGY-REVIEW-TREND-STRENGTH-NEEDS-REVIEW", content)
+
+    def test_daily_summary_shows_pending_strategy_config_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-config-changes.json",
+                {
+                    "draft_count": 2,
+                    "drafts": [
+                        {
+                            "id": "CONFIG-CHANGE-TREND",
+                            "source_task_id": "STRATEGY-REVIEW-TREND",
+                            "strategy": "trend_strength",
+                            "status": "draft",
+                            "change_items": [{"path": "strategies.trend_strength.enabled"}],
+                            "approval": {"required": True, "approved_by": "", "approved_at": None},
+                        },
+                        {
+                            "id": "CONFIG-CHANGE-VALUE",
+                            "source_task_id": "STRATEGY-REVIEW-VALUE",
+                            "strategy": "value_quality",
+                            "status": "draft",
+                            "change_items": [{"path": "strategies.value_quality.screening"}],
+                            "approval": {"required": True, "approved_by": "lihongwei", "approved_at": "2026-07-08T12:00:00"},
+                        },
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 11, 0, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["strategy_config_changes"]["draft_count"], 2)
+        self.assertEqual(summary["strategy_config_changes"]["pending_approval_count"], 1)
+        self.assertIn("审批或驳回 1 个策略配置变更草稿。", summary["operating_actions"])
+        self.assertIn("CONFIG-CHANGE-TREND", content)
+        self.assertNotIn("CONFIG-CHANGE-VALUE strategy=value_quality", content)
 
 
 if __name__ == "__main__":
