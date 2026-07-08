@@ -26,6 +26,7 @@ def args(tmp_dir: str) -> Namespace:
         strategy_health=str(base / "strategy-health.json"),
         strategy_review_tasks=str(base / "strategy-review-tasks.json"),
         strategy_config_changes=str(base / "strategy-config-changes.json"),
+        strategy_config_patch=str(base / "strategy-config-patch.json"),
         output=str(base / "daily-summary.md"),
         json_output=None,
         json=False,
@@ -246,6 +247,33 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("已审批策略配置变更：1", content)
         self.assertIn("已驳回策略配置变更：1", content)
         self.assertNotIn("CONFIG-CHANGE-VALUE strategy=value_quality", content)
+
+    def test_daily_summary_shows_pending_strategy_config_patch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-config-patch.json",
+                {
+                    "operation_count": 1,
+                    "operations": [
+                        {
+                            "op": "replace",
+                            "path": "risk.max_position_pct_per_stock",
+                            "old_value": 10.0,
+                            "new_value": 8.0,
+                            "source_change_id": "CONFIG-CHANGE-RISK",
+                        }
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 11, 30, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["strategy_config_patch"]["operation_count"], 1)
+        self.assertIn("人工复核 1 个待应用策略配置补丁。", summary["operating_actions"])
+        self.assertIn("risk.max_position_pct_per_stock", content)
+        self.assertIn("CONFIG-CHANGE-RISK", content)
 
 
 if __name__ == "__main__":
