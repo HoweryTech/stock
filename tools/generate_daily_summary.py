@@ -184,7 +184,16 @@ def summarize_cooldown(cooldown: dict[str, Any] | None) -> dict[str, Any]:
 
 def summarize_strategy_health(health: dict[str, Any] | None) -> dict[str, Any]:
     if not health:
-        return {"available": False, "conclusion": "missing", "pause_count": 0, "needs_review_count": 0, "actions": []}
+        return {
+            "available": False,
+            "conclusion": "missing",
+            "pause_count": 0,
+            "needs_review_count": 0,
+            "config_version_count": 0,
+            "needs_review_config_version_count": 0,
+            "actions": [],
+            "config_version_actions": [],
+        }
     actions: list[str] = []
     for row in health.get("strategies", []) or []:
         if row.get("status") in {"pause_new_entries", "needs_review"}:
@@ -196,32 +205,61 @@ def summarize_strategy_health(health: dict[str, Any] | None) -> dict[str, Any]:
                     actions.append(f"{strategy}: {status} [{item.get('code')}] {item.get('message')}")
             else:
                 actions.append(f"{strategy}: {status}")
+    config_version_actions: list[str] = []
+    for row in health.get("config_versions", []) or []:
+        if row.get("status") == "needs_review":
+            version_id = row.get("version_id")
+            status = row.get("status")
+            row_actions = row.get("actions") or []
+            if row_actions:
+                for item in row_actions:
+                    config_version_actions.append(f"{version_id}: {status} [{item.get('code')}] {item.get('message')}")
+            else:
+                config_version_actions.append(f"{version_id}: {status}")
     return {
         "available": True,
         "conclusion": health.get("conclusion") or "unknown",
         "pause_count": health.get("pause_count", 0),
         "needs_review_count": health.get("needs_review_count", 0),
+        "config_version_count": health.get("config_version_count", 0),
+        "needs_review_config_version_count": health.get("needs_review_config_version_count", 0),
         "actions": actions,
+        "config_version_actions": config_version_actions,
     }
 
 
 def summarize_strategy_review_tasks(tasks_doc: dict[str, Any] | None) -> dict[str, Any]:
     if not tasks_doc:
-        return {"available": False, "task_count": 0, "open_task_count": 0, "resolved_task_count": 0, "deferred_task_count": 0, "open_tasks": []}
+        return {
+            "available": False,
+            "task_count": 0,
+            "open_task_count": 0,
+            "open_strategy_task_count": 0,
+            "open_config_version_task_count": 0,
+            "resolved_task_count": 0,
+            "deferred_task_count": 0,
+            "open_tasks": [],
+        }
     tasks = tasks_doc.get("tasks", []) or []
     open_tasks = [task for task in tasks if (task.get("task_status") or "open") == "open"]
+    open_config_version_tasks = [task for task in open_tasks if task.get("task_type") == "config_version"]
+    open_strategy_tasks = [task for task in open_tasks if task.get("task_type") != "config_version"]
     resolved_count = sum(1 for task in tasks if task.get("task_status") == "resolved")
     deferred_count = sum(1 for task in tasks if task.get("task_status") == "deferred")
     return {
         "available": True,
         "task_count": len(tasks),
         "open_task_count": len(open_tasks),
+        "open_strategy_task_count": len(open_strategy_tasks),
+        "open_config_version_task_count": len(open_config_version_tasks),
         "resolved_task_count": resolved_count,
         "deferred_task_count": deferred_count,
         "open_tasks": [
             {
                 "id": task.get("id"),
+                "task_type": task.get("task_type") or "strategy",
                 "strategy": task.get("strategy"),
+                "config_version_id": task.get("config_version_id"),
                 "status": task.get("status"),
                 "priority": task.get("priority"),
             }
@@ -232,7 +270,16 @@ def summarize_strategy_review_tasks(tasks_doc: dict[str, Any] | None) -> dict[st
 
 def summarize_strategy_config_changes(changes_doc: dict[str, Any] | None) -> dict[str, Any]:
     if not changes_doc:
-        return {"available": False, "draft_count": 0, "pending_approval_count": 0, "approved_count": 0, "rejected_count": 0, "drafts": []}
+        return {
+            "available": False,
+            "draft_count": 0,
+            "pending_approval_count": 0,
+            "pending_strategy_change_count": 0,
+            "pending_config_version_change_count": 0,
+            "approved_count": 0,
+            "rejected_count": 0,
+            "drafts": [],
+        }
     drafts = changes_doc.get("drafts", []) or []
     pending = [
         draft
@@ -243,16 +290,22 @@ def summarize_strategy_config_changes(changes_doc: dict[str, Any] | None) -> dic
     ]
     approved_count = sum(1 for draft in drafts if draft.get("status") == "approved")
     rejected_count = sum(1 for draft in drafts if draft.get("status") == "rejected")
+    pending_config_version_count = sum(1 for draft in pending if draft.get("source_task_type") == "config_version")
+    pending_strategy_count = sum(1 for draft in pending if draft.get("source_task_type") != "config_version")
     return {
         "available": True,
         "draft_count": len(drafts),
         "pending_approval_count": len(pending),
+        "pending_strategy_change_count": pending_strategy_count,
+        "pending_config_version_change_count": pending_config_version_count,
         "approved_count": approved_count,
         "rejected_count": rejected_count,
         "drafts": [
             {
                 "id": draft.get("id"),
+                "source_task_type": draft.get("source_task_type") or "strategy",
                 "strategy": draft.get("strategy"),
+                "config_version_id": draft.get("config_version_id"),
                 "source_task_id": draft.get("source_task_id"),
                 "change_count": len(draft.get("change_items", []) or []),
             }
@@ -414,14 +467,22 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
         actions.append("执行策略健康检查。")
     elif strategy_health["conclusion"] == "pause_required":
         actions.append("存在需暂停新开仓的策略。")
-    elif strategy_health["conclusion"] == "needs_review":
+    elif strategy_health["conclusion"] == "needs_review" and (
+        strategy_health["needs_review_count"] or not strategy_health["needs_review_config_version_count"]
+    ):
         actions.append("存在需复核的策略。")
-    if strategy_review_tasks["open_task_count"]:
-        actions.append(f"处理 {strategy_review_tasks['open_task_count']} 个未完成策略复核任务。")
+    if strategy_health["needs_review_config_version_count"]:
+        actions.append(f"复核 {strategy_health['needs_review_config_version_count']} 个表现异常的策略配置版本。")
+    if strategy_review_tasks["open_strategy_task_count"]:
+        actions.append(f"处理 {strategy_review_tasks['open_strategy_task_count']} 个未完成策略复核任务。")
+    if strategy_review_tasks["open_config_version_task_count"]:
+        actions.append(f"处理 {strategy_review_tasks['open_config_version_task_count']} 个未完成配置版本复核任务。")
     if strategy_review_tasks["deferred_task_count"]:
         actions.append(f"复查 {strategy_review_tasks['deferred_task_count']} 个暂缓策略复核任务。")
-    if strategy_config_changes["pending_approval_count"]:
-        actions.append(f"审批或驳回 {strategy_config_changes['pending_approval_count']} 个策略配置变更草稿。")
+    if strategy_config_changes["pending_strategy_change_count"]:
+        actions.append(f"审批或驳回 {strategy_config_changes['pending_strategy_change_count']} 个策略配置变更草稿。")
+    if strategy_config_changes["pending_config_version_change_count"]:
+        actions.append(f"审批或驳回 {strategy_config_changes['pending_config_version_change_count']} 个配置版本变更草稿。")
     if strategy_config_patch["operation_count"]:
         actions.append(f"人工复核 {strategy_config_patch['operation_count']} 个待应用策略配置补丁。")
     if strategy_config_regression["conclusion"] == "blocked":
@@ -547,12 +608,18 @@ def render_summary(summary: dict[str, Any]) -> str:
             f"- 策略健康结论：{strategy_health['conclusion']}",
             f"- 暂停新开仓策略数：{strategy_health['pause_count']}",
             f"- 需复核策略数：{strategy_health['needs_review_count']}",
+            f"- 配置版本数量：{strategy_health['config_version_count']}",
+            f"- 需复核配置版本数：{strategy_health['needs_review_config_version_count']}",
             f"- 策略复核任务：{'已读取' if strategy_review_tasks['available'] else '缺失'}",
-            f"- 未完成策略复核任务：{strategy_review_tasks['open_task_count']}",
+            f"- 未完成复核任务：{strategy_review_tasks['open_task_count']}",
+            f"- 未完成策略复核任务：{strategy_review_tasks['open_strategy_task_count']}",
+            f"- 未完成配置版本复核任务：{strategy_review_tasks['open_config_version_task_count']}",
             f"- 已解决策略复核任务：{strategy_review_tasks['resolved_task_count']}",
             f"- 暂缓策略复核任务：{strategy_review_tasks['deferred_task_count']}",
             f"- 策略配置变更草稿：{'已读取' if strategy_config_changes['available'] else '缺失'}",
-            f"- 待审批策略配置变更：{strategy_config_changes['pending_approval_count']}",
+            f"- 待审批配置变更：{strategy_config_changes['pending_approval_count']}",
+            f"- 待审批策略配置变更：{strategy_config_changes['pending_strategy_change_count']}",
+            f"- 待审批配置版本变更：{strategy_config_changes['pending_config_version_change_count']}",
             f"- 已审批策略配置变更：{strategy_config_changes['approved_count']}",
             f"- 已驳回策略配置变更：{strategy_config_changes['rejected_count']}",
             f"- 待应用配置补丁：{'已读取' if strategy_config_patch['available'] else '缺失'}",
@@ -594,15 +661,26 @@ def render_summary(summary: dict[str, Any]) -> str:
         for item in strategy_health["actions"]:
             lines.append(f"- {item}")
         lines.append("")
+    if strategy_health["config_version_actions"]:
+        lines.append("配置版本健康动作：")
+        for item in strategy_health["config_version_actions"]:
+            lines.append(f"- {item}")
+        lines.append("")
     if strategy_review_tasks["open_tasks"]:
         lines.append("未完成策略复核任务：")
         for item in strategy_review_tasks["open_tasks"]:
-            lines.append(f"- {item['id']} strategy={item['strategy']} status={item['status']} priority={item['priority']}")
+            if item["task_type"] == "config_version":
+                lines.append(f"- {item['id']} config_version={item['config_version_id']} status={item['status']} priority={item['priority']}")
+            else:
+                lines.append(f"- {item['id']} strategy={item['strategy']} status={item['status']} priority={item['priority']}")
         lines.append("")
     if strategy_config_changes["drafts"]:
         lines.append("待审批策略配置变更：")
         for item in strategy_config_changes["drafts"]:
-            lines.append(f"- {item['id']} strategy={item['strategy']} source_task={item['source_task_id']} changes={item['change_count']}")
+            if item["source_task_type"] == "config_version":
+                lines.append(f"- {item['id']} config_version={item['config_version_id']} source_task={item['source_task_id']} changes={item['change_count']}")
+            else:
+                lines.append(f"- {item['id']} strategy={item['strategy']} source_task={item['source_task_id']} changes={item['change_count']}")
         lines.append("")
     if strategy_config_patch["operations"]:
         lines.append("待应用配置补丁：")

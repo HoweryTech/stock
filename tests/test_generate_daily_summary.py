@@ -159,6 +159,42 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("loss_making_discipline_exception", summary["strategy_health"]["actions"][0])
         self.assertIn("亏损纪律例外交易", content)
 
+    def test_daily_summary_shows_config_version_health_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-health.json",
+                {
+                    "conclusion": "needs_review",
+                    "pause_count": 0,
+                    "needs_review_count": 0,
+                    "config_version_count": 1,
+                    "needs_review_config_version_count": 1,
+                    "strategies": [],
+                    "config_versions": [
+                        {
+                            "version_id": "CONFIG-VERSION-RISK",
+                            "status": "needs_review",
+                            "actions": [
+                                {
+                                    "code": "config_version_negative_portfolio_contribution",
+                                    "message": "配置版本 CONFIG-VERSION-RISK 组合收益贡献为 -0.20%。",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 9, 45, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["strategy_health"]["needs_review_config_version_count"], 1)
+        self.assertNotIn("存在需复核的策略。", summary["operating_actions"])
+        self.assertIn("复核 1 个表现异常的策略配置版本。", summary["operating_actions"])
+        self.assertIn("配置版本健康动作", content)
+        self.assertIn("CONFIG-VERSION-RISK", content)
+
     def test_daily_summary_shows_strategy_review_task_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
@@ -197,11 +233,43 @@ class GenerateDailySummaryTest(unittest.TestCase):
 
         self.assertEqual(summary["strategy_review_tasks"]["task_count"], 3)
         self.assertEqual(summary["strategy_review_tasks"]["open_task_count"], 1)
+        self.assertEqual(summary["strategy_review_tasks"]["open_strategy_task_count"], 1)
         self.assertEqual(summary["strategy_review_tasks"]["deferred_task_count"], 1)
         self.assertEqual(summary["strategy_review_tasks"]["resolved_task_count"], 1)
         self.assertIn("处理 1 个未完成策略复核任务。", summary["operating_actions"])
         self.assertIn("复查 1 个暂缓策略复核任务。", summary["operating_actions"])
         self.assertIn("STRATEGY-REVIEW-TREND-STRENGTH-NEEDS-REVIEW", content)
+
+    def test_daily_summary_shows_config_version_review_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-review-tasks.json",
+                {
+                    "task_count": 1,
+                    "tasks": [
+                        {
+                            "id": "CONFIG-VERSION-REVIEW-CONFIG-VERSION-RISK",
+                            "task_type": "config_version",
+                            "strategy": None,
+                            "config_version_id": "CONFIG-VERSION-RISK",
+                            "status": "needs_review",
+                            "priority": "medium",
+                            "task_status": "open",
+                        }
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 10, 45, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["strategy_review_tasks"]["open_task_count"], 1)
+        self.assertEqual(summary["strategy_review_tasks"]["open_strategy_task_count"], 0)
+        self.assertEqual(summary["strategy_review_tasks"]["open_config_version_task_count"], 1)
+        self.assertNotIn("处理 1 个未完成策略复核任务。", summary["operating_actions"])
+        self.assertIn("处理 1 个未完成配置版本复核任务。", summary["operating_actions"])
+        self.assertIn("config_version=CONFIG-VERSION-RISK", content)
 
     def test_daily_summary_shows_pending_strategy_config_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -244,6 +312,7 @@ class GenerateDailySummaryTest(unittest.TestCase):
 
         self.assertEqual(summary["strategy_config_changes"]["draft_count"], 3)
         self.assertEqual(summary["strategy_config_changes"]["pending_approval_count"], 1)
+        self.assertEqual(summary["strategy_config_changes"]["pending_strategy_change_count"], 1)
         self.assertEqual(summary["strategy_config_changes"]["approved_count"], 1)
         self.assertEqual(summary["strategy_config_changes"]["rejected_count"], 1)
         self.assertIn("审批或驳回 1 个策略配置变更草稿。", summary["operating_actions"])
@@ -251,6 +320,36 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("已审批策略配置变更：1", content)
         self.assertIn("已驳回策略配置变更：1", content)
         self.assertNotIn("CONFIG-CHANGE-VALUE strategy=value_quality", content)
+
+    def test_daily_summary_shows_pending_config_version_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-config-changes.json",
+                {
+                    "drafts": [
+                        {
+                            "id": "CONFIG-CHANGE-CONFIG-VERSION-RISK",
+                            "source_task_type": "config_version",
+                            "source_task_id": "CONFIG-VERSION-REVIEW-CONFIG-VERSION-RISK",
+                            "strategy": "CONFIG_VERSION",
+                            "config_version_id": "CONFIG-VERSION-RISK",
+                            "status": "draft",
+                            "change_items": [{"path": "risk.max_total_position_pct"}],
+                            "approval": {"required": True, "approved_by": "", "approved_at": None},
+                        }
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 11, 15, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["strategy_config_changes"]["pending_config_version_change_count"], 1)
+        self.assertEqual(summary["strategy_config_changes"]["pending_strategy_change_count"], 0)
+        self.assertNotIn("审批或驳回 1 个策略配置变更草稿。", summary["operating_actions"])
+        self.assertIn("审批或驳回 1 个配置版本变更草稿。", summary["operating_actions"])
+        self.assertIn("config_version=CONFIG-VERSION-RISK", content)
 
     def test_daily_summary_shows_pending_strategy_config_patch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
