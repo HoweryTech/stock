@@ -184,12 +184,16 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertEqual(summary["exit_executions"]["count"], 1)
         self.assertEqual(summary["exit_executions"]["requires_confirmation_count"], 1)
         self.assertEqual(summary["exit_executions"]["missing_confirmation_count"], 1)
+        self.assertEqual(summary["exit_executions"]["blocked_count"], 1)
+        self.assertIn("修正 1 笔阻断级卖出执行记录。", summary["operating_actions"])
         self.assertIn("修正 1 笔缺少确认快照的卖出执行记录。", summary["operating_actions"])
         self.assertIn(
             "待确认：补齐卖出执行确认记录：EXITEXEC-SUMMARY-0001 stock=600000 mode=real check=needs_review。 confirmation_id=CONFIRM-EXIT-EXEC-SUMMARY-0001",
             summary["manual_confirmations"],
         )
         self.assertIn("缺少确认快照卖出执行：1", content)
+        self.assertIn("阻断级卖出执行：1", content)
+        self.assertIn("execution_check=blocked", content)
         self.assertIn("EXITEXEC-SUMMARY-0001", content)
 
     def test_daily_summary_shows_strategy_health_action_reasons(self) -> None:

@@ -13,9 +13,11 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.check_exit_execution import check_exit_execution
     from tools.check_trade_review_quality import check_trade_review_quality
     from tools.risk_check import load_yaml, value_at
 except ModuleNotFoundError:
+    from check_exit_execution import check_exit_execution
     from check_trade_review_quality import check_trade_review_quality
     from risk_check import load_yaml, value_at
 
@@ -128,6 +130,7 @@ def summarize_exit_executions(executions: list[dict[str, Any]]) -> dict[str, Any
     missing_confirmation_count = 0
     for item in executions:
         data = item["data"]
+        execution_check = check_exit_execution(data)
         confirmation_status = value_at(data, "confirmation_snapshot.status") or "missing"
         exit_check = value_at(data, "execution.exit_check_conclusion")
         mode = value_at(data, "execution.mode")
@@ -146,6 +149,9 @@ def summarize_exit_executions(executions: list[dict[str, Any]]) -> dict[str, Any
                 "confirmation_status": confirmation_status,
                 "requires_confirmation": requires_confirmation,
                 "missing_confirmation": missing_confirmation,
+                "execution_check_conclusion": execution_check["conclusion"],
+                "execution_check_blocker_count": len(execution_check["blockers"]),
+                "execution_check_warning_count": len(execution_check["warnings"]),
                 "trade_return_pct": value_at(data, "result_estimate.trade_return_pct"),
                 "portfolio_return_pct": value_at(data, "result_estimate.portfolio_return_pct"),
             }
@@ -154,6 +160,8 @@ def summarize_exit_executions(executions: list[dict[str, Any]]) -> dict[str, Any
         "count": len(rows),
         "requires_confirmation_count": sum(1 for row in rows if row["requires_confirmation"]),
         "missing_confirmation_count": missing_confirmation_count,
+        "blocked_count": sum(1 for row in rows if row["execution_check_conclusion"] == "blocked"),
+        "needs_review_count": sum(1 for row in rows if row["execution_check_conclusion"] == "needs_review"),
         "rows": rows,
     }
 
@@ -544,6 +552,8 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
         actions.append(f"处理 {len(urgent_exits)} 个紧急退出计划。")
     if trade_executions["missing_confirmation_count"]:
         actions.append(f"修正 {trade_executions['missing_confirmation_count']} 笔缺少确认快照的交易执行记录。")
+    if exit_executions["blocked_count"]:
+        actions.append(f"修正 {exit_executions['blocked_count']} 笔阻断级卖出执行记录。")
     if exit_executions["missing_confirmation_count"]:
         actions.append(f"修正 {exit_executions['missing_confirmation_count']} 笔缺少确认快照的卖出执行记录。")
     if reviews["draft_count"]:
@@ -848,6 +858,8 @@ def render_summary(summary: dict[str, Any]) -> str:
         f"- 需确认交易执行：{trade_executions['requires_confirmation_count']}",
         f"- 缺少确认快照交易执行：{trade_executions['missing_confirmation_count']}",
         f"- 卖出执行数量：{executions['count']}",
+        f"- 阻断级卖出执行：{executions['blocked_count']}",
+        f"- 需复核卖出执行：{executions['needs_review_count']}",
         f"- 需确认卖出执行：{executions['requires_confirmation_count']}",
         f"- 缺少确认快照卖出执行：{executions['missing_confirmation_count']}",
         "",
@@ -869,7 +881,7 @@ def render_summary(summary: dict[str, Any]) -> str:
         lines.append("卖出执行：")
         for row in executions["rows"]:
             lines.append(
-                f"- {row['id']} {row['stock']} mode={row['mode']} check={row['exit_check']} confirmation={row['confirmation_status']} trade_return={row['trade_return_pct']}% portfolio={row['portfolio_return_pct']}%"
+                f"- {row['id']} {row['stock']} mode={row['mode']} check={row['exit_check']} execution_check={row['execution_check_conclusion']} confirmation={row['confirmation_status']} trade_return={row['trade_return_pct']}% portfolio={row['portfolio_return_pct']}%"
             )
         lines.append("")
 
