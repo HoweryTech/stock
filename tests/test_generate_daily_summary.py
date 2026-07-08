@@ -28,6 +28,7 @@ def args(tmp_dir: str) -> Namespace:
         strategy_config_changes=str(base / "strategy-config-changes.json"),
         strategy_config_patch=str(base / "strategy-config-patch.json"),
         strategy_config_patch_audit=str(base / "strategy-config-patch.apply.json"),
+        strategy_config_regression=str(base / "strategy-config-regression.json"),
         output=str(base / "daily-summary.md"),
         json_output=None,
         json=False,
@@ -306,6 +307,37 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("已应用配置操作数：1", content)
         self.assertIn("配置应用人：lihongwei", content)
         self.assertIn("data/backups/investment-profile.20260708-150000.yaml", content)
+
+    def test_daily_summary_shows_strategy_config_regression_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(base / "strategy-config-regression.json", {"conclusion": "pass", "blockers": [], "warnings": []})
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 16, 30, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["strategy_config_regression"]["conclusion"], "pass")
+        self.assertEqual(summary["strategy_config_regression"]["blocker_count"], 0)
+        self.assertIn("配置回归结论：pass", content)
+
+    def test_daily_summary_prioritizes_blocked_strategy_config_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-config-regression.json",
+                {
+                    "conclusion": "blocked",
+                    "blockers": [{"code": "risk_field_out_of_safe_range", "message": "风险字段超限。"}],
+                    "warnings": [],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 16, 45, 0))
+            content = render_summary(summary)
+
+        self.assertIn("配置应用后回归检查阻断，先回滚或修复配置。", summary["operating_actions"])
+        self.assertEqual(summary["strategy_config_regression"]["blocker_count"], 1)
+        self.assertIn("[risk_field_out_of_safe_range] 风险字段超限。", content)
 
 
 if __name__ == "__main__":
