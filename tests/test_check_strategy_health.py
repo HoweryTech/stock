@@ -71,6 +71,40 @@ class CheckStrategyHealthTest(unittest.TestCase):
         self.assertEqual(result["strategies"][0]["status"], "healthy")
         self.assertTrue(any(item["code"] == "insufficient_review_sample" for item in result["strategies"][0]["actions"]))
 
+    def test_marks_loss_making_discipline_exception_as_needs_review(self) -> None:
+        analysis = {
+            "by_strategy": {
+                "trend_strength": {
+                    "count": 3,
+                    "win_count": 2,
+                    "loss_count": 1,
+                    "win_rate_pct": 66.6667,
+                    "avg_trade_return_pct": 0.8,
+                    "total_portfolio_return_pct": 0.2,
+                }
+            },
+            "discipline": {
+                "exceptions": [
+                    {
+                        "review_id": "TR-EXCEPTION",
+                        "strategy": "trend_strength",
+                        "trade_return_pct": -2.0,
+                        "portfolio_return_pct": -0.1,
+                        "exception_reason": "策略暂停期小仓位例外。",
+                    }
+                ]
+            },
+        }
+
+        result = check_strategy_health(analysis, {"conclusion": "normal", "threshold": 3, "strategy_losing_streaks": {}})
+        content = render_health(result)
+
+        self.assertEqual(result["conclusion"], "needs_review")
+        self.assertEqual(result["strategies"][0]["status"], "needs_review")
+        self.assertEqual(result["strategies"][0]["discipline_exception_loss_count"], 1)
+        self.assertTrue(any(item["code"] == "loss_making_discipline_exception" for item in result["strategies"][0]["actions"]))
+        self.assertIn("亏损纪律例外交易", content)
+
 
 if __name__ == "__main__":
     unittest.main()

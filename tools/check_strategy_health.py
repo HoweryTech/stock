@@ -18,10 +18,19 @@ def load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def is_loss_making_exception(item: dict[str, Any], strategy: str) -> bool:
+    if item.get("strategy") != strategy:
+        return False
+    trade_return = item.get("trade_return_pct")
+    portfolio_return = item.get("portfolio_return_pct")
+    return (trade_return is not None and trade_return < 0) or (portfolio_return is not None and portfolio_return < 0)
+
+
 def classify_strategy(
     strategy: str,
     stats: dict[str, Any],
     cooldown: dict[str, Any],
+    discipline: dict[str, Any],
     *,
     min_trades: int,
     min_win_rate_pct: float,
@@ -33,6 +42,11 @@ def classify_strategy(
     avg_return = stats.get("avg_trade_return_pct")
     portfolio_return = stats.get("total_portfolio_return_pct")
     strategy_streaks = cooldown.get("strategy_losing_streaks") or {}
+    exception_losses = [
+        item
+        for item in discipline.get("exceptions", [])
+        if is_loss_making_exception(item, strategy)
+    ]
 
     if strategy_streaks.get(strategy, 0) >= int(cooldown.get("threshold") or 0) and cooldown.get("conclusion") == "cooldown_required":
         actions.append(
@@ -69,10 +83,17 @@ def classify_strategy(
                 "message": f"策略 {strategy} 组合收益贡献为 {portfolio_return:.2f}%。",
             }
         )
+    if exception_losses:
+        actions.append(
+            {
+                "code": "loss_making_discipline_exception",
+                "message": f"策略 {strategy} 存在 {len(exception_losses)} 笔亏损纪律例外交易，需要复查破例规则。",
+            }
+        )
 
     if any(item["code"] == "strategy_cooldown_required" for item in actions):
         status = "pause_new_entries"
-    elif any(item["code"] in {"low_win_rate", "low_average_return", "negative_portfolio_contribution"} for item in actions):
+    elif any(item["code"] in {"low_win_rate", "low_average_return", "negative_portfolio_contribution", "loss_making_discipline_exception"} for item in actions):
         status = "needs_review"
     else:
         status = "healthy"
@@ -81,6 +102,7 @@ def classify_strategy(
         "strategy": strategy,
         "status": status,
         "stats": stats,
+        "discipline_exception_loss_count": len(exception_losses),
         "actions": actions,
     }
 
@@ -94,11 +116,13 @@ def check_strategy_health(
     min_avg_return_pct: float = 0.0,
 ) -> dict[str, Any]:
     strategies = analysis.get("by_strategy") or {}
+    discipline = analysis.get("discipline") or {}
     rows = [
         classify_strategy(
             strategy,
             stats,
             cooldown,
+            discipline,
             min_trades=min_trades,
             min_win_rate_pct=min_win_rate_pct,
             min_avg_return_pct=min_avg_return_pct,
