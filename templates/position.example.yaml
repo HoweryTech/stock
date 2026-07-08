@@ -45,4 +45,5 @@ tracking:
   days_held: 0
   notes: []
 
+strategy_config_snapshot: {}
 trade_plan_snapshot: {}

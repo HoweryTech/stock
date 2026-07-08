@@ -68,6 +68,15 @@ def position_args(plan_path: Path) -> Namespace:
     )
 
 
+def strategy_config_snapshot() -> dict:
+    return {
+        "available": True,
+        "version_id": "CONFIG-VERSION-TEST",
+        "profile_hash": "abc123",
+        "source": {"regression": {"conclusion": "pass"}},
+    }
+
+
 def exit_args(position_path: Path, **overrides) -> Namespace:
     defaults = {
         "template": str(ROOT / "templates/exit-plan.example.yaml"),
@@ -98,6 +107,7 @@ def exit_args(position_path: Path, **overrides) -> Namespace:
 class NewExitPlanTest(unittest.TestCase):
     def create_position_yaml(self, tmp_dir: str) -> Path:
         plan, _ = create_trade_plan(plan_args())
+        plan["strategy_config_snapshot"] = strategy_config_snapshot()
         plan_path = Path(tmp_dir) / "plan.yaml"
         position_path = Path(tmp_dir) / "position.yaml"
         write_yaml(plan_path, plan)
@@ -128,6 +138,7 @@ class NewExitPlanTest(unittest.TestCase):
         self.assertEqual(exit_plan["exit_plan"]["urgency"], "immediate")
         self.assertTrue(exit_plan["decision"]["must_exit"])
         self.assertIn("stop_loss_triggered", exit_plan["checks"]["source_action_codes"])
+        self.assertEqual(exit_plan["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-TEST")
 
     def test_creates_take_profit_exit_plan_without_daily_check(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -11,6 +11,15 @@ from tools.risk_check import load_yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def strategy_config_snapshot() -> dict:
+    return {
+        "available": True,
+        "version_id": "CONFIG-VERSION-TEST",
+        "profile_hash": "abc123",
+        "source": {"regression": {"conclusion": "pass"}},
+    }
+
+
 def valid_exit_plan() -> dict:
     plan = load_yaml(ROOT / "templates/exit-plan.example.yaml")
     plan["exit_plan"]["id"] = "EXIT-EXEC-0001"
@@ -33,6 +42,7 @@ def valid_exit_plan() -> dict:
     plan["checks"]["triggered_by_daily_check"] = True
     plan["checks"]["daily_check_conclusion"] = "needs_action"
     plan["checks"]["source_action_codes"] = ["stop_loss_triggered"]
+    plan["strategy_config_snapshot"] = strategy_config_snapshot()
     return plan
 
 
@@ -79,6 +89,7 @@ class NewExitExecutionTest(unittest.TestCase):
         self.assertEqual(execution["order"]["exited_position_pct_of_total_assets"], 5.0)
         self.assertEqual(execution["result_estimate"]["trade_return_pct"], -9.0)
         self.assertEqual(execution["result_estimate"]["portfolio_return_pct"], -0.45)
+        self.assertEqual(execution["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-TEST")
 
     def test_blocks_failed_exit_plan_check(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

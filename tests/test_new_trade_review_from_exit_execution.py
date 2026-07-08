@@ -11,6 +11,15 @@ from tools.risk_check import load_yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def strategy_config_snapshot() -> dict:
+    return {
+        "available": True,
+        "version_id": "CONFIG-VERSION-TEST",
+        "profile_hash": "abc123",
+        "source": {"regression": {"conclusion": "pass"}},
+    }
+
+
 def exit_execution_record() -> dict:
     execution = load_yaml(ROOT / "templates/exit-execution.example.yaml")
     execution["execution"]["id"] = "EXITEXEC-REVIEW-0001"
@@ -29,10 +38,11 @@ def exit_execution_record() -> dict:
     execution["result_estimate"]["entry_price"] = 10.0
     execution["result_estimate"]["trade_return_pct"] = -9.0
     execution["result_estimate"]["portfolio_return_pct"] = -0.45
+    execution["strategy_config_snapshot"] = strategy_config_snapshot()
     execution["exit_plan_snapshot"] = {
         "position_full_snapshot": {
             "entry": {"entry_date": "2026-07-01"},
-            "trade_plan_snapshot": {"trade_plan": {"id": "TP-REVIEW-0001"}},
+            "trade_plan_snapshot": {"trade_plan": {"id": "TP-REVIEW-0001"}, "strategy_config_snapshot": strategy_config_snapshot()},
             "execution_snapshot": {},
         }
     }
@@ -75,6 +85,7 @@ class NewTradeReviewFromExitExecutionTest(unittest.TestCase):
         self.assertEqual(review["execution"]["exit_price"], 9.1)
         self.assertEqual(review["result"]["trade_return_pct"], -9.0)
         self.assertEqual(review["result"]["result_category"], "strategy_loss")
+        self.assertEqual(review["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-TEST")
 
     def test_infers_execution_error_profit_when_not_followed_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

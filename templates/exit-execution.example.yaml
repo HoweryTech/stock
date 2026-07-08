@@ -48,5 +48,6 @@ result_estimate:
 notes:
   - "按退出计划执行。"
 
+strategy_config_snapshot: {}
 exit_check_snapshot: {}
 exit_plan_snapshot: {}

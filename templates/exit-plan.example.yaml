@@ -45,5 +45,6 @@ next_steps:
   execution_note: ""
   review_required_after_exit: true
 
+strategy_config_snapshot: {}
 position_full_snapshot: {}
 daily_check_snapshot: {}

@@ -48,6 +48,15 @@ def plan_args():
     )
 
 
+def strategy_config_snapshot() -> dict:
+    return {
+        "available": True,
+        "version_id": "CONFIG-VERSION-TEST",
+        "profile_hash": "abc123",
+        "source": {"regression": {"conclusion": "pass"}},
+    }
+
+
 def execution_args(plan_path: Path, output: Path):
     return Namespace(
         template=str(ROOT / "templates/trade-execution.example.yaml"),
@@ -98,6 +107,7 @@ class NewPositionFromExecutionTest(unittest.TestCase):
     def write_execution(self, tmp_dir: str) -> Path:
         profile = load_yaml(ROOT / "config/investment-profile.example.yaml")
         plan, _ = create_trade_plan(plan_args())
+        plan["strategy_config_snapshot"] = strategy_config_snapshot()
         plan = apply_completion(
             plan,
             profile,
@@ -151,6 +161,7 @@ class NewPositionFromExecutionTest(unittest.TestCase):
         self.assertEqual(position["tracking"]["current_return_pct"], 1.9802)
         self.assertEqual(position["execution_snapshot"]["execution"]["id"], "EXEC-POS-0001")
         self.assertEqual(position["execution_check_snapshot"]["conclusion"], "needs_review")
+        self.assertEqual(position["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-TEST")
         self.assertTrue(any("来源执行记录" in note for note in position["tracking"]["notes"]))
 
     def test_blocks_position_creation_from_blocked_execution(self) -> None:

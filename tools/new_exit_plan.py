@@ -144,6 +144,11 @@ def create_exit_plan(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
 
     set_value(exit_plan, "next_steps.execution_note", args.execution_note or "")
     set_value(exit_plan, "next_steps.review_required_after_exit", True)
+    set_value(
+        exit_plan,
+        "strategy_config_snapshot",
+        value_at(position, "strategy_config_snapshot") or value_at(position, "trade_plan_snapshot.strategy_config_snapshot") or {},
+    )
     set_value(exit_plan, "position_full_snapshot", position)
     set_value(exit_plan, "daily_check_snapshot", daily_check or {})
 

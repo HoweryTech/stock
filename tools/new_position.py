@@ -92,6 +92,7 @@ def create_position(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     set_value(position, "tracking.current_portfolio_return_pct", current_portfolio_return_pct)
     set_value(position, "tracking.days_held", args.days_held)
     set_value(position, "tracking.notes", args.note or [])
+    set_value(position, "strategy_config_snapshot", value_at(plan, "strategy_config_snapshot") or {})
     set_value(position, "trade_plan_snapshot", plan)
 
     output_path = build_output_path(Path(args.output_dir), position_id, args.output)

@@ -120,6 +120,11 @@ def create_trade_review_from_exit_execution(args: argparse.Namespace) -> tuple[d
         {},
     )
     set_value(review, "trade_plan_snapshot", trade_plan_snapshot)
+    set_value(
+        review,
+        "strategy_config_snapshot",
+        value_at(exit_execution, "strategy_config_snapshot") or value_at(trade_plan_snapshot, "strategy_config_snapshot") or {},
+    )
     set_value(review, "exit_plan_snapshot", value_at(exit_execution, "exit_plan_snapshot") or {})
     set_value(review, "exit_execution_snapshot", exit_execution)
 

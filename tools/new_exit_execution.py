@@ -128,6 +128,14 @@ def create_exit_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
     set_value(execution, "result_estimate.trade_return_pct", trade_return_pct)
     set_value(execution, "result_estimate.portfolio_return_pct", portfolio_return_pct)
     set_value(execution, "notes", args.note or [])
+    set_value(
+        execution,
+        "strategy_config_snapshot",
+        value_at(exit_plan, "strategy_config_snapshot")
+        or value_at(exit_plan, "position_full_snapshot.strategy_config_snapshot")
+        or value_at(exit_plan, "position_full_snapshot.trade_plan_snapshot.strategy_config_snapshot")
+        or {},
+    )
     set_value(execution, "exit_check_snapshot", exit_check)
     set_value(execution, "exit_plan_snapshot", exit_plan)
 
