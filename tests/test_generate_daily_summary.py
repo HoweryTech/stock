@@ -218,9 +218,17 @@ class GenerateDailySummaryTest(unittest.TestCase):
                             "id": "CONFIG-CHANGE-VALUE",
                             "source_task_id": "STRATEGY-REVIEW-VALUE",
                             "strategy": "value_quality",
-                            "status": "draft",
+                            "status": "approved",
                             "change_items": [{"path": "strategies.value_quality.screening"}],
                             "approval": {"required": True, "approved_by": "lihongwei", "approved_at": "2026-07-08T12:00:00"},
+                        },
+                        {
+                            "id": "CONFIG-CHANGE-REJECTED",
+                            "source_task_id": "STRATEGY-REVIEW-REJECTED",
+                            "strategy": "event_catalyst",
+                            "status": "rejected",
+                            "change_items": [{"path": "strategies.event_catalyst"}],
+                            "approval": {"required": True, "rejected_by": "lihongwei", "rejected_at": "2026-07-08T12:30:00", "rejected_reason": "证据不足。"},
                         },
                     ],
                 },
@@ -229,10 +237,14 @@ class GenerateDailySummaryTest(unittest.TestCase):
             summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 11, 0, 0))
             content = render_summary(summary)
 
-        self.assertEqual(summary["strategy_config_changes"]["draft_count"], 2)
+        self.assertEqual(summary["strategy_config_changes"]["draft_count"], 3)
         self.assertEqual(summary["strategy_config_changes"]["pending_approval_count"], 1)
+        self.assertEqual(summary["strategy_config_changes"]["approved_count"], 1)
+        self.assertEqual(summary["strategy_config_changes"]["rejected_count"], 1)
         self.assertIn("审批或驳回 1 个策略配置变更草稿。", summary["operating_actions"])
         self.assertIn("CONFIG-CHANGE-TREND", content)
+        self.assertIn("已审批策略配置变更：1", content)
+        self.assertIn("已驳回策略配置变更：1", content)
         self.assertNotIn("CONFIG-CHANGE-VALUE strategy=value_quality", content)
 
 

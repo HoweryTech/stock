@@ -232,7 +232,7 @@ def summarize_strategy_review_tasks(tasks_doc: dict[str, Any] | None) -> dict[st
 
 def summarize_strategy_config_changes(changes_doc: dict[str, Any] | None) -> dict[str, Any]:
     if not changes_doc:
-        return {"available": False, "draft_count": 0, "pending_approval_count": 0, "drafts": []}
+        return {"available": False, "draft_count": 0, "pending_approval_count": 0, "approved_count": 0, "rejected_count": 0, "drafts": []}
     drafts = changes_doc.get("drafts", []) or []
     pending = [
         draft
@@ -241,10 +241,14 @@ def summarize_strategy_config_changes(changes_doc: dict[str, Any] | None) -> dic
         and (draft.get("approval") or {}).get("required")
         and not (draft.get("approval") or {}).get("approved_by")
     ]
+    approved_count = sum(1 for draft in drafts if draft.get("status") == "approved")
+    rejected_count = sum(1 for draft in drafts if draft.get("status") == "rejected")
     return {
         "available": True,
         "draft_count": len(drafts),
         "pending_approval_count": len(pending),
+        "approved_count": approved_count,
+        "rejected_count": rejected_count,
         "drafts": [
             {
                 "id": draft.get("id"),
@@ -419,6 +423,8 @@ def render_summary(summary: dict[str, Any]) -> str:
             f"- 暂缓策略复核任务：{strategy_review_tasks['deferred_task_count']}",
             f"- 策略配置变更草稿：{'已读取' if strategy_config_changes['available'] else '缺失'}",
             f"- 待审批策略配置变更：{strategy_config_changes['pending_approval_count']}",
+            f"- 已审批策略配置变更：{strategy_config_changes['approved_count']}",
+            f"- 已驳回策略配置变更：{strategy_config_changes['rejected_count']}",
             "",
         ]
     )
