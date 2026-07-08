@@ -140,6 +140,57 @@ def summarize_exit_executions(executions: list[dict[str, Any]]) -> dict[str, Any
     return {"count": len(rows), "rows": rows}
 
 
+def trade_execution_requires_confirmation(data: dict[str, Any]) -> bool:
+    gate_conclusion = value_at(data, "execution.gate_conclusion")
+    mode = value_at(data, "execution.mode")
+    side = value_at(data, "order.side")
+    cooldown_conclusion = value_at(data, "execution.cooldown_conclusion") or value_at(data, "cooldown_snapshot.conclusion")
+    strategy_status = None
+    strategy = value_at(data, "trade_plan_snapshot.strategy.source")
+    for item in value_at(data, "strategy_health_snapshot.strategies") or []:
+        if item.get("strategy") == strategy:
+            strategy_status = item.get("status")
+            break
+    return (
+        gate_conclusion == "needs_confirmation"
+        or mode == "real"
+        or (side == "buy" and cooldown_conclusion == "cooldown_required")
+        or (side == "buy" and strategy_status == "pause_new_entries")
+    )
+
+
+def summarize_trade_executions(executions: list[dict[str, Any]]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    missing_confirmation_count = 0
+    for item in executions:
+        data = item["data"]
+        confirmation_status = value_at(data, "confirmation_snapshot.status") or "missing"
+        requires_confirmation = trade_execution_requires_confirmation(data)
+        missing_confirmation = requires_confirmation and confirmation_status != "confirmed"
+        if missing_confirmation:
+            missing_confirmation_count += 1
+        rows.append(
+            {
+                "path": item["path"],
+                "id": value_at(data, "execution.id"),
+                "stock": value_at(data, "stock.code"),
+                "mode": value_at(data, "execution.mode"),
+                "side": value_at(data, "order.side"),
+                "gate_conclusion": value_at(data, "execution.gate_conclusion"),
+                "confirmation_id": value_at(data, "execution.confirmation_id"),
+                "confirmation_status": confirmation_status,
+                "requires_confirmation": requires_confirmation,
+                "missing_confirmation": missing_confirmation,
+            }
+        )
+    return {
+        "count": len(rows),
+        "requires_confirmation_count": sum(1 for row in rows if row["requires_confirmation"]),
+        "missing_confirmation_count": missing_confirmation_count,
+        "rows": rows,
+    }
+
+
 def summarize_reviews(reviews: list[dict[str, Any]]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     drafts = 0
@@ -446,6 +497,7 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
     watchlist = summary["watchlist"]
     portfolio = summary["portfolio"]
     exits = summary["exit_plans"]
+    trade_executions = summary["trade_executions"]
     reviews = summary["reviews"]
     review_analysis_available = summary["review_analysis_available"]
     cooldown = summary["cooldown"]
@@ -471,6 +523,8 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
     urgent_exits = [row for row in exits["rows"] if row["must_exit"] or row["urgency"] == "immediate"]
     if urgent_exits:
         actions.append(f"处理 {len(urgent_exits)} 个紧急退出计划。")
+    if trade_executions["missing_confirmation_count"]:
+        actions.append(f"修正 {trade_executions['missing_confirmation_count']} 笔缺少确认快照的交易执行记录。")
     if reviews["draft_count"]:
         actions.append(f"补全 {reviews['draft_count']} 份复盘草稿。")
     if reviews["quality_blocked_count"]:
@@ -554,6 +608,7 @@ def format_manual_confirmation(item: dict[str, Any]) -> str:
 def derive_manual_confirmation_items(summary: dict[str, Any]) -> list[dict[str, Any]]:
     confirmations: list[dict[str, Any]] = []
     exits = summary["exit_plans"]
+    trade_executions = summary["trade_executions"]
     reviews = summary["reviews"]
     strategy_health = summary["strategy_health"]
     strategy_config_changes = summary["strategy_config_changes"]
@@ -574,6 +629,19 @@ def derive_manual_confirmation_items(summary: dict[str, Any]) -> list[dict[str, 
                 subject_id=row["id"] or "",
             )
         )
+    for row in trade_executions["rows"]:
+        if row["missing_confirmation"]:
+            confirmation_id = row["confirmation_id"] or f"CONFIRM-TRADE-{slug(row['id'])}"
+            text = f"补齐交易执行确认记录：{row['id']} stock={row['stock']} mode={row['mode']} gate={row['gate_conclusion']}。"
+            confirmations.append(
+                manual_confirmation_item(
+                    records,
+                    confirmation_id=confirmation_id,
+                    text=text,
+                    subject_type="trade_execution",
+                    subject_id=row["id"] or "",
+                )
+            )
     for row in reviews["rows"]:
         if row["quality_conclusion"] == "blocked":
             text = f"确认阻断级复盘修正结论：{row['id']} stock={row['stock']}。"
@@ -661,6 +729,7 @@ def build_summary(args: argparse.Namespace, generated_at: datetime | None = None
         "watchlist": summarize_watchlist(load_json_if_exists(Path(args.watchlist_metadata))),
         "portfolio": summarize_portfolio(load_json_if_exists(Path(args.portfolio_check))),
         "exit_plans": summarize_exit_plans(load_yaml_files(args.exit_plans)),
+        "trade_executions": summarize_trade_executions(load_yaml_files(args.trade_executions)),
         "exit_executions": summarize_exit_executions(load_yaml_files(args.exit_executions)),
         "reviews": summarize_reviews(load_yaml_files(args.reviews)),
         "review_analysis_available": Path(args.review_analysis).exists(),
@@ -691,6 +760,7 @@ def render_summary(summary: dict[str, Any]) -> str:
     watchlist = summary["watchlist"]
     portfolio = summary["portfolio"]
     exits = summary["exit_plans"]
+    trade_executions = summary["trade_executions"]
     executions = summary["exit_executions"]
     reviews = summary["reviews"]
     review_analysis_available = summary["review_analysis_available"]
@@ -739,6 +809,9 @@ def render_summary(summary: dict[str, Any]) -> str:
         "## 退出与卖出",
         "",
         f"- 退出计划数量：{exits['count']}",
+        f"- 交易执行数量：{trade_executions['count']}",
+        f"- 需确认交易执行：{trade_executions['requires_confirmation_count']}",
+        f"- 缺少确认快照交易执行：{trade_executions['missing_confirmation_count']}",
         f"- 卖出执行数量：{executions['count']}",
         "",
     ]
@@ -747,6 +820,13 @@ def render_summary(summary: dict[str, Any]) -> str:
         lines.append("退出计划：")
         for row in exits["rows"]:
             lines.append(f"- {row['id']} {row['stock']} {row['type']} urgency={row['urgency']} must_exit={row['must_exit']}")
+        lines.append("")
+    if trade_executions["rows"]:
+        lines.append("交易执行：")
+        for row in trade_executions["rows"]:
+            lines.append(
+                f"- {row['id']} {row['stock']} mode={row['mode']} side={row['side']} gate={row['gate_conclusion']} confirmation={row['confirmation_status']}"
+            )
         lines.append("")
     if executions["rows"]:
         lines.append("卖出执行：")
@@ -881,6 +961,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--watchlist-metadata", default="data/metadata/watchlist_pipeline.json", help="Watchlist pipeline metadata JSON.")
     parser.add_argument("--portfolio-check", default="data/metadata/portfolio_positions.check.json", help="Portfolio position check JSON.")
     parser.add_argument("--exit-plans", nargs="+", default=["exit-plans/*.yaml"], help="Exit plan YAML paths or glob patterns.")
+    parser.add_argument("--trade-executions", nargs="+", default=["executions/*.yaml"], help="Trade execution YAML paths or glob patterns.")
     parser.add_argument("--exit-executions", nargs="+", default=["exit-executions/*.yaml"], help="Sell execution YAML paths or glob patterns.")
     parser.add_argument("--reviews", nargs="+", default=["reviews/*.yaml"], help="Review YAML paths or glob patterns.")
     parser.add_argument("--review-analysis", default="data/metadata/review-analysis.json", help="Review analysis JSON generated by analyze_trade_reviews.py.")

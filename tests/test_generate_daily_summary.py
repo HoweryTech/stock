@@ -19,6 +19,7 @@ def args(tmp_dir: str) -> Namespace:
         watchlist_metadata=str(base / "watchlist.json"),
         portfolio_check=str(base / "portfolio.json"),
         exit_plans=[str(base / "exit-plans/*.yaml")],
+        trade_executions=[str(base / "executions/*.yaml")],
         exit_executions=[str(base / "exit-executions/*.yaml")],
         reviews=[str(base / "reviews/*.yaml")],
         review_analysis=str(base / "review-analysis.json"),
@@ -62,6 +63,19 @@ def exit_execution() -> dict:
     execution["result_estimate"]["trade_return_pct"] = -9.0
     execution["result_estimate"]["portfolio_return_pct"] = -0.45
     return execution
+
+
+def trade_execution() -> dict:
+    data = load_yaml(ROOT / "templates/trade-execution.example.yaml")
+    data["execution"]["id"] = "EXEC-SUMMARY-0001"
+    data["execution"]["mode"] = "paper"
+    data["execution"]["source_trade_plan_id"] = "TP-SUMMARY-0001"
+    data["execution"]["gate_conclusion"] = "needs_confirmation"
+    data["execution"]["confirmation_id"] = "CONFIRM-TRADE-EXEC-SUMMARY-0001"
+    data["stock"]["code"] = "600000"
+    data["order"]["side"] = "buy"
+    data["confirmation_snapshot"] = {"available": False, "status": "missing"}
+    return data
 
 
 def review() -> dict:
@@ -131,6 +145,24 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("## 今日必须人工确认事项", content)
         self.assertIn("今日无必须人工确认事项", content)
         self.assertIn("元数据状态：缺失", content)
+
+    def test_daily_summary_shows_trade_execution_missing_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_yaml(base / "executions" / "execution.yaml", trade_execution())
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 9, 10, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["trade_executions"]["count"], 1)
+        self.assertEqual(summary["trade_executions"]["missing_confirmation_count"], 1)
+        self.assertIn("修正 1 笔缺少确认快照的交易执行记录。", summary["operating_actions"])
+        self.assertIn(
+            "待确认：补齐交易执行确认记录：EXEC-SUMMARY-0001 stock=600000 mode=paper gate=needs_confirmation。 confirmation_id=CONFIRM-TRADE-EXEC-SUMMARY-0001",
+            summary["manual_confirmations"],
+        )
+        self.assertIn("缺少确认快照交易执行：1", content)
+        self.assertIn("EXEC-SUMMARY-0001", content)
 
     def test_daily_summary_shows_strategy_health_action_reasons(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
