@@ -22,6 +22,7 @@ def args(tmp_dir: str) -> Namespace:
         exit_executions=[str(base / "exit-executions/*.yaml")],
         reviews=[str(base / "reviews/*.yaml")],
         review_analysis=str(base / "review-analysis.json"),
+        cooldown_check=str(base / "review-cooldown.json"),
         output=str(base / "daily-summary.md"),
         json_output=None,
         json=False,
@@ -102,6 +103,7 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("补全 1 份复盘草稿。", summary["operating_actions"])
         self.assertIn("完善 1 份需复核复盘。", summary["operating_actions"])
         self.assertIn("生成或刷新交易复盘分析。", summary["operating_actions"])
+        self.assertIn("执行复盘冷静期检查。", summary["operating_actions"])
         self.assertIn("# 每日操作摘要", content)
         self.assertIn("EXIT-SUMMARY-0001", content)
 

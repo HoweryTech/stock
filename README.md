@@ -77,6 +77,7 @@
 - [卖出执行生成复盘](./docs/卖出执行生成复盘.md)
 - [交易复盘质量检查](./docs/交易复盘质量检查.md)
 - [交易复盘分析](./docs/交易复盘分析.md)
+- [复盘冷静期检查](./docs/复盘冷静期检查.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
 
@@ -427,6 +428,14 @@ python3 tools/analyze_trade_reviews.py \
   --reviews reviews/*.yaml \
   --output reports/review-analysis.md \
   --json-output data/metadata/review-analysis.json
+```
+
+检查复盘冷静期：
+
+```bash
+python3 tools/check_review_cooldown.py \
+  --reviews reviews/*.yaml \
+  --output data/metadata/review-cooldown.json
 ```
 
 ### 新建交易复盘草稿
