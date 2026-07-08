@@ -29,6 +29,7 @@ def args(tmp_dir: str) -> Namespace:
         strategy_config_patch=str(base / "strategy-config-patch.json"),
         strategy_config_patch_audit=str(base / "strategy-config-patch.apply.json"),
         strategy_config_regression=str(base / "strategy-config-regression.json"),
+        strategy_config_pipeline=str(base / "strategy-config-change-pipeline.json"),
         output=str(base / "daily-summary.md"),
         json_output=None,
         json=False,
@@ -338,6 +339,51 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("配置应用后回归检查阻断，先回滚或修复配置。", summary["operating_actions"])
         self.assertEqual(summary["strategy_config_regression"]["blocker_count"], 1)
         self.assertIn("[risk_field_out_of_safe_range] 风险字段超限。", content)
+
+    def test_daily_summary_shows_strategy_config_pipeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-config-change-pipeline.json",
+                {
+                    "apply_requested": False,
+                    "steps": {
+                        "change_check": {"conclusion": "pass", "blocker_count": 0, "warning_count": 0},
+                        "patch": {"operation_count": 1, "skipped": False},
+                        "apply": {"operation_count": 0, "skipped": True},
+                        "regression": {"conclusion": "skipped", "blocker_count": 0, "warning_count": 0, "skipped": True},
+                    },
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 17, 0, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["strategy_config_pipeline"]["change_check_conclusion"], "pass")
+        self.assertEqual(summary["strategy_config_pipeline"]["patch_operation_count"], 1)
+        self.assertTrue(summary["strategy_config_pipeline"]["apply_skipped"])
+        self.assertIn("配置变更流水线：已读取", content)
+        self.assertIn("流水线补丁操作数：1", content)
+
+    def test_daily_summary_prioritizes_blocked_strategy_config_pipeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-config-change-pipeline.json",
+                {
+                    "apply_requested": False,
+                    "steps": {
+                        "change_check": {"conclusion": "blocked", "blocker_count": 1, "warning_count": 0},
+                        "patch": {"operation_count": 0, "skipped": True},
+                        "apply": {"operation_count": 0, "skipped": True},
+                        "regression": {"conclusion": "skipped", "blocker_count": 0, "warning_count": 0, "skipped": True},
+                    },
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 17, 15, 0))
+
+        self.assertIn("配置变更流水线校验阻断，先修正变更草稿。", summary["operating_actions"])
 
 
 if __name__ == "__main__":
