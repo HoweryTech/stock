@@ -18,6 +18,24 @@ def task(task_id: str, strategy: str, status: str, code: str, resolution: str) -
     }
 
 
+def config_version_task(status: str, resolution: str) -> dict:
+    return {
+        "id": "CONFIG-VERSION-REVIEW-CONFIG-VERSION-RISK",
+        "task_type": "config_version",
+        "strategy": None,
+        "config_version_id": "CONFIG-VERSION-RISK",
+        "profile_hash": "abcdef1234567890",
+        "profile_hash_short": "abcdef123456",
+        "status": "needs_review",
+        "priority": "medium",
+        "task_status": status,
+        "resolution": resolution,
+        "resolved_at": "2026-07-08T11:30:00" if status == "resolved" else None,
+        "stats": {"count": 3, "total_portfolio_return_pct": -0.2},
+        "actions": [{"code": "config_version_negative_portfolio_contribution", "message": "配置版本表现偏弱。"}],
+    }
+
+
 class GenerateStrategyConfigChangesTest(unittest.TestCase):
     def test_generates_change_draft_from_resolved_task(self) -> None:
         tasks_doc = {
@@ -68,6 +86,24 @@ class GenerateStrategyConfigChangesTest(unittest.TestCase):
         result = build_change_drafts(tasks_doc, generated_at=datetime(2026, 7, 8, 12, 0, 0))
 
         self.assertEqual(result["drafts"][0]["change_items"][0]["path"], "strategies.trend_strength.enabled")
+
+    def test_generates_change_draft_from_config_version_task(self) -> None:
+        tasks_doc = {"tasks": [config_version_task("resolved", "降低该配置版本风险暴露，并复查策略适用场景。")]}
+
+        result = build_change_drafts(tasks_doc, generated_at=datetime(2026, 7, 8, 12, 30, 0))
+        content = render_change_drafts(result)
+
+        self.assertEqual(result["draft_count"], 1)
+        draft = result["drafts"][0]
+        self.assertEqual(draft["source_task_type"], "config_version")
+        self.assertEqual(draft["strategy"], "CONFIG_VERSION")
+        self.assertEqual(draft["config_version_id"], "CONFIG-VERSION-RISK")
+        self.assertEqual(draft["profile_hash"], "abcdef1234567890")
+        paths = [item["path"] for item in draft["change_items"]]
+        self.assertIn("risk.max_total_position_pct", paths)
+        self.assertIn("risk.max_position_pct_per_stock", paths)
+        self.assertIn("strategies", paths)
+        self.assertIn("CONFIG-VERSION-RISK", content)
 
     def test_renders_empty_when_no_resolved_tasks(self) -> None:
         result = build_change_drafts({"tasks": [task("T-1", "trend_strength", "deferred", "low_win_rate", "暂缓。")]}, generated_at=datetime(2026, 7, 8, 12, 0, 0))

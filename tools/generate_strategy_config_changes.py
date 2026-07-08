@@ -45,6 +45,25 @@ def action_codes(task: dict[str, Any]) -> list[str]:
 
 
 def infer_change_items(task: dict[str, Any]) -> list[dict[str, str]]:
+    if task.get("task_type") == "config_version":
+        version_id = task.get("config_version_id") or "UNKNOWN_CONFIG_VERSION"
+        return [
+            {
+                "path": "risk.max_total_position_pct",
+                "proposed_change": "复核是否降低该配置版本后的总仓位上限，具体数值需人工填写。",
+                "reason": f"配置版本 {version_id} 表现偏弱，需要确认是否降低整体风险暴露。",
+            },
+            {
+                "path": "risk.max_position_pct_per_stock",
+                "proposed_change": "复核是否降低该配置版本后的单票仓位上限，具体数值需人工填写。",
+                "reason": f"配置版本 {version_id} 表现偏弱，需要控制单笔错误对组合的影响。",
+            },
+            {
+                "path": "strategies",
+                "proposed_change": "复核是否拆分适用场景、提高筛选阈值或回滚部分策略规则。",
+                "reason": f"配置版本 {version_id} 需要区分配置规则问题、市场阶段问题和具体策略问题。",
+            },
+        ]
     strategy = task.get("strategy") or "UNKNOWN"
     codes = set(action_codes(task))
     items: list[dict[str, str]] = []
@@ -92,18 +111,25 @@ def build_change_drafts(tasks_doc: dict[str, Any], generated_at: datetime | None
         resolution = (task.get("resolution") or "").strip()
         if not resolution:
             continue
-        strategy = task.get("strategy") or "UNKNOWN"
+        task_type = task.get("task_type") or "strategy"
+        strategy = task.get("strategy") or ("CONFIG_VERSION" if task_type == "config_version" else "UNKNOWN")
         task_id = task.get("id") or f"UNKNOWN-{len(drafts) + 1}"
         drafts.append(
             {
                 "id": f"CONFIG-CHANGE-{slug(task_id)}",
                 "source_task_id": task_id,
+                "source_task_type": task_type,
                 "strategy": strategy,
+                "config_version_id": task.get("config_version_id"),
+                "profile_hash": task.get("profile_hash"),
                 "status": "draft",
                 "created_at": generated_at.isoformat(timespec="seconds"),
                 "effective_date": None,
                 "resolution": resolution,
                 "review_evidence": {
+                    "task_type": task_type,
+                    "config_version_id": task.get("config_version_id"),
+                    "profile_hash": task.get("profile_hash"),
                     "task_status": task.get("status"),
                     "task_priority": task.get("priority"),
                     "resolved_at": task.get("resolved_at"),
