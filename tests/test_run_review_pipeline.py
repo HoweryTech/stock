@@ -22,6 +22,8 @@ def args(tmp_dir: str) -> Namespace:
         cooldown_output=str(base / "metadata/review-cooldown.json"),
         strategy_health_output=str(base / "reports/strategy-health.md"),
         strategy_health_json_output=str(base / "metadata/strategy-health.json"),
+        strategy_review_tasks_output=str(base / "reports/strategy-review-tasks.md"),
+        strategy_review_tasks_json_output=str(base / "metadata/strategy-review-tasks.json"),
         metadata_output=str(base / "metadata/review-pipeline.json"),
         min_trades=3,
         min_win_rate_pct=40.0,
@@ -70,14 +72,17 @@ class RunReviewPipelineTest(unittest.TestCase):
             analysis = json.loads((base / "metadata/review-analysis.json").read_text(encoding="utf-8"))
             cooldown = json.loads((base / "metadata/review-cooldown.json").read_text(encoding="utf-8"))
             strategy_health = json.loads((base / "metadata/strategy-health.json").read_text(encoding="utf-8"))
+            strategy_review_tasks = json.loads((base / "metadata/strategy-review-tasks.json").read_text(encoding="utf-8"))
             pipeline = json.loads((base / "metadata/review-pipeline.json").read_text(encoding="utf-8"))
 
         self.assertEqual(metadata["review_count"], 3)
         self.assertEqual(analysis["review_count"], 3)
         self.assertEqual(cooldown["conclusion"], "cooldown_required")
         self.assertEqual(strategy_health["conclusion"], "pause_required")
+        self.assertEqual(strategy_review_tasks["task_count"], 1)
         self.assertEqual(pipeline["steps"]["cooldown_check"]["conclusion"], "cooldown_required")
         self.assertEqual(pipeline["steps"]["strategy_health"]["conclusion"], "pause_required")
+        self.assertEqual(pipeline["steps"]["strategy_review_tasks"]["task_count"], 1)
 
 
 if __name__ == "__main__":
