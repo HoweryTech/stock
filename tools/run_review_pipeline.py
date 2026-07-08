@@ -74,6 +74,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 "conclusion": strategy_health["conclusion"],
                 "pause_count": strategy_health["pause_count"],
                 "needs_review_count": strategy_health["needs_review_count"],
+                "needs_review_config_version_count": strategy_health.get("needs_review_config_version_count", 0),
             },
             "strategy_review_tasks": {
                 "output": args.strategy_review_tasks_output,

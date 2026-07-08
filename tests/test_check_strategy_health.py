@@ -105,6 +105,44 @@ class CheckStrategyHealthTest(unittest.TestCase):
         self.assertTrue(any(item["code"] == "loss_making_discipline_exception" for item in result["strategies"][0]["actions"]))
         self.assertIn("亏损纪律例外交易", content)
 
+    def test_marks_negative_config_version_as_needs_review(self) -> None:
+        analysis = {
+            "by_strategy": {
+                "trend_strength": {
+                    "count": 3,
+                    "win_count": 2,
+                    "loss_count": 1,
+                    "win_rate_pct": 66.6667,
+                    "avg_trade_return_pct": 0.8,
+                    "total_portfolio_return_pct": 0.2,
+                }
+            },
+            "by_config_version": {
+                "CONFIG-VERSION-RISK": {
+                    "version_id": "CONFIG-VERSION-RISK",
+                    "profile_hash": "abcdef1234567890",
+                    "profile_hash_short": "abcdef123456",
+                    "count": 3,
+                    "win_count": 1,
+                    "loss_count": 2,
+                    "win_rate_pct": 33.3333,
+                    "avg_trade_return_pct": -0.6,
+                    "total_portfolio_return_pct": -0.2,
+                }
+            },
+        }
+
+        result = check_strategy_health(analysis, {"conclusion": "normal", "threshold": 3, "strategy_losing_streaks": {}})
+        content = render_health(result)
+
+        self.assertEqual(result["conclusion"], "needs_review")
+        self.assertEqual(result["strategies"][0]["status"], "healthy")
+        self.assertEqual(result["needs_review_config_version_count"], 1)
+        self.assertEqual(result["config_versions"][0]["status"], "needs_review")
+        self.assertTrue(any(item["code"] == "config_version_low_win_rate" for item in result["config_versions"][0]["actions"]))
+        self.assertIn("配置版本明细", content)
+        self.assertIn("CONFIG-VERSION-RISK", content)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -54,7 +54,8 @@ def review(review_id: str, exit_date: str, trade_return: float) -> dict:
     data["review_questions"]["position_sizing_followed"] = True
     data["review_questions"]["lesson"] = "记录复盘。"
     data["review_questions"]["next_action"] = "继续观察。"
-    data["trade_plan_snapshot"] = {"strategy": {"source": "trend_strength"}}
+    data["strategy_config_snapshot"] = {"version_id": "CONFIG-VERSION-PIPELINE", "profile_hash": "abc123"}
+    data["trade_plan_snapshot"] = {"strategy": {"source": "trend_strength"}, "strategy_config_snapshot": data["strategy_config_snapshot"]}
     return data
 
 
@@ -82,6 +83,7 @@ class RunReviewPipelineTest(unittest.TestCase):
         self.assertEqual(strategy_review_tasks["task_count"], 1)
         self.assertEqual(pipeline["steps"]["cooldown_check"]["conclusion"], "cooldown_required")
         self.assertEqual(pipeline["steps"]["strategy_health"]["conclusion"], "pause_required")
+        self.assertEqual(pipeline["steps"]["strategy_health"]["needs_review_config_version_count"], 1)
         self.assertEqual(pipeline["steps"]["strategy_review_tasks"]["task_count"], 1)
 
 
