@@ -498,6 +498,41 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
     return actions
 
 
+def derive_manual_confirmations(summary: dict[str, Any]) -> list[str]:
+    confirmations: list[str] = []
+    exits = summary["exit_plans"]
+    reviews = summary["reviews"]
+    strategy_health = summary["strategy_health"]
+    strategy_config_changes = summary["strategy_config_changes"]
+    strategy_config_patch = summary["strategy_config_patch"]
+    strategy_config_regression = summary["strategy_config_regression"]
+    strategy_config_pipeline = summary["strategy_config_pipeline"]
+
+    urgent_exits = [row for row in exits["rows"] if row["must_exit"] or row["urgency"] == "immediate"]
+    for row in urgent_exits:
+        confirmations.append(f"确认紧急退出计划：{row['id']} stock={row['stock']} type={row['type']}。")
+    if reviews["quality_blocked_count"]:
+        confirmations.append(f"确认 {reviews['quality_blocked_count']} 份阻断级复盘的修正结论。")
+    if strategy_health["pause_count"]:
+        confirmations.append(f"确认 {strategy_health['pause_count']} 个暂停新开仓策略的执行边界。")
+    for item in strategy_config_changes["drafts"]:
+        if item["source_task_type"] == "config_version":
+            confirmations.append(f"审批或驳回配置版本变更草稿：{item['id']} config_version={item['config_version_id']}。")
+        else:
+            confirmations.append(f"审批或驳回策略配置变更草稿：{item['id']} strategy={item['strategy']}。")
+    for item in strategy_config_patch["operations"]:
+        confirmations.append(f"人工复核待应用配置补丁：{item['source_change_id']} path={item['path']} old={item['old_value']} new={item['new_value']}。")
+    if strategy_config_regression["conclusion"] == "blocked":
+        confirmations.append("确认配置回归阻断后的回滚或修复方案。")
+    if strategy_config_pipeline["change_check_conclusion"] == "blocked":
+        confirmations.append("确认配置变更流水线校验阻断的修正方案。")
+    if strategy_config_pipeline["regression_conclusion"] == "blocked":
+        confirmations.append("确认配置变更流水线回归阻断后的回滚或修复方案。")
+    if not confirmations:
+        confirmations.append("今日无必须人工确认事项。")
+    return confirmations
+
+
 def build_summary(args: argparse.Namespace, generated_at: datetime | None = None) -> dict[str, Any]:
     generated_at = generated_at or datetime.now()
     summary = {
@@ -519,6 +554,7 @@ def build_summary(args: argparse.Namespace, generated_at: datetime | None = None
         "strategy_config_snapshot": summarize_strategy_config_snapshot(load_json_if_exists(Path(args.strategy_config_snapshot))),
     }
     summary["operating_actions"] = derive_operating_actions(summary)
+    summary["manual_confirmations"] = derive_manual_confirmations(summary)
     return summary
 
 
@@ -554,6 +590,10 @@ def render_summary(summary: dict[str, Any]) -> str:
         "## 今日优先动作",
         "",
         *render_section_list(summary["operating_actions"]),
+        "",
+        "## 今日必须人工确认事项",
+        "",
+        *render_section_list(summary["manual_confirmations"]),
         "",
         "## 观察池",
         "",

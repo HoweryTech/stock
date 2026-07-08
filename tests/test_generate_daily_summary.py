@@ -108,6 +108,7 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertEqual(summary["reviews"]["quality_needs_review_count"], 1)
         self.assertIn("优先处理组合或持仓日检中的 needs_action。", summary["operating_actions"])
         self.assertIn("处理 1 个紧急退出计划。", summary["operating_actions"])
+        self.assertIn("确认紧急退出计划：EXIT-SUMMARY-0001 stock=600000 type=stop_loss。", summary["manual_confirmations"])
         self.assertIn("补全 1 份复盘草稿。", summary["operating_actions"])
         self.assertIn("完善 1 份需复核复盘。", summary["operating_actions"])
         self.assertIn("生成或刷新交易复盘分析。", summary["operating_actions"])
@@ -125,6 +126,9 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertEqual(summary["portfolio"]["conclusion"], "missing")
         self.assertIn("生成或刷新观察池流水线。", summary["operating_actions"])
         self.assertIn("执行组合持仓日检。", summary["operating_actions"])
+        self.assertEqual(summary["manual_confirmations"], ["今日无必须人工确认事项。"])
+        self.assertIn("## 今日必须人工确认事项", content)
+        self.assertIn("今日无必须人工确认事项", content)
         self.assertIn("元数据状态：缺失", content)
 
     def test_daily_summary_shows_strategy_health_action_reasons(self) -> None:
@@ -349,6 +353,11 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertEqual(summary["strategy_config_changes"]["pending_strategy_change_count"], 0)
         self.assertNotIn("审批或驳回 1 个策略配置变更草稿。", summary["operating_actions"])
         self.assertIn("审批或驳回 1 个配置版本变更草稿。", summary["operating_actions"])
+        self.assertIn(
+            "审批或驳回配置版本变更草稿：CONFIG-CHANGE-CONFIG-VERSION-RISK config_version=CONFIG-VERSION-RISK。",
+            summary["manual_confirmations"],
+        )
+        self.assertIn("## 今日必须人工确认事项", content)
         self.assertIn("config_version=CONFIG-VERSION-RISK", content)
 
     def test_daily_summary_shows_pending_strategy_config_patch(self) -> None:
@@ -375,6 +384,10 @@ class GenerateDailySummaryTest(unittest.TestCase):
 
         self.assertEqual(summary["strategy_config_patch"]["operation_count"], 1)
         self.assertIn("人工复核 1 个待应用策略配置补丁。", summary["operating_actions"])
+        self.assertIn(
+            "人工复核待应用配置补丁：CONFIG-CHANGE-RISK path=risk.max_position_pct_per_stock old=10.0 new=8.0。",
+            summary["manual_confirmations"],
+        )
         self.assertIn("risk.max_position_pct_per_stock", content)
         self.assertIn("CONFIG-CHANGE-RISK", content)
 
