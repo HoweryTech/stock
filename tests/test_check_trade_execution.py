@@ -177,6 +177,16 @@ class CheckTradeExecutionTest(unittest.TestCase):
         self.assertEqual(result["conclusion"], "blocked")
         self.assertTrue(any(item["code"] == "missing_user_confirmation" for item in result["blockers"]))
 
+    def test_blocks_missing_confirmed_manual_confirmation_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = self.create_execution_record(tmp_dir)
+        execution["confirmation_snapshot"] = {"available": False, "status": "missing"}
+
+        result = check_execution(execution)
+
+        self.assertEqual(result["conclusion"], "blocked")
+        self.assertTrue(any(item["code"] == "missing_confirmed_manual_confirmation_record" for item in result["blockers"]))
+
     def test_blocks_cooldown_exception_without_reason(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             execution = self.create_execution_record(tmp_dir)

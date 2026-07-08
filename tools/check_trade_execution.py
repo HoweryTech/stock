@@ -56,6 +56,27 @@ def check_gate_and_confirmation(execution: dict[str, Any]) -> list[CheckItem]:
     return blockers
 
 
+def confirmation_snapshot_confirmed(execution: dict[str, Any]) -> bool:
+    return bool(value_at(execution, "confirmation_snapshot.available")) and value_at(execution, "confirmation_snapshot.status") == "confirmed"
+
+
+def check_manual_confirmation_snapshot(execution: dict[str, Any]) -> list[CheckItem]:
+    blockers: list[CheckItem] = []
+    gate_conclusion = value_at(execution, "execution.gate_conclusion")
+    mode = value_at(execution, "execution.mode")
+    side = value_at(execution, "order.side")
+    cooldown_conclusion = value_at(execution, "execution.cooldown_conclusion") or value_at(execution, "cooldown_snapshot.conclusion")
+    requires_confirmation = gate_conclusion == "needs_confirmation" or mode == "real"
+    if side == "buy" and cooldown_conclusion == "cooldown_required":
+        requires_confirmation = True
+    if side == "buy" and current_strategy_status(execution) == "pause_new_entries":
+        requires_confirmation = True
+    if requires_confirmation and not confirmation_snapshot_confirmed(execution):
+        confirmation_id = value_at(execution, "execution.confirmation_id") or "missing"
+        blockers.append(CheckItem("missing_confirmed_manual_confirmation_record", f"缺少已确认的人工确认记录：{confirmation_id}。"))
+    return blockers
+
+
 def check_cooldown_exception(execution: dict[str, Any]) -> list[CheckItem]:
     blockers: list[CheckItem] = []
     side = value_at(execution, "order.side")
@@ -134,6 +155,7 @@ def check_price_and_position(execution: dict[str, Any]) -> tuple[list[CheckItem]
 def check_execution(execution: dict[str, Any]) -> dict[str, Any]:
     blockers = check_required_fields(execution)
     blockers.extend(check_gate_and_confirmation(execution))
+    blockers.extend(check_manual_confirmation_snapshot(execution))
     blockers.extend(check_cooldown_exception(execution))
     blockers.extend(check_strategy_health_exception(execution))
     price_blockers, warnings, info = check_price_and_position(execution)
