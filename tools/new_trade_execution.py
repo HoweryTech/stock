@@ -74,6 +74,18 @@ def load_confirmation_record(confirmations_path: Path | None, confirmation_id: s
     return {"available": False, "status": "missing", "id": confirmation_id}
 
 
+def confirmation_is_confirmed(record: dict[str, Any]) -> bool:
+    return bool(record.get("available")) and record.get("status") == "confirmed"
+
+
+def validate_manual_confirmation_required(required: bool, record: dict[str, Any]) -> None:
+    if not required:
+        return
+    if not confirmation_is_confirmed(record):
+        confirmation_id = record.get("id") or "missing"
+        raise ValueError(f"confirmed manual confirmation record is required: {confirmation_id}")
+
+
 def strategy_status(health: dict[str, Any], strategy: str | None) -> str | None:
     if not strategy:
         return None
@@ -91,6 +103,26 @@ def validate_execution_allowed(gate: dict[str, Any], user_confirmed: bool, mode:
         raise ValueError("gate needs confirmation; pass --user-confirmed after manual confirmation")
     if mode == "real" and not user_confirmed:
         raise ValueError("real execution requires --user-confirmed")
+
+
+def execution_requires_manual_confirmation(
+    gate: dict[str, Any],
+    mode: str,
+    cooldown: dict[str, Any],
+    health: dict[str, Any],
+    strategy: str | None,
+    side: str,
+    allow_exception: bool,
+) -> bool:
+    if gate.get("conclusion") == "needs_confirmation":
+        return True
+    if mode == "real":
+        return True
+    if side == "buy" and cooldown.get("conclusion") == "cooldown_required" and allow_exception:
+        return True
+    if side == "buy" and strategy_status(health, strategy) == "pause_new_entries" and allow_exception:
+        return True
+    return False
 
 
 def validate_cooldown_allowed(
@@ -160,13 +192,26 @@ def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         getattr(args, "confirmation_id", None),
     )
     plan_strategy = value_at(plan, "strategy.source")
-    validate_execution_allowed(gate, args.user_confirmed, args.mode)
+    effective_user_confirmed = bool(args.user_confirmed or confirmation_is_confirmed(confirmation_record))
+    validate_manual_confirmation_required(
+        execution_requires_manual_confirmation(
+            gate,
+            args.mode,
+            cooldown,
+            strategy_health,
+            plan_strategy,
+            args.side,
+            bool(getattr(args, "allow_cooldown_exception", False)),
+        ),
+        confirmation_record,
+    )
+    validate_execution_allowed(gate, effective_user_confirmed, args.mode)
     validate_cooldown_allowed(
         cooldown,
         args.side,
         bool(getattr(args, "allow_cooldown_exception", False)),
         getattr(args, "cooldown_exception_reason", None),
-        args.user_confirmed,
+        effective_user_confirmed,
     )
     validate_strategy_health_allowed(
         strategy_health,
@@ -174,7 +219,7 @@ def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         args.side,
         bool(getattr(args, "allow_cooldown_exception", False)),
         getattr(args, "cooldown_exception_reason", None),
-        args.user_confirmed,
+        effective_user_confirmed,
     )
 
     execution = deepcopy(template)
@@ -198,7 +243,7 @@ def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     set_value(execution, "execution.gate_conclusion", gate.get("conclusion"))
     set_value(execution, "execution.cooldown_conclusion", cooldown.get("conclusion"))
     set_value(execution, "execution.strategy_health_conclusion", strategy_health.get("conclusion"))
-    set_value(execution, "execution.user_confirmed", args.user_confirmed)
+    set_value(execution, "execution.user_confirmed", effective_user_confirmed)
     set_value(execution, "execution.confirmation_id", getattr(args, "confirmation_id", None) or "")
     set_value(execution, "execution.confirmation_text", value_at(plan, "risk_check_expectation.confirmation_text"))
     set_value(execution, "execution.cooldown_exception_reason", getattr(args, "cooldown_exception_reason", None) or "")

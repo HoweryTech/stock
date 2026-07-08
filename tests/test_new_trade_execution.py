@@ -83,6 +83,37 @@ def execution_args(plan_path: Path, **overrides):
 
 
 class NewTradeExecutionTest(unittest.TestCase):
+    def write_confirmation(self, tmp_dir: str, confirmation_id: str = "CONFIRM-TRADE-TP-EXEC-0001") -> Path:
+        path = Path(tmp_dir) / "manual-confirmations.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "confirmations": [
+                        {
+                            "id": confirmation_id,
+                            "status": "confirmed",
+                            "confirmed_by": "lihongwei",
+                            "confirmed_at": "2026-07-08T14:00:00",
+                            "confirmation_reason": "已阅读计划、反证和最大亏损。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def confirmed_execution_args(self, tmp_dir: str, plan_path: Path, **overrides) -> Namespace:
+        confirmation_id = overrides.pop("confirmation_id", "CONFIRM-TRADE-TP-EXEC-0001")
+        confirmations_path = self.write_confirmation(tmp_dir, confirmation_id)
+        return execution_args(
+            plan_path,
+            manual_confirmations=str(confirmations_path),
+            confirmation_id=confirmation_id,
+            **overrides,
+        )
+
     def write_snapshot(self, tmp_dir: str) -> Path:
         path = Path(tmp_dir) / "strategy-config-snapshot.json"
         path.write_text(
@@ -130,7 +161,7 @@ class NewTradeExecutionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             plan_path = self.write_ready_plan(tmp_dir)
 
-            execution, output_path = create_execution(execution_args(plan_path))
+            execution, output_path = create_execution(self.confirmed_execution_args(tmp_dir, plan_path))
 
         self.assertEqual(output_path, Path("executions/EXEC-TEST-0001.yaml"))
         self.assertEqual(execution["execution"]["source_trade_plan_id"], "TP-EXEC-0001")
@@ -149,7 +180,7 @@ class NewTradeExecutionTest(unittest.TestCase):
             write_yaml(plan_path, plan, overwrite=True)
             snapshot_path = self.write_snapshot(tmp_dir)
 
-            execution, _ = create_execution(execution_args(plan_path, strategy_config_snapshot=str(snapshot_path)))
+            execution, _ = create_execution(self.confirmed_execution_args(tmp_dir, plan_path, strategy_config_snapshot=str(snapshot_path)))
 
         self.assertEqual(execution["trade_plan_snapshot"]["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-20260708-173000")
         self.assertTrue(execution["trade_plan_snapshot"]["strategy_config_snapshot"]["available"])
@@ -157,24 +188,7 @@ class NewTradeExecutionTest(unittest.TestCase):
     def test_records_manual_confirmation_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             plan_path = self.write_ready_plan(tmp_dir)
-            confirmations_path = Path(tmp_dir) / "manual-confirmations.json"
-            confirmations_path.write_text(
-                json.dumps(
-                    {
-                        "confirmations": [
-                            {
-                                "id": "CONFIRM-TRADE-TP-EXEC-0001",
-                                "status": "confirmed",
-                                "confirmed_by": "lihongwei",
-                                "confirmed_at": "2026-07-08T14:00:00",
-                                "confirmation_reason": "已阅读计划、反证和最大亏损。",
-                            }
-                        ]
-                    },
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
+            confirmations_path = self.write_confirmation(tmp_dir)
 
             execution, _ = create_execution(
                 execution_args(
@@ -195,6 +209,13 @@ class NewTradeExecutionTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 create_execution(execution_args(plan_path, user_confirmed=False))
+
+    def test_rejects_user_confirmed_without_manual_confirmation_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plan_path = self.write_ready_plan(tmp_dir)
+
+            with self.assertRaisesRegex(ValueError, "confirmed manual confirmation"):
+                create_execution(execution_args(plan_path, user_confirmed=True))
 
     def test_rejects_blocked_gate(self) -> None:
         with self.assertRaises(ValueError):
@@ -242,7 +263,8 @@ class NewTradeExecutionTest(unittest.TestCase):
             )
 
             execution, _ = create_execution(
-                execution_args(
+                self.confirmed_execution_args(
+                    tmp_dir,
                     plan_path,
                     strategy_health=str(health_path),
                     allow_cooldown_exception=True,
@@ -263,7 +285,8 @@ class NewTradeExecutionTest(unittest.TestCase):
             )
 
             execution, _ = create_execution(
-                execution_args(
+                self.confirmed_execution_args(
+                    tmp_dir,
                     plan_path,
                     cooldown_check=str(cooldown_path),
                     allow_cooldown_exception=True,
@@ -280,7 +303,7 @@ class NewTradeExecutionTest(unittest.TestCase):
             plan_path = self.write_ready_plan(tmp_dir)
 
             with self.assertRaises(ValueError):
-                create_execution(execution_args(plan_path, execution_price=0))
+                create_execution(self.confirmed_execution_args(tmp_dir, plan_path, execution_price=0))
 
 
 if __name__ == "__main__":

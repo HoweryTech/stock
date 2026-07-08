@@ -1,4 +1,5 @@
 import copy
+import json
 import tempfile
 import unittest
 from argparse import Namespace
@@ -82,6 +83,8 @@ def execution_args(plan_path: Path) -> Namespace:
         profile=str(ROOT / "config/investment-profile.example.yaml"),
         plan=str(plan_path),
         gate=None,
+        manual_confirmations=None,
+        confirmation_id=None,
         output_dir="executions",
         output=None,
         overwrite=False,
@@ -100,12 +103,36 @@ def execution_args(plan_path: Path) -> Namespace:
 
 
 class CheckTradeExecutionTest(unittest.TestCase):
+    def write_confirmation(self, tmp_dir: str) -> Path:
+        path = Path(tmp_dir) / "manual-confirmations.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "confirmations": [
+                        {
+                            "id": "CONFIRM-TRADE-TP-EXEC-CHECK-0001",
+                            "status": "confirmed",
+                            "confirmed_by": "lihongwei",
+                            "confirmed_at": "2026-07-08T14:00:00",
+                            "confirmation_reason": "已阅读计划、反证和最大亏损。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
     def create_execution_record(self, tmp_dir: str) -> dict:
         plan, _ = create_trade_plan(plan_args())
         plan = apply_completion(plan, load_yaml(ROOT / "config/investment-profile.example.yaml"), completion_args())
         plan_path = Path(tmp_dir) / "plan.yaml"
         write_yaml(plan_path, plan)
-        execution, _ = create_execution(execution_args(plan_path))
+        args = execution_args(plan_path)
+        args.manual_confirmations = str(self.write_confirmation(tmp_dir))
+        args.confirmation_id = "CONFIRM-TRADE-TP-EXEC-CHECK-0001"
+        execution, _ = create_execution(args)
         return execution
 
     def test_warns_positive_slippage(self) -> None:
