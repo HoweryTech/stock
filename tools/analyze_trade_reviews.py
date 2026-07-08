@@ -37,6 +37,22 @@ def strategy_of(review: dict[str, Any]) -> str:
     return value_at(review, "trade_plan_snapshot.strategy.source") or "UNKNOWN"
 
 
+def config_snapshot_of(review: dict[str, Any]) -> dict[str, Any]:
+    snapshot = value_at(review, "strategy_config_snapshot") or value_at(review, "trade_plan_snapshot.strategy_config_snapshot") or {}
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
+def config_version_of(review: dict[str, Any]) -> tuple[str, str | None]:
+    snapshot = config_snapshot_of(review)
+    version_id = snapshot.get("version_id")
+    profile_hash = snapshot.get("profile_hash")
+    if version_id:
+        return str(version_id), str(profile_hash) if profile_hash else None
+    if profile_hash:
+        return f"HASH-{str(profile_hash)[:12]}", str(profile_hash)
+    return "UNKNOWN_CONFIG_VERSION", None
+
+
 def add_numeric(bucket: dict[str, Any], trade_return_pct: float | None, portfolio_return_pct: float | None) -> None:
     bucket["count"] += 1
     if trade_return_pct is not None:
@@ -75,6 +91,8 @@ def empty_bucket() -> dict[str, Any]:
 def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
     overall = empty_bucket()
     by_strategy: dict[str, dict[str, Any]] = defaultdict(empty_bucket)
+    by_config_version: dict[str, dict[str, Any]] = defaultdict(empty_bucket)
+    config_version_meta: dict[str, dict[str, Any]] = {}
     result_categories: Counter[str] = Counter()
     error_tags: Counter[str] = Counter()
     quality: Counter[str] = Counter()
@@ -91,6 +109,7 @@ def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
         review = load_yaml(path)
         review_quality = check_trade_review_quality(review)
         strategy = strategy_of(review)
+        config_version_id, config_profile_hash = config_version_of(review)
         trade_return_pct = as_float(value_at(review, "result.trade_return_pct"))
         portfolio_return_pct = as_float(value_at(review, "result.portfolio_return_pct"))
         category = value_at(review, "result.result_category") or "UNKNOWN"
@@ -101,6 +120,15 @@ def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
 
         add_numeric(overall, trade_return_pct, portfolio_return_pct)
         add_numeric(by_strategy[strategy], trade_return_pct, portfolio_return_pct)
+        add_numeric(by_config_version[config_version_id], trade_return_pct, portfolio_return_pct)
+        config_version_meta.setdefault(
+            config_version_id,
+            {
+                "version_id": config_version_id,
+                "profile_hash": config_profile_hash,
+                "profile_hash_short": config_profile_hash[:12] if config_profile_hash else None,
+            },
+        )
         result_categories[category] += 1
         quality[review_quality["conclusion"]] += 1
         for tag in tags:
@@ -128,6 +156,8 @@ def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
                 "review_id": value_at(review, "review.id"),
                 "stock": value_at(review, "stock.code"),
                 "strategy": strategy,
+                "config_version_id": config_version_id,
+                "config_profile_hash": config_profile_hash,
                 "result_category": category,
                 "trade_return_pct": trade_return_pct,
                 "portfolio_return_pct": portfolio_return_pct,
@@ -148,6 +178,10 @@ def analyze_reviews(review_paths: list[Path]) -> dict[str, Any]:
         "review_count": len(review_paths),
         "overall": finalize_bucket(overall),
         "by_strategy": {strategy: finalize_bucket(bucket) for strategy, bucket in sorted(by_strategy.items())},
+        "by_config_version": {
+            version: {**config_version_meta.get(version, {"version_id": version}), **finalize_bucket(bucket)}
+            for version, bucket in sorted(by_config_version.items())
+        },
         "result_categories": dict(sorted(result_categories.items())),
         "error_tags": dict(sorted(error_tags.items())),
         "quality": dict(sorted(quality.items())),
@@ -183,6 +217,16 @@ def render_analysis(analysis: dict[str, Any]) -> str:
         for strategy, stats in analysis["by_strategy"].items():
             lines.append(
                 f"- {strategy}: count={stats['count']} win_rate={stats['win_rate_pct']}% avg_return={stats['avg_trade_return_pct']}% portfolio={stats['total_portfolio_return_pct']}%"
+            )
+
+    lines.extend(["", "## 按配置版本汇总", ""])
+    if not analysis.get("by_config_version"):
+        lines.append("- 无。")
+    else:
+        for version, stats in analysis["by_config_version"].items():
+            hash_text = stats.get("profile_hash_short") or "-"
+            lines.append(
+                f"- {version}: hash={hash_text} count={stats['count']} win_rate={stats['win_rate_pct']}% avg_return={stats['avg_trade_return_pct']}% portfolio={stats['total_portfolio_return_pct']}%"
             )
 
     lines.extend(["", "## 结果分类", "", *render_counter(analysis["result_categories"]), "", "## 错误标签", "", *render_counter(analysis["error_tags"]), ""])

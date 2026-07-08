@@ -10,7 +10,15 @@ from tools.risk_check import load_yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def review(review_id: str, strategy: str, trade_return: float, portfolio_return: float, category: str, tags: list[str] | None = None) -> dict:
+def review(
+    review_id: str,
+    strategy: str,
+    trade_return: float,
+    portfolio_return: float,
+    category: str,
+    tags: list[str] | None = None,
+    config_version_id: str = "CONFIG-VERSION-TEST",
+) -> dict:
     data = load_yaml(ROOT / "templates/trade-review.example.yaml")
     data["review"]["id"] = review_id
     data["review"]["source_trade_plan_id"] = f"TP-{review_id}"
@@ -33,7 +41,13 @@ def review(review_id: str, strategy: str, trade_return: float, portfolio_return:
     data["review_questions"]["position_sizing_followed"] = True
     data["review_questions"]["lesson"] = "记录复盘。"
     data["review_questions"]["next_action"] = "继续观察。"
-    data["trade_plan_snapshot"] = {"strategy": {"source": strategy}}
+    snapshot = {
+        "available": True,
+        "version_id": config_version_id,
+        "profile_hash": f"{config_version_id.lower().replace('-', '')}abcdef123456",
+    }
+    data["strategy_config_snapshot"] = snapshot
+    data["trade_plan_snapshot"] = {"strategy": {"source": strategy}, "strategy_config_snapshot": snapshot}
     return data
 
 
@@ -66,9 +80,28 @@ class AnalyzeTradeReviewsTest(unittest.TestCase):
         self.assertEqual(analysis["overall"]["win_rate_pct"], 50.0)
         self.assertEqual(analysis["overall"]["total_portfolio_return_pct"], 0.2)
         self.assertEqual(analysis["by_strategy"]["trend_strength"]["count"], 2)
+        self.assertEqual(analysis["by_config_version"]["CONFIG-VERSION-TEST"]["count"], 2)
         self.assertEqual(analysis["error_tags"]["late_stop_loss"], 1)
         self.assertIn("# 交易复盘分析", content)
         self.assertIn("trend_strength", content)
+        self.assertIn("CONFIG-VERSION-TEST", content)
+
+    def test_analyzes_reviews_by_config_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            first = Path(tmp_dir) / "review1.yaml"
+            second = Path(tmp_dir) / "review2.yaml"
+            write_yaml(first, review("TR-V1", "trend_strength", 8.0, 0.4, "strategy_profit", config_version_id="CONFIG-VERSION-V1"))
+            write_yaml(second, review("TR-V2", "trend_strength", -4.0, -0.2, "strategy_loss", config_version_id="CONFIG-VERSION-V2"))
+
+            analysis = analyze_reviews([first, second])
+            content = render_analysis(analysis)
+
+        self.assertEqual(analysis["by_strategy"]["trend_strength"]["count"], 2)
+        self.assertEqual(analysis["by_config_version"]["CONFIG-VERSION-V1"]["win_count"], 1)
+        self.assertEqual(analysis["by_config_version"]["CONFIG-VERSION-V2"]["loss_count"], 1)
+        self.assertIn("按配置版本汇总", content)
+        self.assertIn("CONFIG-VERSION-V1", content)
+        self.assertIn("CONFIG-VERSION-V2", content)
 
     def test_empty_analysis_is_supported(self) -> None:
         analysis = analyze_reviews([])
