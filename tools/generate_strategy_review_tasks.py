@@ -70,6 +70,10 @@ def build_tasks(health: dict[str, Any], generated_at: datetime | None = None) ->
                 "actions": actions,
                 "required_review_items": required_review_items(actions),
                 "decision_required": "暂停新开仓、继续观察、调整规则或降低仓位上限。",
+                "task_status": "open",
+                "resolution": "",
+                "resolved_at": None,
+                "history": [],
             }
         )
     return {
