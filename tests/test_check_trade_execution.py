@@ -190,6 +190,55 @@ class CheckTradeExecutionTest(unittest.TestCase):
 
         self.assertEqual(result["conclusion"], "pass")
 
+    def test_blocks_strategy_health_exception_without_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = self.create_execution_record(tmp_dir)
+        execution["execution"]["strategy_health_conclusion"] = "pause_required"
+        execution["execution"]["cooldown_exception_reason"] = ""
+        execution["strategy_health_snapshot"] = {
+            "conclusion": "pause_required",
+            "strategies": [{"strategy": "trend_strength", "status": "pause_new_entries"}],
+        }
+
+        result = check_execution(execution)
+
+        self.assertEqual(result["conclusion"], "blocked")
+        self.assertTrue(any(item["code"] == "missing_strategy_health_exception_reason" for item in result["blockers"]))
+
+    def test_blocks_strategy_health_exception_without_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = self.create_execution_record(tmp_dir)
+        execution["execution"]["gate_conclusion"] = "pass"
+        execution["execution"]["user_confirmed"] = False
+        execution["execution"]["strategy_health_conclusion"] = "pause_required"
+        execution["execution"]["cooldown_exception_reason"] = "例外原因。"
+        execution["strategy_health_snapshot"] = {
+            "conclusion": "pause_required",
+            "strategies": [{"strategy": "trend_strength", "status": "pause_new_entries"}],
+        }
+
+        result = check_execution(execution)
+
+        self.assertEqual(result["conclusion"], "blocked")
+        self.assertTrue(any(item["code"] == "strategy_health_exception_without_confirmation" for item in result["blockers"]))
+
+    def test_passes_confirmed_strategy_health_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = self.create_execution_record(tmp_dir)
+        execution = copy.deepcopy(execution)
+        execution["order"]["execution_price"] = 9.9
+        execution["order"]["slippage_pct_vs_plan"] = -1.0
+        execution["execution"]["strategy_health_conclusion"] = "pause_required"
+        execution["execution"]["cooldown_exception_reason"] = "策略暂停期小仓位例外。"
+        execution["strategy_health_snapshot"] = {
+            "conclusion": "pause_required",
+            "strategies": [{"strategy": "trend_strength", "status": "pause_new_entries"}],
+        }
+
+        result = check_execution(execution)
+
+        self.assertEqual(result["conclusion"], "pass")
+
     def test_run_check_reads_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             execution = self.create_execution_record(tmp_dir)
