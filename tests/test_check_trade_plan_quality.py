@@ -21,6 +21,7 @@ class CheckTradePlanQualityTest(unittest.TestCase):
         self.assertEqual(result["conclusion"], "blocked")
         self.assertTrue(any(item["code"] == "placeholder_strategy_buy_reason" for item in result["blockers"]))
         self.assertTrue(any(item["code"] == "missing_candidate_pool_trace" for item in result["warnings"]))
+        self.assertTrue(any(item["code"] == "missing_strategy_config_snapshot" for item in result["warnings"]))
 
     def test_blocks_missing_exit_conditions_and_placeholder_stock(self) -> None:
         plan = copy.deepcopy(self.plan)
@@ -94,6 +95,27 @@ class CheckTradePlanQualityTest(unittest.TestCase):
         self.assertEqual(result["conclusion"], "blocked")
         self.assertTrue(any(item["code"] == "missing_exit_plan_take_profit_conditions" for item in result["blockers"]))
         self.assertFalse(any(item["code"] == "missing_candidate_pool_trace" for item in result["warnings"]))
+
+    def test_warns_when_strategy_config_snapshot_is_unavailable(self) -> None:
+        plan = copy.deepcopy(self.plan)
+        plan["strategy_config_snapshot"] = {"available": False, "reason": "missing"}
+
+        result = check_trade_plan_quality(plan)
+
+        self.assertTrue(any(item["code"] == "unavailable_strategy_config_snapshot" for item in result["warnings"]))
+
+    def test_blocks_when_strategy_config_snapshot_regression_is_blocked(self) -> None:
+        plan = copy.deepcopy(self.plan)
+        plan["strategy_config_snapshot"] = {
+            "available": True,
+            "version_id": "CONFIG-VERSION-BLOCKED",
+            "profile_hash": "abc123",
+            "source": {"regression": {"conclusion": "blocked"}},
+        }
+
+        result = check_trade_plan_quality(plan)
+
+        self.assertTrue(any(item["code"] == "blocked_strategy_config_snapshot" for item in result["blockers"]))
 
     def test_run_check_reads_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

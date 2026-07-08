@@ -132,6 +132,27 @@ def validate_exit_plan(plan: dict[str, Any]) -> list[CheckItem]:
     return blockers
 
 
+def validate_strategy_config_snapshot(plan: dict[str, Any]) -> tuple[list[CheckItem], list[CheckItem]]:
+    blockers: list[CheckItem] = []
+    warnings: list[CheckItem] = []
+    snapshot = value_at(plan, "strategy_config_snapshot")
+
+    if not isinstance(snapshot, dict) or not snapshot:
+        warnings.append(CheckItem("missing_strategy_config_snapshot", "交易计划未记录策略配置版本快照，后续复盘无法精确对应投资体系版本。"))
+        return blockers, warnings
+    if snapshot.get("available") is False:
+        warnings.append(CheckItem("unavailable_strategy_config_snapshot", f"策略配置版本快照不可用：{snapshot.get('reason') or 'unknown'}。"))
+        return blockers, warnings
+
+    if is_missing(snapshot.get("version_id")):
+        warnings.append(CheckItem("missing_strategy_config_version_id", "策略配置版本快照缺少 version_id。"))
+    if is_missing(snapshot.get("profile_hash")):
+        warnings.append(CheckItem("missing_strategy_config_profile_hash", "策略配置版本快照缺少 profile_hash。"))
+    if value_at(snapshot, "source.regression.conclusion") == "blocked":
+        blockers.append(CheckItem("blocked_strategy_config_snapshot", "策略配置版本快照来源回归为 blocked，不能作为新交易计划依据。"))
+    return blockers, warnings
+
+
 def check_trade_plan_quality(plan: dict[str, Any]) -> dict[str, Any]:
     blockers: list[CheckItem] = []
     warnings: list[CheckItem] = []
@@ -154,10 +175,13 @@ def check_trade_plan_quality(plan: dict[str, Any]) -> dict[str, Any]:
     blockers.extend(validate_exit_plan(plan))
     trade_blockers, trade_warnings = validate_trade_terms(plan)
     evidence_blockers, evidence_warnings, evidence_info = validate_evidence(plan)
+    snapshot_blockers, snapshot_warnings = validate_strategy_config_snapshot(plan)
     blockers.extend(trade_blockers)
     blockers.extend(evidence_blockers)
+    blockers.extend(snapshot_blockers)
     warnings.extend(trade_warnings)
     warnings.extend(evidence_warnings)
+    warnings.extend(snapshot_warnings)
     info.extend(evidence_info)
 
     if blockers:

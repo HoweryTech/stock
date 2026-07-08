@@ -25,6 +25,14 @@ class CheckTradePlanGateTest(unittest.TestCase):
         path.write_text(yaml.safe_dump(plan, allow_unicode=True, sort_keys=False), encoding="utf-8")
         return path
 
+    def add_valid_snapshot(self, plan: dict) -> None:
+        plan["strategy_config_snapshot"] = {
+            "available": True,
+            "version_id": "CONFIG-VERSION-TEST",
+            "profile_hash": "abc123",
+            "source": {"regression": {"conclusion": "pass"}},
+        }
+
     def test_gate_skips_risk_when_quality_blocked(self) -> None:
         plan = copy.deepcopy(self.plan)
         plan["exit_plan"]["take_profit_conditions"] = []
@@ -55,6 +63,7 @@ class CheckTradePlanGateTest(unittest.TestCase):
         ]
         plan["strategy"]["counter_evidence_and_risks"] = [{"type": "manual", "description": "[value_quality] 估值分位接近上限。"}]
         plan["price_plan"]["current_price"] = 30.0
+        self.add_valid_snapshot(plan)
         path = self.write_plan(plan)
 
         result = run_gate(self.profile, path)
@@ -77,6 +86,7 @@ class CheckTradePlanGateTest(unittest.TestCase):
             {"type": "manual", "description": "[trend_strength] 成交额支持。"},
         ]
         plan["strategy"]["counter_evidence_and_risks"] = [{"type": "manual", "description": "[trend_strength] 跌破止损说明趋势失效。"}]
+        self.add_valid_snapshot(plan)
         path = self.write_plan(plan)
         health_path = path.parent / "strategy-health.json"
         health_path.write_text(
@@ -101,6 +111,7 @@ class CheckTradePlanGateTest(unittest.TestCase):
             {"type": "manual", "description": "[trend_strength] 成交额支持。"},
         ]
         plan["strategy"]["counter_evidence_and_risks"] = [{"type": "manual", "description": "[trend_strength] 跌破止损说明趋势失效。"}]
+        self.add_valid_snapshot(plan)
         path = self.write_plan(plan)
         health_path = path.parent / "strategy-health.json"
         health_path.write_text(
@@ -124,6 +135,7 @@ class CheckTradePlanGateTest(unittest.TestCase):
             {"type": "manual", "description": "[trend_strength] 成交额支持。"},
         ]
         plan["strategy"]["counter_evidence_and_risks"] = [{"type": "manual", "description": "[trend_strength] 跌破止损说明趋势失效。"}]
+        self.add_valid_snapshot(plan)
         path = self.write_plan(plan)
 
         result = run_gate(self.profile, path, strategy_health_path=path.parent / "missing.json")

@@ -15,6 +15,7 @@ def args(**overrides):
     defaults = {
         "candidates": "",
         "profile": str(ROOT / "config/investment-profile.example.yaml"),
+        "strategy_config_snapshot": None,
         "template": str(ROOT / "templates/trade-plan.example.yaml"),
         "output_dir": "plans",
         "output": "",
@@ -70,20 +71,29 @@ class PrepareTradePlanFromCandidateTest(unittest.TestCase):
                 }
             )
 
+    def write_snapshot(self, path: Path) -> None:
+        path.write_text(
+            '{"version_id":"CONFIG-VERSION-TEST","profile_hash":"abc123","source":{"regression":{"conclusion":"pass"}}}',
+            encoding="utf-8",
+        )
+
     def test_prepare_creates_completed_plan_and_gate_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             candidates = Path(tmp_dir) / "candidate_pool.csv"
             output = Path(tmp_dir) / "plan.yaml"
             gate_output = Path(tmp_dir) / "gate.json"
+            snapshot = Path(tmp_dir) / "strategy-config-snapshot.json"
             self.write_candidate_pool(candidates)
+            self.write_snapshot(snapshot)
 
-            result = run_prepare(args(candidates=str(candidates), output=str(output), gate_output=str(gate_output)))
+            result = run_prepare(args(candidates=str(candidates), output=str(output), gate_output=str(gate_output), strategy_config_snapshot=str(snapshot)))
             plan = load_yaml(output)
             gate_exists = gate_output.exists()
 
         self.assertEqual(result["gate"]["quality"]["conclusion"], "pass")
         self.assertEqual(result["gate"]["conclusion"], "needs_confirmation")
         self.assertEqual(plan["trade_plan"]["status"], "ready_for_gate")
+        self.assertEqual(plan["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-TEST")
         self.assertEqual(plan["exit_plan"]["take_profit_conditions"], ["达到计划目标区后分批止盈。"])
         self.assertTrue(gate_exists)
 
