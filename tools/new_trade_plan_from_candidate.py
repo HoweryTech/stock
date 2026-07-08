@@ -70,6 +70,7 @@ def args_from_candidate(args: argparse.Namespace, candidate: dict[str, str]) -> 
     strategy = infer_strategy(candidate, args.strategy)
     return Namespace(
         profile=args.profile,
+        strategy_config_snapshot=getattr(args, "strategy_config_snapshot", None),
         template=args.template,
         output_dir=args.output_dir,
         output=args.output,
@@ -111,6 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create a draft trade plan from a candidate pool row.")
     parser.add_argument("--candidates", default="data/processed/candidate_pool.csv", help="Input candidate pool CSV.")
     parser.add_argument("--profile", default="config/investment-profile.example.yaml", help="Path to investment profile YAML.")
+    parser.add_argument("--strategy-config-snapshot", default="data/metadata/strategy-config-snapshot.json", help="Optional strategy config version snapshot JSON.")
     parser.add_argument("--template", default="templates/trade-plan.example.yaml", help="Path to trade plan template YAML.")
     parser.add_argument("--output-dir", default="plans", help="Directory for generated trade plans.")
     parser.add_argument("--output", help="Explicit output file path.")

@@ -53,6 +53,7 @@ def execution_args(plan_path: Path, **overrides):
     defaults = {
         "template": str(ROOT / "templates/trade-execution.example.yaml"),
         "profile": str(ROOT / "config/investment-profile.example.yaml"),
+        "strategy_config_snapshot": None,
         "plan": str(plan_path),
         "gate": None,
         "cooldown_check": None,
@@ -79,6 +80,14 @@ def execution_args(plan_path: Path, **overrides):
 
 
 class NewTradeExecutionTest(unittest.TestCase):
+    def write_snapshot(self, tmp_dir: str) -> Path:
+        path = Path(tmp_dir) / "strategy-config-snapshot.json"
+        path.write_text(
+            '{"version_id":"CONFIG-VERSION-20260708-173000","profile_hash":"4e0e64d3354b0d4bc865d57a0582e0119dd05a0074c612687a3f1a69705f3edd"}',
+            encoding="utf-8",
+        )
+        return path
+
     def write_ready_plan(self, tmp_dir: str) -> Path:
         plan, _ = create_trade_plan(plan_args())
         profile = load_yaml(ROOT / "config/investment-profile.example.yaml")
@@ -128,6 +137,19 @@ class NewTradeExecutionTest(unittest.TestCase):
         self.assertEqual(execution["order"]["slippage_pct_vs_plan"], 1.0)
         self.assertTrue(execution["order"]["price_within_max_acceptable"])
         self.assertEqual(execution["trade_plan_snapshot"]["trade_plan"]["id"], "TP-EXEC-0001")
+
+    def test_fills_strategy_config_snapshot_for_legacy_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plan_path = self.write_ready_plan(tmp_dir)
+            plan = load_yaml(plan_path)
+            plan.pop("strategy_config_snapshot", None)
+            write_yaml(plan_path, plan, overwrite=True)
+            snapshot_path = self.write_snapshot(tmp_dir)
+
+            execution, _ = create_execution(execution_args(plan_path, strategy_config_snapshot=str(snapshot_path)))
+
+        self.assertEqual(execution["trade_plan_snapshot"]["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-20260708-173000")
+        self.assertTrue(execution["trade_plan_snapshot"]["strategy_config_snapshot"]["available"])
 
     def test_rejects_unconfirmed_needs_confirmation_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

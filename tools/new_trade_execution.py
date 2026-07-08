@@ -13,11 +13,11 @@ from typing import Any
 
 try:
     from tools.check_trade_plan_gate import run_gate
-    from tools.new_trade_plan import set_value, write_yaml
+    from tools.new_trade_plan import load_strategy_config_snapshot, set_value, write_yaml
     from tools.risk_check import as_float, load_yaml, value_at
 except ModuleNotFoundError:
     from check_trade_plan_gate import run_gate
-    from new_trade_plan import set_value, write_yaml
+    from new_trade_plan import load_strategy_config_snapshot, set_value, write_yaml
     from risk_check import as_float, load_yaml, value_at
 
 
@@ -122,11 +122,21 @@ def calculate_slippage_pct(execution_price: float, planned_buy_price: float | No
     return round((execution_price - planned_buy_price) / planned_buy_price * 100, 4)
 
 
+def ensure_strategy_config_snapshot(plan: dict[str, Any], snapshot_path: str | None) -> None:
+    existing = plan.get("strategy_config_snapshot")
+    if isinstance(existing, dict) and existing.get("available"):
+        return
+    if not snapshot_path:
+        return
+    set_value(plan, "strategy_config_snapshot", load_strategy_config_snapshot(Path(snapshot_path)))
+
+
 def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     template = load_yaml(Path(args.template))
     plan_path = Path(args.plan)
     profile_path = Path(args.profile)
     plan = load_yaml(plan_path)
+    ensure_strategy_config_snapshot(plan, getattr(args, "strategy_config_snapshot", None))
     gate = load_gate_result(profile_path, plan_path, Path(args.gate) if args.gate else None)
     cooldown_check = getattr(args, "cooldown_check", None)
     cooldown = load_cooldown_result(Path(cooldown_check) if cooldown_check else None)
@@ -208,6 +218,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create a trade execution record from a gated trade plan.")
     parser.add_argument("--template", default="templates/trade-execution.example.yaml", help="Path to trade execution template YAML.")
     parser.add_argument("--profile", default="config/investment-profile.example.yaml", help="Path to investment profile YAML.")
+    parser.add_argument("--strategy-config-snapshot", default="data/metadata/strategy-config-snapshot.json", help="Optional strategy config version snapshot JSON used when the plan has no snapshot.")
     parser.add_argument("--plan", required=True, help="Path to trade plan YAML.")
     parser.add_argument("--gate", help="Optional gate JSON from check_trade_plan_gate.py or prepare_trade_plan_from_candidate.py.")
     parser.add_argument("--cooldown-check", default="data/metadata/review-cooldown.json", help="Optional cooldown JSON from check_review_cooldown.py.")

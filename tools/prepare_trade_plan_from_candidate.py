@@ -27,6 +27,7 @@ def candidate_creation_args(args: argparse.Namespace, output_path: Path) -> argp
     return argparse.Namespace(
         candidates=args.candidates,
         profile=args.profile,
+        strategy_config_snapshot=getattr(args, "strategy_config_snapshot", None),
         template=args.template,
         output_dir=args.output_dir,
         output=str(output_path),
@@ -122,6 +123,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create, complete, and gate-check a trade plan from a candidate row.")
     parser.add_argument("--candidates", default="data/processed/candidate_pool.csv", help="Input candidate pool CSV.")
     parser.add_argument("--profile", default="config/investment-profile.example.yaml", help="Path to investment profile YAML.")
+    parser.add_argument("--strategy-config-snapshot", default="data/metadata/strategy-config-snapshot.json", help="Optional strategy config version snapshot JSON.")
     parser.add_argument("--template", default="templates/trade-plan.example.yaml", help="Path to trade plan template YAML.")
     parser.add_argument("--output-dir", default="plans", help="Directory for generated trade plans.")
     parser.add_argument("--output", help="Explicit output file path.")

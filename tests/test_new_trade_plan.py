@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from argparse import Namespace
@@ -13,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def args(**overrides):
     defaults = {
         "profile": str(ROOT / "config/investment-profile.example.yaml"),
+        "strategy_config_snapshot": None,
         "template": str(ROOT / "templates/trade-plan.example.yaml"),
         "output_dir": "plans",
         "output": None,
@@ -48,6 +50,22 @@ def args(**overrides):
 
 
 class NewTradePlanTest(unittest.TestCase):
+    def write_snapshot(self, tmp_dir: str) -> Path:
+        path = Path(tmp_dir) / "strategy-config-snapshot.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version_id": "CONFIG-VERSION-20260708-173000",
+                    "profile_hash": "4e0e64d3354b0d4bc865d57a0582e0119dd05a0074c612687a3f1a69705f3edd",
+                    "source": {"regression": {"conclusion": "pass"}},
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
     def test_creates_trade_plan_with_derived_risk_fields(self) -> None:
         plan, output_path = create_trade_plan(args())
 
@@ -59,6 +77,7 @@ class NewTradePlanTest(unittest.TestCase):
         self.assertEqual(plan["position_plan"]["expected_industry_position_pct_after_buy"], 15.0)
         self.assertEqual(plan["risk_calculation"]["max_loss_pct_of_total_assets"], 0.4)
         self.assertEqual(plan["exit_plan"]["invalidation_conditions"], ["趋势强度消失。"])
+        self.assertFalse(plan["strategy_config_snapshot"]["available"])
 
     def test_generated_plan_can_be_written_and_checked(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -72,6 +91,15 @@ class NewTradePlanTest(unittest.TestCase):
 
         self.assertEqual(result["conclusion"], "needs_confirmation")
         self.assertEqual(result["blockers"], [])
+
+    def test_records_strategy_config_snapshot_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_path = self.write_snapshot(tmp_dir)
+            plan, _ = create_trade_plan(args(strategy_config_snapshot=str(snapshot_path)))
+
+        self.assertTrue(plan["strategy_config_snapshot"]["available"])
+        self.assertEqual(plan["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-20260708-173000")
+        self.assertEqual(plan["strategy_config_snapshot"]["path"], str(snapshot_path))
 
 
 if __name__ == "__main__":

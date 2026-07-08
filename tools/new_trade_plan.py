@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from copy import deepcopy
 from datetime import datetime
@@ -38,6 +39,20 @@ def build_output_path(base_dir: Path, trade_plan_id: str, explicit_output: str |
     if explicit_output:
         return Path(explicit_output)
     return base_dir / f"{trade_plan_id}.yaml"
+
+
+def load_strategy_config_snapshot(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {"available": False, "path": None, "reason": "not_configured"}
+    if not path.exists():
+        return {"available": False, "path": str(path), "reason": "missing"}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    data = deepcopy(data)
+    data["available"] = True
+    data.setdefault("path", str(path))
+    return data
 
 
 def calculate_derived_fields(profile: dict[str, Any], plan: dict[str, Any]) -> None:
@@ -84,6 +99,7 @@ def create_trade_plan(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     plan = deepcopy(template)
     created_at, stamp = now_stamp()
     trade_plan_id = args.id or f"TP-{stamp}"
+    snapshot_path = getattr(args, "strategy_config_snapshot", None)
 
     normalize_draft_fields(plan)
 
@@ -123,6 +139,7 @@ def create_trade_plan(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     set_value(plan, "position_plan.current_stock_position_pct", args.current_stock_pct)
     set_value(plan, "position_plan.current_industry_position_pct", args.current_industry_pct)
     set_value(plan, "position_plan.current_total_position_pct", args.current_total_pct)
+    set_value(plan, "strategy_config_snapshot", load_strategy_config_snapshot(Path(snapshot_path) if snapshot_path else None))
 
     calculate_derived_fields(profile, plan)
 
@@ -141,6 +158,7 @@ def write_yaml(path: Path, data: dict[str, Any], overwrite: bool = False) -> Non
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create a new draft trade plan YAML.")
     parser.add_argument("--profile", default="config/investment-profile.example.yaml", help="Path to investment profile YAML.")
+    parser.add_argument("--strategy-config-snapshot", default="data/metadata/strategy-config-snapshot.json", help="Optional strategy config version snapshot JSON.")
     parser.add_argument("--template", default="templates/trade-plan.example.yaml", help="Path to trade plan template YAML.")
     parser.add_argument("--output-dir", default="plans", help="Directory for generated trade plans.")
     parser.add_argument("--output", help="Explicit output file path.")
