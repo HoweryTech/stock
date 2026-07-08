@@ -24,6 +24,7 @@ def args(tmp_dir: str) -> Namespace:
         review_analysis=str(base / "review-analysis.json"),
         cooldown_check=str(base / "review-cooldown.json"),
         strategy_health=str(base / "strategy-health.json"),
+        strategy_review_tasks=str(base / "strategy-review-tasks.json"),
         output=str(base / "daily-summary.md"),
         json_output=None,
         json=False,
@@ -151,6 +152,50 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertEqual(summary["strategy_health"]["needs_review_count"], 1)
         self.assertIn("loss_making_discipline_exception", summary["strategy_health"]["actions"][0])
         self.assertIn("亏损纪律例外交易", content)
+
+    def test_daily_summary_shows_strategy_review_task_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-review-tasks.json",
+                {
+                    "task_count": 3,
+                    "tasks": [
+                        {
+                            "id": "STRATEGY-REVIEW-TREND-STRENGTH-NEEDS-REVIEW",
+                            "strategy": "trend_strength",
+                            "status": "needs_review",
+                            "priority": "medium",
+                            "task_status": "open",
+                        },
+                        {
+                            "id": "STRATEGY-REVIEW-VALUE-QUALITY-NEEDS-REVIEW",
+                            "strategy": "value_quality",
+                            "status": "needs_review",
+                            "priority": "medium",
+                            "task_status": "deferred",
+                        },
+                        {
+                            "id": "STRATEGY-REVIEW-EVENT-CATALYST-NEEDS-REVIEW",
+                            "strategy": "event_catalyst",
+                            "status": "needs_review",
+                            "priority": "medium",
+                            "task_status": "resolved",
+                        },
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 10, 30, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["strategy_review_tasks"]["task_count"], 3)
+        self.assertEqual(summary["strategy_review_tasks"]["open_task_count"], 1)
+        self.assertEqual(summary["strategy_review_tasks"]["deferred_task_count"], 1)
+        self.assertEqual(summary["strategy_review_tasks"]["resolved_task_count"], 1)
+        self.assertIn("处理 1 个未完成策略复核任务。", summary["operating_actions"])
+        self.assertIn("复查 1 个暂缓策略复核任务。", summary["operating_actions"])
+        self.assertIn("STRATEGY-REVIEW-TREND-STRENGTH-NEEDS-REVIEW", content)
 
 
 if __name__ == "__main__":
