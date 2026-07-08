@@ -125,19 +125,37 @@ def summarize_exit_plans(exit_plans: list[dict[str, Any]]) -> dict[str, Any]:
 
 def summarize_exit_executions(executions: list[dict[str, Any]]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
+    missing_confirmation_count = 0
     for item in executions:
         data = item["data"]
+        confirmation_status = value_at(data, "confirmation_snapshot.status") or "missing"
+        exit_check = value_at(data, "execution.exit_check_conclusion")
+        mode = value_at(data, "execution.mode")
+        requires_confirmation = exit_check == "needs_review" or mode == "real"
+        missing_confirmation = requires_confirmation and confirmation_status != "confirmed"
+        if missing_confirmation:
+            missing_confirmation_count += 1
         rows.append(
             {
                 "path": item["path"],
                 "id": value_at(data, "execution.id"),
                 "stock": value_at(data, "stock.code"),
-                "exit_check": value_at(data, "execution.exit_check_conclusion"),
+                "mode": mode,
+                "exit_check": exit_check,
+                "confirmation_id": value_at(data, "execution.confirmation_id"),
+                "confirmation_status": confirmation_status,
+                "requires_confirmation": requires_confirmation,
+                "missing_confirmation": missing_confirmation,
                 "trade_return_pct": value_at(data, "result_estimate.trade_return_pct"),
                 "portfolio_return_pct": value_at(data, "result_estimate.portfolio_return_pct"),
             }
         )
-    return {"count": len(rows), "rows": rows}
+    return {
+        "count": len(rows),
+        "requires_confirmation_count": sum(1 for row in rows if row["requires_confirmation"]),
+        "missing_confirmation_count": missing_confirmation_count,
+        "rows": rows,
+    }
 
 
 def trade_execution_requires_confirmation(data: dict[str, Any]) -> bool:
@@ -498,6 +516,7 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
     portfolio = summary["portfolio"]
     exits = summary["exit_plans"]
     trade_executions = summary["trade_executions"]
+    exit_executions = summary["exit_executions"]
     reviews = summary["reviews"]
     review_analysis_available = summary["review_analysis_available"]
     cooldown = summary["cooldown"]
@@ -525,6 +544,8 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
         actions.append(f"处理 {len(urgent_exits)} 个紧急退出计划。")
     if trade_executions["missing_confirmation_count"]:
         actions.append(f"修正 {trade_executions['missing_confirmation_count']} 笔缺少确认快照的交易执行记录。")
+    if exit_executions["missing_confirmation_count"]:
+        actions.append(f"修正 {exit_executions['missing_confirmation_count']} 笔缺少确认快照的卖出执行记录。")
     if reviews["draft_count"]:
         actions.append(f"补全 {reviews['draft_count']} 份复盘草稿。")
     if reviews["quality_blocked_count"]:
@@ -609,6 +630,7 @@ def derive_manual_confirmation_items(summary: dict[str, Any]) -> list[dict[str, 
     confirmations: list[dict[str, Any]] = []
     exits = summary["exit_plans"]
     trade_executions = summary["trade_executions"]
+    exit_executions = summary["exit_executions"]
     reviews = summary["reviews"]
     strategy_health = summary["strategy_health"]
     strategy_config_changes = summary["strategy_config_changes"]
@@ -639,6 +661,19 @@ def derive_manual_confirmation_items(summary: dict[str, Any]) -> list[dict[str, 
                     confirmation_id=confirmation_id,
                     text=text,
                     subject_type="trade_execution",
+                    subject_id=row["id"] or "",
+                )
+            )
+    for row in exit_executions["rows"]:
+        if row["missing_confirmation"]:
+            confirmation_id = row["confirmation_id"] or f"CONFIRM-EXIT-EXEC-{slug(row['id'])}"
+            text = f"补齐卖出执行确认记录：{row['id']} stock={row['stock']} mode={row['mode']} check={row['exit_check']}。"
+            confirmations.append(
+                manual_confirmation_item(
+                    records,
+                    confirmation_id=confirmation_id,
+                    text=text,
+                    subject_type="exit_execution",
                     subject_id=row["id"] or "",
                 )
             )
@@ -813,6 +848,8 @@ def render_summary(summary: dict[str, Any]) -> str:
         f"- 需确认交易执行：{trade_executions['requires_confirmation_count']}",
         f"- 缺少确认快照交易执行：{trade_executions['missing_confirmation_count']}",
         f"- 卖出执行数量：{executions['count']}",
+        f"- 需确认卖出执行：{executions['requires_confirmation_count']}",
+        f"- 缺少确认快照卖出执行：{executions['missing_confirmation_count']}",
         "",
     ]
 
@@ -832,7 +869,7 @@ def render_summary(summary: dict[str, Any]) -> str:
         lines.append("卖出执行：")
         for row in executions["rows"]:
             lines.append(
-                f"- {row['id']} {row['stock']} check={row['exit_check']} trade_return={row['trade_return_pct']}% portfolio={row['portfolio_return_pct']}%"
+                f"- {row['id']} {row['stock']} mode={row['mode']} check={row['exit_check']} confirmation={row['confirmation_status']} trade_return={row['trade_return_pct']}% portfolio={row['portfolio_return_pct']}%"
             )
         lines.append("")
 

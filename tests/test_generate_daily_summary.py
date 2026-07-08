@@ -65,6 +65,15 @@ def exit_execution() -> dict:
     return execution
 
 
+def exit_execution_missing_confirmation() -> dict:
+    execution = exit_execution()
+    execution["execution"]["mode"] = "real"
+    execution["execution"]["exit_check_conclusion"] = "needs_review"
+    execution["execution"]["confirmation_id"] = "CONFIRM-EXIT-EXEC-SUMMARY-0001"
+    execution["confirmation_snapshot"] = {"available": False, "status": "missing"}
+    return execution
+
+
 def trade_execution() -> dict:
     data = load_yaml(ROOT / "templates/trade-execution.example.yaml")
     data["execution"]["id"] = "EXEC-SUMMARY-0001"
@@ -163,6 +172,25 @@ class GenerateDailySummaryTest(unittest.TestCase):
         )
         self.assertIn("缺少确认快照交易执行：1", content)
         self.assertIn("EXEC-SUMMARY-0001", content)
+
+    def test_daily_summary_shows_exit_execution_missing_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_yaml(base / "exit-executions" / "exit_execution.yaml", exit_execution_missing_confirmation())
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 9, 15, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["exit_executions"]["count"], 1)
+        self.assertEqual(summary["exit_executions"]["requires_confirmation_count"], 1)
+        self.assertEqual(summary["exit_executions"]["missing_confirmation_count"], 1)
+        self.assertIn("修正 1 笔缺少确认快照的卖出执行记录。", summary["operating_actions"])
+        self.assertIn(
+            "待确认：补齐卖出执行确认记录：EXITEXEC-SUMMARY-0001 stock=600000 mode=real check=needs_review。 confirmation_id=CONFIRM-EXIT-EXEC-SUMMARY-0001",
+            summary["manual_confirmations"],
+        )
+        self.assertIn("缺少确认快照卖出执行：1", content)
+        self.assertIn("EXITEXEC-SUMMARY-0001", content)
 
     def test_daily_summary_shows_strategy_health_action_reasons(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
