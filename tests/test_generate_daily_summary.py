@@ -30,6 +30,7 @@ def args(tmp_dir: str) -> Namespace:
         strategy_config_patch_audit=str(base / "strategy-config-patch.apply.json"),
         strategy_config_regression=str(base / "strategy-config-regression.json"),
         strategy_config_pipeline=str(base / "strategy-config-change-pipeline.json"),
+        strategy_config_snapshot=str(base / "strategy-config-snapshot.json"),
         output=str(base / "daily-summary.md"),
         json_output=None,
         json=False,
@@ -384,6 +385,30 @@ class GenerateDailySummaryTest(unittest.TestCase):
             summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 17, 15, 0))
 
         self.assertIn("配置变更流水线校验阻断，先修正变更草稿。", summary["operating_actions"])
+
+    def test_daily_summary_shows_strategy_config_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "strategy-config-snapshot.json",
+                {
+                    "version_id": "CONFIG-VERSION-20260708-173000",
+                    "generated_at": "2026-07-08T17:30:00",
+                    "profile_hash": "4e0e64d3354b0d4bc865d57a0582e0119dd05a0074c612687a3f1a69705f3edd",
+                    "profile": {"name": "personal-a-share-investment-profile"},
+                    "source": {"regression": {"conclusion": "pass"}},
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 18, 0, 0))
+            content = render_summary(summary)
+
+        self.assertTrue(summary["strategy_config_snapshot"]["available"])
+        self.assertEqual(summary["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-20260708-173000")
+        self.assertEqual(summary["strategy_config_snapshot"]["profile_hash_short"], "4e0e64d3354b")
+        self.assertIn("策略配置版本快照：已读取", content)
+        self.assertIn("当前配置版本：CONFIG-VERSION-20260708-173000", content)
+        self.assertIn("配置哈希：4e0e64d3354b", content)
 
 
 if __name__ == "__main__":
