@@ -150,6 +150,46 @@ class CheckTradeExecutionTest(unittest.TestCase):
         self.assertEqual(result["conclusion"], "blocked")
         self.assertTrue(any(item["code"] == "missing_user_confirmation" for item in result["blockers"]))
 
+    def test_blocks_cooldown_exception_without_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = self.create_execution_record(tmp_dir)
+        execution["execution"]["cooldown_conclusion"] = "cooldown_required"
+        execution["execution"]["cooldown_exception_reason"] = ""
+        execution["cooldown_snapshot"] = {"conclusion": "cooldown_required"}
+
+        result = check_execution(execution)
+
+        self.assertEqual(result["conclusion"], "blocked")
+        self.assertTrue(any(item["code"] == "missing_cooldown_exception_reason" for item in result["blockers"]))
+
+    def test_blocks_cooldown_exception_without_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = self.create_execution_record(tmp_dir)
+        execution["execution"]["gate_conclusion"] = "pass"
+        execution["execution"]["user_confirmed"] = False
+        execution["execution"]["cooldown_conclusion"] = "cooldown_required"
+        execution["execution"]["cooldown_exception_reason"] = "例外原因。"
+        execution["cooldown_snapshot"] = {"conclusion": "cooldown_required"}
+
+        result = check_execution(execution)
+
+        self.assertEqual(result["conclusion"], "blocked")
+        self.assertTrue(any(item["code"] == "cooldown_exception_without_confirmation" for item in result["blockers"]))
+
+    def test_passes_confirmed_cooldown_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = self.create_execution_record(tmp_dir)
+        execution = copy.deepcopy(execution)
+        execution["order"]["execution_price"] = 9.9
+        execution["order"]["slippage_pct_vs_plan"] = -1.0
+        execution["execution"]["cooldown_conclusion"] = "cooldown_required"
+        execution["execution"]["cooldown_exception_reason"] = "小仓位验证。"
+        execution["cooldown_snapshot"] = {"conclusion": "cooldown_required"}
+
+        result = check_execution(execution)
+
+        self.assertEqual(result["conclusion"], "pass")
+
     def test_run_check_reads_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             execution = self.create_execution_record(tmp_dir)

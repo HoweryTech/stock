@@ -56,6 +56,21 @@ def check_gate_and_confirmation(execution: dict[str, Any]) -> list[CheckItem]:
     return blockers
 
 
+def check_cooldown_exception(execution: dict[str, Any]) -> list[CheckItem]:
+    blockers: list[CheckItem] = []
+    side = value_at(execution, "order.side")
+    cooldown_conclusion = value_at(execution, "execution.cooldown_conclusion") or value_at(execution, "cooldown_snapshot.conclusion")
+    exception_reason = value_at(execution, "execution.cooldown_exception_reason")
+    user_confirmed = bool(value_at(execution, "execution.user_confirmed"))
+
+    if side == "buy" and cooldown_conclusion == "cooldown_required":
+        if not user_confirmed:
+            blockers.append(CheckItem("cooldown_exception_without_confirmation", "冷静期内买入例外必须人工确认。"))
+        if is_missing(exception_reason):
+            blockers.append(CheckItem("missing_cooldown_exception_reason", "冷静期内买入例外必须记录原因。"))
+    return blockers
+
+
 def check_price_and_position(execution: dict[str, Any]) -> tuple[list[CheckItem], list[CheckItem], list[CheckItem]]:
     blockers: list[CheckItem] = []
     warnings: list[CheckItem] = []
@@ -97,6 +112,7 @@ def check_price_and_position(execution: dict[str, Any]) -> tuple[list[CheckItem]
 def check_execution(execution: dict[str, Any]) -> dict[str, Any]:
     blockers = check_required_fields(execution)
     blockers.extend(check_gate_and_confirmation(execution))
+    blockers.extend(check_cooldown_exception(execution))
     price_blockers, warnings, info = check_price_and_position(execution)
     blockers.extend(price_blockers)
 
