@@ -13,10 +13,12 @@ from typing import Any
 try:
     from tools.analyze_trade_reviews import analyze_reviews, expand_paths, render_analysis, write_text
     from tools.check_review_cooldown import check_cooldown
+    from tools.check_strategy_health import check_strategy_health, render_health
     from tools.risk_check import load_yaml
 except ModuleNotFoundError:
     from analyze_trade_reviews import analyze_reviews, expand_paths, render_analysis, write_text
     from check_review_cooldown import check_cooldown
+    from check_strategy_health import check_strategy_health, render_health
     from risk_check import load_yaml
 
 
@@ -29,10 +31,19 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     review_paths = expand_paths(args.reviews)
     analysis = analyze_reviews(review_paths)
     cooldown = check_cooldown(load_yaml(Path(args.profile)), review_paths)
+    strategy_health = check_strategy_health(
+        analysis,
+        cooldown,
+        min_trades=args.min_trades,
+        min_win_rate_pct=args.min_win_rate_pct,
+        min_avg_return_pct=args.min_avg_return_pct,
+    )
 
     write_text(Path(args.analysis_output), render_analysis(analysis))
     write_json(Path(args.analysis_json_output), analysis)
     write_json(Path(args.cooldown_output), cooldown)
+    write_text(Path(args.strategy_health_output), render_health(strategy_health))
+    write_json(Path(args.strategy_health_json_output), strategy_health)
 
     metadata = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -50,6 +61,13 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 "conclusion": cooldown["conclusion"],
                 "overall_losing_streak": cooldown["overall_losing_streak"],
             },
+            "strategy_health": {
+                "output": args.strategy_health_output,
+                "json_output": args.strategy_health_json_output,
+                "conclusion": strategy_health["conclusion"],
+                "pause_count": strategy_health["pause_count"],
+                "needs_review_count": strategy_health["needs_review_count"],
+            },
         },
     }
     write_json(Path(args.metadata_output), metadata)
@@ -63,7 +81,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analysis-output", default="reports/review-analysis.md", help="Output Markdown review analysis.")
     parser.add_argument("--analysis-json-output", default="data/metadata/review-analysis.json", help="Output JSON review analysis.")
     parser.add_argument("--cooldown-output", default="data/metadata/review-cooldown.json", help="Output cooldown JSON.")
+    parser.add_argument("--strategy-health-output", default="reports/strategy-health.md", help="Output Markdown strategy health report.")
+    parser.add_argument("--strategy-health-json-output", default="data/metadata/strategy-health.json", help="Output JSON strategy health report.")
     parser.add_argument("--metadata-output", default="data/metadata/review-pipeline.json", help="Output pipeline metadata JSON.")
+    parser.add_argument("--min-trades", type=int, default=3, help="Minimum review sample size for strategy health warnings.")
+    parser.add_argument("--min-win-rate-pct", type=float, default=40.0, help="Minimum acceptable strategy win rate.")
+    parser.add_argument("--min-avg-return-pct", type=float, default=0.0, help="Minimum acceptable average trade return.")
     parser.add_argument("--json", action="store_true", help="Print pipeline metadata as JSON.")
     return parser.parse_args()
 
@@ -82,8 +105,9 @@ def main() -> int:
         print(f"review count: {metadata['review_count']}")
         print(f"review analysis: {metadata['steps']['review_analysis']['output']}")
         print(f"cooldown conclusion: {metadata['steps']['cooldown_check']['conclusion']}")
+        print(f"strategy health conclusion: {metadata['steps']['strategy_health']['conclusion']}")
         print(f"metadata: {args.metadata_output}")
-    return 1 if metadata["steps"]["cooldown_check"]["conclusion"] == "cooldown_required" else 0
+    return 1 if metadata["steps"]["cooldown_check"]["conclusion"] == "cooldown_required" or metadata["steps"]["strategy_health"]["conclusion"] != "healthy" else 0
 
 
 if __name__ == "__main__":

@@ -78,6 +78,7 @@
 - [交易复盘质量检查](./docs/交易复盘质量检查.md)
 - [交易复盘分析](./docs/交易复盘分析.md)
 - [复盘冷静期检查](./docs/复盘冷静期检查.md)
+- [策略健康检查](./docs/策略健康检查.md)
 - [复盘维护流水线](./docs/复盘维护流水线.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
