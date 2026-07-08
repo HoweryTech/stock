@@ -97,7 +97,7 @@ def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
     plan = apply_completion(plan, profile, completion_args(args))
     write_yaml(output_path, plan, overwrite=args.overwrite)
 
-    gate = run_gate(Path(args.profile), output_path)
+    gate = run_gate(Path(args.profile), output_path, strategy_health_path=Path(args.strategy_health) if args.strategy_health else None)
     result = {
         "plan": str(output_path),
         "candidate": args.code,
@@ -127,6 +127,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", help="Explicit output file path.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite output file if it already exists.")
     parser.add_argument("--gate-output", help="Optional JSON output for gate result.")
+    parser.add_argument("--strategy-health", default="data/metadata/strategy-health.json", help="Optional strategy health JSON.")
     parser.add_argument("--id", help="Explicit trade plan id.")
 
     parser.add_argument("--code", required=True, help="Candidate stock code.")

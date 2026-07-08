@@ -20,6 +20,7 @@ def args(**overrides):
         "output": "",
         "overwrite": True,
         "gate_output": "",
+        "strategy_health": None,
         "id": "TP-PREPARE-0001",
         "code": "300750",
         "name": "宁德时代",
@@ -94,6 +95,22 @@ class PrepareTradePlanFromCandidateTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 run_prepare(args(candidates=str(candidates), output=str(output), take_profit_condition=[]))
+
+    def test_prepare_uses_strategy_health_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            candidates = Path(tmp_dir) / "candidate_pool.csv"
+            output = Path(tmp_dir) / "plan.yaml"
+            strategy_health = Path(tmp_dir) / "strategy-health.json"
+            self.write_candidate_pool(candidates)
+            strategy_health.write_text(
+                '{"conclusion":"pause_required","strategies":[{"strategy":"trend_strength","status":"pause_new_entries"}]}',
+                encoding="utf-8",
+            )
+
+            result = run_prepare(args(candidates=str(candidates), output=str(output), strategy_health=str(strategy_health), strategy="trend_strength"))
+
+        self.assertEqual(result["gate"]["conclusion"], "blocked_by_strategy_health")
+        self.assertEqual(result["gate"]["strategy_health"]["conclusion"], "blocked")
 
 
 if __name__ == "__main__":
