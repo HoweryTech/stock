@@ -1,4 +1,5 @@
 import copy
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,6 +65,71 @@ class CheckTradePlanGateTest(unittest.TestCase):
 
     def test_gate_conclusion_passes_when_both_pass(self) -> None:
         self.assertEqual(gate_conclusion({"conclusion": "pass"}, {"conclusion": "pass"}), "pass")
+
+    def test_gate_blocks_paused_strategy(self) -> None:
+        plan = copy.deepcopy(self.plan)
+        plan["stock"]["name"] = "测试股票"
+        plan["stock"]["industry"] = "银行"
+        plan["strategy"]["source"] = "trend_strength"
+        plan["strategy"]["buy_reason"] = "来自观察池候选，趋势证据明确。"
+        plan["strategy"]["key_evidence"] = [
+            {"type": "manual", "description": "[trend_strength] 趋势强。"},
+            {"type": "manual", "description": "[trend_strength] 成交额支持。"},
+        ]
+        plan["strategy"]["counter_evidence_and_risks"] = [{"type": "manual", "description": "[trend_strength] 跌破止损说明趋势失效。"}]
+        path = self.write_plan(plan)
+        health_path = path.parent / "strategy-health.json"
+        health_path.write_text(
+            json.dumps({"conclusion": "pause_required", "strategies": [{"strategy": "trend_strength", "status": "pause_new_entries"}]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        result = run_gate(self.profile, path, strategy_health_path=health_path)
+
+        self.assertEqual(result["quality"]["conclusion"], "pass")
+        self.assertEqual(result["strategy_health"]["conclusion"], "blocked")
+        self.assertEqual(result["conclusion"], "blocked_by_strategy_health")
+
+    def test_gate_requires_confirmation_for_strategy_needing_review(self) -> None:
+        plan = copy.deepcopy(self.plan)
+        plan["stock"]["name"] = "测试股票"
+        plan["stock"]["industry"] = "银行"
+        plan["strategy"]["source"] = "trend_strength"
+        plan["strategy"]["buy_reason"] = "来自观察池候选，趋势证据明确。"
+        plan["strategy"]["key_evidence"] = [
+            {"type": "manual", "description": "[trend_strength] 趋势强。"},
+            {"type": "manual", "description": "[trend_strength] 成交额支持。"},
+        ]
+        plan["strategy"]["counter_evidence_and_risks"] = [{"type": "manual", "description": "[trend_strength] 跌破止损说明趋势失效。"}]
+        path = self.write_plan(plan)
+        health_path = path.parent / "strategy-health.json"
+        health_path.write_text(
+            json.dumps({"conclusion": "needs_review", "strategies": [{"strategy": "trend_strength", "status": "needs_review"}]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        result = run_gate(self.profile, path, strategy_health_path=health_path)
+
+        self.assertEqual(result["strategy_health"]["conclusion"], "needs_review")
+        self.assertEqual(result["conclusion"], "needs_confirmation")
+
+    def test_missing_strategy_health_does_not_block_gate(self) -> None:
+        plan = copy.deepcopy(self.plan)
+        plan["stock"]["name"] = "测试股票"
+        plan["stock"]["industry"] = "银行"
+        plan["strategy"]["source"] = "trend_strength"
+        plan["strategy"]["buy_reason"] = "来自观察池候选，趋势证据明确。"
+        plan["strategy"]["key_evidence"] = [
+            {"type": "manual", "description": "[trend_strength] 趋势强。"},
+            {"type": "manual", "description": "[trend_strength] 成交额支持。"},
+        ]
+        plan["strategy"]["counter_evidence_and_risks"] = [{"type": "manual", "description": "[trend_strength] 跌破止损说明趋势失效。"}]
+        path = self.write_plan(plan)
+
+        result = run_gate(self.profile, path, strategy_health_path=path.parent / "missing.json")
+
+        self.assertEqual(result["strategy_health"]["conclusion"], "missing")
+        self.assertEqual(result["conclusion"], "needs_confirmation")
 
 
 if __name__ == "__main__":

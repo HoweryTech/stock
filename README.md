@@ -225,7 +225,8 @@ python3 tools/risk_check.py \
 ```bash
 python3 tools/check_trade_plan_gate.py \
   --profile config/investment-profile.example.yaml \
-  --plan plans/TP-示例.yaml
+  --plan plans/TP-示例.yaml \
+  --strategy-health data/metadata/strategy-health.json
 ```
 
 输出 JSON：
