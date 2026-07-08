@@ -62,6 +62,18 @@ def load_strategy_health(health_path: Path | None) -> dict[str, Any]:
     return data
 
 
+def load_confirmation_record(confirmations_path: Path | None, confirmation_id: str | None) -> dict[str, Any]:
+    if not confirmation_id:
+        return {"available": False, "status": "missing", "id": None}
+    if confirmations_path is None or not confirmations_path.exists():
+        return {"available": False, "status": "missing", "id": confirmation_id}
+    data = json.loads(confirmations_path.read_text(encoding="utf-8"))
+    for item in data.get("confirmations", []) or []:
+        if item.get("id") == confirmation_id:
+            return {"available": True, **item}
+    return {"available": False, "status": "missing", "id": confirmation_id}
+
+
 def strategy_status(health: dict[str, Any], strategy: str | None) -> str | None:
     if not strategy:
         return None
@@ -142,6 +154,11 @@ def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     cooldown = load_cooldown_result(Path(cooldown_check) if cooldown_check else None)
     strategy_health_path = getattr(args, "strategy_health", None)
     strategy_health = load_strategy_health(Path(strategy_health_path) if strategy_health_path else None)
+    manual_confirmations_path = getattr(args, "manual_confirmations", None)
+    confirmation_record = load_confirmation_record(
+        Path(manual_confirmations_path) if manual_confirmations_path else None,
+        getattr(args, "confirmation_id", None),
+    )
     plan_strategy = value_at(plan, "strategy.source")
     validate_execution_allowed(gate, args.user_confirmed, args.mode)
     validate_cooldown_allowed(
@@ -182,6 +199,7 @@ def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     set_value(execution, "execution.cooldown_conclusion", cooldown.get("conclusion"))
     set_value(execution, "execution.strategy_health_conclusion", strategy_health.get("conclusion"))
     set_value(execution, "execution.user_confirmed", args.user_confirmed)
+    set_value(execution, "execution.confirmation_id", getattr(args, "confirmation_id", None) or "")
     set_value(execution, "execution.confirmation_text", value_at(plan, "risk_check_expectation.confirmation_text"))
     set_value(execution, "execution.cooldown_exception_reason", getattr(args, "cooldown_exception_reason", None) or "")
 
@@ -208,6 +226,7 @@ def create_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     set_value(execution, "gate_snapshot", gate)
     set_value(execution, "cooldown_snapshot", cooldown)
     set_value(execution, "strategy_health_snapshot", strategy_health)
+    set_value(execution, "confirmation_snapshot", confirmation_record)
     set_value(execution, "trade_plan_snapshot", plan)
 
     output_path = build_output_path(Path(args.output_dir), execution_id, args.output)
@@ -223,6 +242,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gate", help="Optional gate JSON from check_trade_plan_gate.py or prepare_trade_plan_from_candidate.py.")
     parser.add_argument("--cooldown-check", default="data/metadata/review-cooldown.json", help="Optional cooldown JSON from check_review_cooldown.py.")
     parser.add_argument("--strategy-health", default="data/metadata/strategy-health.json", help="Optional strategy health JSON from check_strategy_health.py.")
+    parser.add_argument("--manual-confirmations", default="data/metadata/manual-confirmations.json", help="Optional manual confirmation record JSON.")
     parser.add_argument("--output-dir", default="executions", help="Directory for generated execution records.")
     parser.add_argument("--output", help="Explicit output file path.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite output file if it already exists.")
@@ -237,6 +257,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--position-pct", type=float, help="Actual position percent. Defaults to planned position percent.")
     parser.add_argument("--fees", type=float, default=0.0, help="Execution fees.")
     parser.add_argument("--user-confirmed", action="store_true", help="User has manually confirmed the gated trade plan.")
+    parser.add_argument("--confirmation-id", help="Manual confirmation id recorded for this execution.")
     parser.add_argument("--allow-cooldown-exception", action="store_true", help="Allow buy execution during review cooldown.")
     parser.add_argument("--cooldown-exception-reason", help="Required reason when allowing a cooldown exception.")
     parser.add_argument("--note", action="append", default=[], help="Execution note. Can be repeated.")

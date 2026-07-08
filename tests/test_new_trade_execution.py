@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from argparse import Namespace
@@ -58,6 +59,7 @@ def execution_args(plan_path: Path, **overrides):
         "gate": None,
         "cooldown_check": None,
         "strategy_health": None,
+        "manual_confirmations": None,
         "output_dir": "executions",
         "output": None,
         "overwrite": False,
@@ -71,6 +73,7 @@ def execution_args(plan_path: Path, **overrides):
         "position_pct": 5.0,
         "fees": 5.0,
         "user_confirmed": True,
+        "confirmation_id": None,
         "allow_cooldown_exception": False,
         "cooldown_exception_reason": None,
         "note": ["模拟成交。"],
@@ -150,6 +153,41 @@ class NewTradeExecutionTest(unittest.TestCase):
 
         self.assertEqual(execution["trade_plan_snapshot"]["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-20260708-173000")
         self.assertTrue(execution["trade_plan_snapshot"]["strategy_config_snapshot"]["available"])
+
+    def test_records_manual_confirmation_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plan_path = self.write_ready_plan(tmp_dir)
+            confirmations_path = Path(tmp_dir) / "manual-confirmations.json"
+            confirmations_path.write_text(
+                json.dumps(
+                    {
+                        "confirmations": [
+                            {
+                                "id": "CONFIRM-TRADE-TP-EXEC-0001",
+                                "status": "confirmed",
+                                "confirmed_by": "lihongwei",
+                                "confirmed_at": "2026-07-08T14:00:00",
+                                "confirmation_reason": "已阅读计划、反证和最大亏损。",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            execution, _ = create_execution(
+                execution_args(
+                    plan_path,
+                    manual_confirmations=str(confirmations_path),
+                    confirmation_id="CONFIRM-TRADE-TP-EXEC-0001",
+                )
+            )
+
+        self.assertEqual(execution["execution"]["confirmation_id"], "CONFIRM-TRADE-TP-EXEC-0001")
+        self.assertTrue(execution["confirmation_snapshot"]["available"])
+        self.assertEqual(execution["confirmation_snapshot"]["status"], "confirmed")
+        self.assertEqual(execution["confirmation_snapshot"]["confirmed_by"], "lihongwei")
 
     def test_rejects_unconfirmed_needs_confirmation_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
