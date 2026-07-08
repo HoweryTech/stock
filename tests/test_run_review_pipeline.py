@@ -80,11 +80,12 @@ class RunReviewPipelineTest(unittest.TestCase):
         self.assertEqual(analysis["review_count"], 3)
         self.assertEqual(cooldown["conclusion"], "cooldown_required")
         self.assertEqual(strategy_health["conclusion"], "pause_required")
-        self.assertEqual(strategy_review_tasks["task_count"], 1)
+        self.assertEqual(strategy_review_tasks["task_count"], 2)
+        self.assertTrue(any(task["task_type"] == "config_version" for task in strategy_review_tasks["tasks"]))
         self.assertEqual(pipeline["steps"]["cooldown_check"]["conclusion"], "cooldown_required")
         self.assertEqual(pipeline["steps"]["strategy_health"]["conclusion"], "pause_required")
         self.assertEqual(pipeline["steps"]["strategy_health"]["needs_review_config_version_count"], 1)
-        self.assertEqual(pipeline["steps"]["strategy_review_tasks"]["task_count"], 1)
+        self.assertEqual(pipeline["steps"]["strategy_review_tasks"]["task_count"], 2)
 
 
 if __name__ == "__main__":

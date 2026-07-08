@@ -26,6 +26,11 @@ def task_id(strategy: str, status: str) -> str:
     return f"STRATEGY-REVIEW-{normalized or 'UNKNOWN'}"
 
 
+def config_version_task_id(version_id: str) -> str:
+    normalized = re.sub(r"[^A-Z0-9]+", "-", version_id.upper()).strip("-")
+    return f"CONFIG-VERSION-REVIEW-{normalized or 'UNKNOWN'}"
+
+
 def task_priority(status: str) -> str:
     if status == "pause_new_entries":
         return "high"
@@ -50,6 +55,18 @@ def required_review_items(actions: list[dict[str, Any]]) -> list[str]:
     return items
 
 
+def required_config_version_review_items(actions: list[dict[str, Any]]) -> list[str]:
+    codes = {str(item.get("code")) for item in actions}
+    items: list[str] = []
+    if {"config_version_low_win_rate", "config_version_low_average_return", "config_version_negative_portfolio_contribution"} & codes:
+        items.append("复查该配置版本下的交易样本，区分配置规则问题、策略问题和市场阶段问题。")
+    if "config_version_insufficient_review_sample" in codes:
+        items.append("补充该配置版本样本，不因样本不足直接扩大配置适用范围。")
+    if not items:
+        items.append("复查配置版本健康动作，形成保留、回滚、拆分或调整配置的结论。")
+    return items
+
+
 def build_tasks(health: dict[str, Any], generated_at: datetime | None = None) -> dict[str, Any]:
     generated_at = generated_at or datetime.now()
     tasks: list[dict[str, Any]] = []
@@ -62,7 +79,10 @@ def build_tasks(health: dict[str, Any], generated_at: datetime | None = None) ->
         tasks.append(
             {
                 "id": task_id(strategy, status),
+                "task_type": "strategy",
                 "strategy": strategy,
+                "config_version_id": None,
+                "profile_hash": None,
                 "status": status,
                 "priority": task_priority(status),
                 "discipline_exception_loss_count": row.get("discipline_exception_loss_count", 0),
@@ -70,6 +90,32 @@ def build_tasks(health: dict[str, Any], generated_at: datetime | None = None) ->
                 "actions": actions,
                 "required_review_items": required_review_items(actions),
                 "decision_required": "暂停新开仓、继续观察、调整规则或降低仓位上限。",
+                "task_status": "open",
+                "resolution": "",
+                "resolved_at": None,
+                "history": [],
+            }
+        )
+    for row in health.get("config_versions", []) or []:
+        if row.get("status") != "needs_review":
+            continue
+        version_id = row.get("version_id") or "UNKNOWN_CONFIG_VERSION"
+        actions = row.get("actions") or []
+        tasks.append(
+            {
+                "id": config_version_task_id(version_id),
+                "task_type": "config_version",
+                "strategy": None,
+                "config_version_id": version_id,
+                "profile_hash": row.get("profile_hash"),
+                "profile_hash_short": row.get("profile_hash_short"),
+                "status": row.get("status"),
+                "priority": "medium",
+                "discipline_exception_loss_count": 0,
+                "stats": row.get("stats") or {},
+                "actions": actions,
+                "required_review_items": required_config_version_review_items(actions),
+                "decision_required": "保留配置、回滚配置、拆分适用场景、调整规则或继续观察。",
                 "task_status": "open",
                 "resolution": "",
                 "resolved_at": None,
@@ -99,11 +145,19 @@ def render_tasks(result: dict[str, Any]) -> str:
         return "\n".join(lines)
 
     for task in result["tasks"]:
+        task_type = task.get("task_type") or "strategy"
+        lines.extend([f"## {task['id']}", "", f"- 任务类型：{task_type}"])
+        if task.get("task_type") == "config_version":
+            lines.extend(
+                [
+                    f"- 配置版本：{task.get('config_version_id')}",
+                    f"- 配置哈希：{task.get('profile_hash_short') or task.get('profile_hash') or '-'}",
+                ]
+            )
+        else:
+            lines.append(f"- 策略：{task['strategy']}")
         lines.extend(
             [
-                f"## {task['id']}",
-                "",
-                f"- 策略：{task['strategy']}",
                 f"- 状态：{task['status']}",
                 f"- 优先级：{task['priority']}",
                 f"- 亏损纪律例外数：{task['discipline_exception_loss_count']}",
