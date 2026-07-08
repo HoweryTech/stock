@@ -315,6 +315,8 @@ python3 tools/new_trade_execution.py \
   --note "按计划模拟成交。"
 ```
 
+如果 `data/metadata/review-cooldown.json` 显示冷静期已触发，买入执行默认阻断；确需例外时必须传入 `--allow-cooldown-exception --cooldown-exception-reason "..." --user-confirmed`。
+
 ### 检查交易执行偏差
 
 ```bash

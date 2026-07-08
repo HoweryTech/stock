@@ -4,7 +4,7 @@ from argparse import Namespace
 from pathlib import Path
 
 from tools.complete_trade_plan import apply_completion
-from tools.new_trade_execution import create_execution, validate_execution_allowed
+from tools.new_trade_execution import create_execution, validate_cooldown_allowed, validate_execution_allowed
 from tools.new_trade_plan import create_trade_plan, write_yaml
 from tools.risk_check import load_yaml
 
@@ -55,6 +55,7 @@ def execution_args(plan_path: Path, **overrides):
         "profile": str(ROOT / "config/investment-profile.example.yaml"),
         "plan": str(plan_path),
         "gate": None,
+        "cooldown_check": None,
         "output_dir": "executions",
         "output": None,
         "overwrite": False,
@@ -68,6 +69,8 @@ def execution_args(plan_path: Path, **overrides):
         "position_pct": 5.0,
         "fees": 5.0,
         "user_confirmed": True,
+        "allow_cooldown_exception": False,
+        "cooldown_exception_reason": None,
         "note": ["模拟成交。"],
     }
     defaults.update(overrides)
@@ -119,6 +122,7 @@ class NewTradeExecutionTest(unittest.TestCase):
         self.assertEqual(output_path, Path("executions/EXEC-TEST-0001.yaml"))
         self.assertEqual(execution["execution"]["source_trade_plan_id"], "TP-EXEC-0001")
         self.assertEqual(execution["execution"]["gate_conclusion"], "needs_confirmation")
+        self.assertEqual(execution["execution"]["cooldown_conclusion"], "missing")
         self.assertEqual(execution["order"]["slippage_pct_vs_plan"], 1.0)
         self.assertTrue(execution["order"]["price_within_max_acceptable"])
         self.assertEqual(execution["trade_plan_snapshot"]["trade_plan"]["id"], "TP-EXEC-0001")
@@ -133,6 +137,44 @@ class NewTradeExecutionTest(unittest.TestCase):
     def test_rejects_blocked_gate(self) -> None:
         with self.assertRaises(ValueError):
             validate_execution_allowed({"conclusion": "blocked_by_quality"}, True, "paper")
+
+    def test_rejects_buy_during_cooldown(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cooldown"):
+            validate_cooldown_allowed({"conclusion": "cooldown_required"}, "buy", False, None, True)
+
+    def test_cooldown_exception_requires_confirmation_and_reason(self) -> None:
+        with self.assertRaisesRegex(ValueError, "user-confirmed"):
+            validate_cooldown_allowed({"conclusion": "cooldown_required"}, "buy", True, "例外原因。", False)
+        with self.assertRaisesRegex(ValueError, "cooldown-exception-reason"):
+            validate_cooldown_allowed({"conclusion": "cooldown_required"}, "buy", True, "", True)
+
+    def test_allows_confirmed_cooldown_exception(self) -> None:
+        validate_cooldown_allowed({"conclusion": "cooldown_required"}, "buy", True, "高确定性计划。", True)
+
+    def test_sell_is_not_blocked_by_cooldown(self) -> None:
+        validate_cooldown_allowed({"conclusion": "cooldown_required"}, "sell", False, None, False)
+
+    def test_records_cooldown_exception_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plan_path = self.write_ready_plan(tmp_dir)
+            cooldown_path = Path(tmp_dir) / "cooldown.json"
+            cooldown_path.write_text(
+                '{"conclusion":"cooldown_required","actions":[{"code":"overall_losing_streak_cooldown","message":"暂停新开仓。"}]}',
+                encoding="utf-8",
+            )
+
+            execution, _ = create_execution(
+                execution_args(
+                    plan_path,
+                    cooldown_check=str(cooldown_path),
+                    allow_cooldown_exception=True,
+                    cooldown_exception_reason="高确定性小仓位例外。",
+                )
+            )
+
+        self.assertEqual(execution["execution"]["cooldown_conclusion"], "cooldown_required")
+        self.assertEqual(execution["execution"]["cooldown_exception_reason"], "高确定性小仓位例外。")
+        self.assertEqual(execution["cooldown_snapshot"]["actions"][0]["code"], "overall_losing_streak_cooldown")
 
     def test_rejects_execution_price_not_positive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

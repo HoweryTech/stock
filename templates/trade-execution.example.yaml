@@ -8,8 +8,10 @@ execution:
   mode: "paper"
   source_trade_plan_id: "TP-YYYYMMDD-0001"
   gate_conclusion: "needs_confirmation"
+  cooldown_conclusion: "normal"
   user_confirmed: true
   confirmation_text: "我确认本次交易符合计划，已阅读关键证据、反证和风险，并接受按止损价计算的最大亏损。"
+  cooldown_exception_reason: ""
 
 stock:
   code: "000001"
@@ -37,4 +39,5 @@ notes:
   - "按计划执行。"
 
 gate_snapshot: {}
+cooldown_snapshot: {}
 trade_plan_snapshot: {}
