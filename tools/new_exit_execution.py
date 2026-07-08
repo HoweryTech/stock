@@ -43,16 +43,44 @@ def detach_yaml_aliases(data: dict[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(data, ensure_ascii=False))
 
 
+def load_confirmation_record(confirmations_path: Path | None, confirmation_id: str | None) -> dict[str, Any]:
+    if not confirmation_id:
+        return {"available": False, "status": "missing", "id": None}
+    if confirmations_path is None or not confirmations_path.exists():
+        return {"available": False, "status": "missing", "id": confirmation_id}
+    data = json.loads(confirmations_path.read_text(encoding="utf-8"))
+    for item in data.get("confirmations", []) or []:
+        if item.get("id") == confirmation_id:
+            return {"available": True, **item}
+    return {"available": False, "status": "missing", "id": confirmation_id}
+
+
+def confirmation_is_confirmed(record: dict[str, Any]) -> bool:
+    return bool(record.get("available")) and record.get("status") == "confirmed"
+
+
+def exit_execution_requires_confirmation(check: dict[str, Any], mode: str) -> bool:
+    return check.get("conclusion") == "needs_review" or mode == "real"
+
+
+def validate_manual_confirmation_required(required: bool, record: dict[str, Any]) -> None:
+    if not required:
+        return
+    if not confirmation_is_confirmed(record):
+        confirmation_id = record.get("id") or "missing"
+        raise ValueError(f"confirmed manual confirmation record is required: {confirmation_id}")
+
+
 def validate_execution_allowed(check: dict[str, Any], user_confirmed: bool, mode: str) -> None:
     conclusion = check.get("conclusion")
     if conclusion == "blocked":
         raise ValueError("exit plan check conclusion 'blocked' does not allow sell execution")
     if conclusion == "needs_review" and not user_confirmed:
-        raise ValueError("exit plan check needs review; pass --user-confirmed after manual confirmation")
+        raise ValueError("exit plan check needs review; pass --confirmation-id with a confirmed manual confirmation record")
     if conclusion not in {"pass", "needs_review"}:
         raise ValueError(f"unknown exit plan check conclusion {conclusion!r}")
     if mode == "real" and not user_confirmed:
-        raise ValueError("real sell execution requires --user-confirmed")
+        raise ValueError("real sell execution requires --confirmation-id with a confirmed manual confirmation record")
 
 
 def calculate_pct_change(exit_price: float, base_price: float | None) -> float | None:
@@ -66,7 +94,14 @@ def create_exit_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
     exit_plan_path = Path(args.exit_plan)
     exit_plan = load_yaml(exit_plan_path)
     exit_check = load_exit_check(exit_plan_path, Path(args.check) if args.check else None)
-    validate_execution_allowed(exit_check, args.user_confirmed, args.mode)
+    manual_confirmations_path = getattr(args, "manual_confirmations", None)
+    confirmation_record = load_confirmation_record(
+        Path(manual_confirmations_path) if manual_confirmations_path else None,
+        getattr(args, "confirmation_id", None),
+    )
+    effective_user_confirmed = bool(args.user_confirmed or confirmation_is_confirmed(confirmation_record))
+    validate_manual_confirmation_required(exit_execution_requires_confirmation(exit_check, args.mode), confirmation_record)
+    validate_execution_allowed(exit_check, effective_user_confirmed, args.mode)
 
     execution = deepcopy(template)
     created_at, stamp = now_stamp()
@@ -98,7 +133,8 @@ def create_exit_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
     set_value(execution, "execution.source_position_id", value_at(exit_plan, "exit_plan.source_position_id"))
     set_value(execution, "execution.source_trade_plan_id", value_at(exit_plan, "exit_plan.source_trade_plan_id"))
     set_value(execution, "execution.exit_check_conclusion", exit_check.get("conclusion"))
-    set_value(execution, "execution.user_confirmed", args.user_confirmed)
+    set_value(execution, "execution.user_confirmed", effective_user_confirmed)
+    set_value(execution, "execution.confirmation_id", getattr(args, "confirmation_id", None) or "")
     set_value(execution, "execution.confirmation_text", args.confirmation_text or value_at(template, "execution.confirmation_text"))
 
     set_value(execution, "stock.code", value_at(exit_plan, "stock.code"))
@@ -136,6 +172,7 @@ def create_exit_execution(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
         or value_at(exit_plan, "position_full_snapshot.trade_plan_snapshot.strategy_config_snapshot")
         or {},
     )
+    set_value(execution, "confirmation_snapshot", confirmation_record)
     set_value(execution, "exit_check_snapshot", exit_check)
     set_value(execution, "exit_plan_snapshot", exit_plan)
 
@@ -148,6 +185,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--template", default="templates/exit-execution.example.yaml", help="Path to sell execution template YAML.")
     parser.add_argument("--exit-plan", required=True, help="Path to exit plan YAML.")
     parser.add_argument("--check", help="Optional exit check JSON from check_exit_plan.py.")
+    parser.add_argument("--manual-confirmations", default="data/metadata/manual-confirmations.json", help="Optional manual confirmation record JSON.")
     parser.add_argument("--output-dir", default="exit-executions", help="Directory for generated sell execution records.")
     parser.add_argument("--output", help="Explicit output file path.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite output file if it already exists.")
@@ -160,6 +198,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--position-pct", type=float, help="Sold position percent. Defaults to exit plan percent.")
     parser.add_argument("--fees", type=float, default=0.0, help="Execution fees.")
     parser.add_argument("--user-confirmed", action="store_true", help="User has manually confirmed the exit plan/check.")
+    parser.add_argument("--confirmation-id", help="Manual confirmation id recorded for this sell execution.")
     parser.add_argument("--allow-below-min-price", action="store_true", help="Record sell execution below min acceptable price.")
     parser.add_argument("--confirmation-text", help="Manual confirmation text.")
     parser.add_argument("--note", action="append", default=[], help="Execution note. Can be repeated.")

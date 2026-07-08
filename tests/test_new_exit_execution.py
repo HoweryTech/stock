@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from argparse import Namespace
@@ -63,6 +64,8 @@ def args(exit_plan_path: Path, **overrides) -> Namespace:
         "position_pct": None,
         "fees": 5.0,
         "user_confirmed": False,
+        "manual_confirmations": None,
+        "confirmation_id": None,
         "allow_below_min_price": False,
         "confirmation_text": None,
         "note": ["按退出计划卖出。"],
@@ -76,6 +79,27 @@ class NewExitExecutionTest(unittest.TestCase):
         path = Path(tmp_dir) / "exit.yaml"
         write_yaml(path, plan or valid_exit_plan())
         return path
+
+    def write_confirmation(self, tmp_dir: str, confirmation_id: str = "CONFIRM-EXIT-EXEC-0001") -> Path:
+        path = Path(tmp_dir) / "manual-confirmations.json"
+        data = {
+            "confirmations": [
+                {
+                    "id": confirmation_id,
+                    "status": "confirmed",
+                    "confirmed_by": "lihongwei",
+                    "confirmed_at": "2026-07-08T14:00:00",
+                    "confirmation_reason": "已阅读退出证据和继续持有风险。",
+                }
+            ]
+        }
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    def confirmed_args(self, tmp_dir: str, path: Path, **overrides) -> Namespace:
+        confirmation_id = overrides.pop("confirmation_id", "CONFIRM-EXIT-EXEC-0001")
+        confirmations_path = self.write_confirmation(tmp_dir, confirmation_id)
+        return args(path, manual_confirmations=str(confirmations_path), confirmation_id=confirmation_id, **overrides)
 
     def test_creates_sell_execution_from_passed_exit_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -106,13 +130,25 @@ class NewExitExecutionTest(unittest.TestCase):
             plan["checks"]["matched_original_plan"] = False
             path = self.write_exit_plan(tmp_dir, plan)
 
-            with self.assertRaisesRegex(ValueError, "needs review"):
+            with self.assertRaisesRegex(ValueError, "confirmed manual confirmation"):
                 create_exit_execution(args(path))
 
-            execution, _ = create_exit_execution(args(path, user_confirmed=True))
+            execution, _ = create_exit_execution(self.confirmed_args(tmp_dir, path))
 
         self.assertEqual(execution["execution"]["exit_check_conclusion"], "needs_review")
         self.assertTrue(execution["execution"]["user_confirmed"])
+        self.assertEqual(execution["execution"]["confirmation_id"], "CONFIRM-EXIT-EXEC-0001")
+        self.assertTrue(execution["confirmation_snapshot"]["available"])
+        self.assertEqual(execution["confirmation_snapshot"]["status"], "confirmed")
+
+    def test_rejects_user_confirmed_without_manual_confirmation_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plan = valid_exit_plan()
+            plan["checks"]["matched_original_plan"] = False
+            path = self.write_exit_plan(tmp_dir, plan)
+
+            with self.assertRaisesRegex(ValueError, "confirmed manual confirmation"):
+                create_exit_execution(args(path, user_confirmed=True))
 
     def test_blocks_below_min_price_without_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -131,8 +167,13 @@ class NewExitExecutionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = self.write_exit_plan(tmp_dir)
 
-            with self.assertRaisesRegex(ValueError, "real sell execution requires"):
+            with self.assertRaisesRegex(ValueError, "confirmed manual confirmation"):
                 create_exit_execution(args(path, mode="real"))
+
+            execution, _ = create_exit_execution(self.confirmed_args(tmp_dir, path, mode="real"))
+
+        self.assertTrue(execution["execution"]["user_confirmed"])
+        self.assertEqual(execution["execution"]["confirmation_id"], "CONFIRM-EXIT-EXEC-0001")
 
 
 if __name__ == "__main__":

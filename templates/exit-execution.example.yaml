@@ -12,6 +12,7 @@ execution:
   source_trade_plan_id: "TP-YYYYMMDD-0001"
   exit_check_conclusion: "pass"
   user_confirmed: true
+  confirmation_id: ""
   confirmation_text: "我确认本次卖出符合退出计划，已阅读退出证据、继续持有风险和仓位影响。"
 
 stock:
@@ -49,5 +50,6 @@ notes:
   - "按退出计划执行。"
 
 strategy_config_snapshot: {}
+confirmation_snapshot: {}
 exit_check_snapshot: {}
 exit_plan_snapshot: {}
