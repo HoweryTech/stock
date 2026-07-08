@@ -12,10 +12,12 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.check_exit_execution import check_exit_execution
     from tools.new_trade_plan import set_value, write_yaml
     from tools.new_trade_review import infer_result_category, validate_review_labels
     from tools.risk_check import as_float, load_yaml, value_at
 except ModuleNotFoundError:
+    from check_exit_execution import check_exit_execution
     from new_trade_plan import set_value, write_yaml
     from new_trade_review import infer_result_category, validate_review_labels
     from risk_check import as_float, load_yaml, value_at
@@ -47,6 +49,9 @@ def create_trade_review_from_exit_execution(args: argparse.Namespace) -> tuple[d
     profile = load_yaml(Path(args.profile))
     template = load_yaml(Path(args.template))
     exit_execution = load_yaml(Path(args.exit_execution))
+    exit_execution_check = check_exit_execution(exit_execution)
+    if exit_execution_check["conclusion"] == "blocked" and not args.allow_blocked_exit_execution:
+        raise ValueError("exit execution check is blocked; pass --allow-blocked-exit-execution only for explicit correction workflows")
     review = deepcopy(template)
     created_at, stamp = now_stamp()
     review_id = args.id or f"TR-{stamp}"
@@ -127,6 +132,7 @@ def create_trade_review_from_exit_execution(args: argparse.Namespace) -> tuple[d
     )
     set_value(review, "exit_plan_snapshot", value_at(exit_execution, "exit_plan_snapshot") or {})
     set_value(review, "exit_execution_snapshot", exit_execution)
+    set_value(review, "exit_execution_check_snapshot", exit_execution_check)
 
     output_path = build_output_path(Path(args.output_dir), review_id, args.output)
     return detach_yaml_aliases(review), output_path
@@ -137,6 +143,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile", default="config/investment-profile.example.yaml", help="Path to investment profile YAML.")
     parser.add_argument("--template", default="templates/trade-review.example.yaml", help="Path to trade review template YAML.")
     parser.add_argument("--exit-execution", required=True, help="Path to sell execution YAML.")
+    parser.add_argument(
+        "--allow-blocked-exit-execution",
+        action="store_true",
+        help="Allow review creation even when sell execution check is blocked.",
+    )
     parser.add_argument("--output-dir", default="reviews", help="Directory for generated trade reviews.")
     parser.add_argument("--output", help="Explicit output file path.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite output file if it already exists.")

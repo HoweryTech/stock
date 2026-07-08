@@ -54,6 +54,7 @@ def args(path: Path, **overrides) -> Namespace:
         "profile": str(ROOT / "config/investment-profile.example.yaml"),
         "template": str(ROOT / "templates/trade-review.example.yaml"),
         "exit_execution": str(path),
+        "allow_blocked_exit_execution": False,
         "output_dir": "reviews",
         "output": None,
         "overwrite": False,
@@ -86,6 +87,7 @@ class NewTradeReviewFromExitExecutionTest(unittest.TestCase):
         self.assertEqual(review["result"]["trade_return_pct"], -9.0)
         self.assertEqual(review["result"]["result_category"], "strategy_loss")
         self.assertEqual(review["strategy_config_snapshot"]["version_id"], "CONFIG-VERSION-TEST")
+        self.assertEqual(review["exit_execution_check_snapshot"]["conclusion"], "pass")
 
     def test_infers_execution_error_profit_when_not_followed_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -137,6 +139,37 @@ class NewTradeReviewFromExitExecutionTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "entry price"):
                 create_trade_review_from_exit_execution(args(path))
+
+    def test_blocks_review_from_blocked_exit_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = exit_execution_record()
+            execution["execution"]["mode"] = "real"
+            execution["execution"]["user_confirmed"] = True
+            execution["execution"]["confirmation_id"] = "CONFIRM-EXITEXEC-REVIEW-0001"
+            execution["confirmation_snapshot"] = {"available": False, "status": "missing"}
+            path = self.write_execution(tmp_dir, execution)
+
+            with self.assertRaisesRegex(ValueError, "exit execution check is blocked"):
+                create_trade_review_from_exit_execution(args(path))
+
+    def test_allows_blocked_exit_execution_for_correction_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            execution = exit_execution_record()
+            execution["execution"]["mode"] = "real"
+            execution["execution"]["user_confirmed"] = True
+            execution["execution"]["confirmation_id"] = "CONFIRM-EXITEXEC-REVIEW-0001"
+            execution["confirmation_snapshot"] = {"available": False, "status": "missing"}
+            path = self.write_execution(tmp_dir, execution)
+
+            review, _ = create_trade_review_from_exit_execution(args(path, allow_blocked_exit_execution=True))
+
+        self.assertEqual(review["exit_execution_check_snapshot"]["conclusion"], "blocked")
+        self.assertTrue(
+            any(
+                item["code"] == "missing_confirmed_manual_confirmation_record"
+                for item in review["exit_execution_check_snapshot"]["blockers"]
+            )
+        )
 
 
 if __name__ == "__main__":
