@@ -23,6 +23,7 @@ def args(tmp_dir: str) -> Namespace:
         exit_executions=[str(base / "exit-executions/*.yaml")],
         reviews=[str(base / "reviews/*.yaml")],
         review_analysis=str(base / "review-analysis.json"),
+        execution_loop_check=str(base / "execution-loop-check.json"),
         cooldown_check=str(base / "review-cooldown.json"),
         strategy_health=str(base / "strategy-health.json"),
         strategy_review_tasks=str(base / "strategy-review-tasks.json"),
@@ -227,6 +228,26 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertEqual(summary["strategy_health"]["needs_review_count"], 1)
         self.assertIn("loss_making_discipline_exception", summary["strategy_health"]["actions"][0])
         self.assertIn("亏损纪律例外交易", content)
+
+    def test_daily_summary_shows_execution_loop_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "execution-loop-check.json",
+                {
+                    "conclusion": "blocked",
+                    "blocked_count": 2,
+                    "needs_review_count": 1,
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 9, 20, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["execution_loop"]["conclusion"], "blocked")
+        self.assertIn("执行闭环存在 2 条阻断记录，先修正再推进下一环节。", summary["operating_actions"])
+        self.assertIn("执行闭环总检查：已读取", content)
+        self.assertIn("执行闭环阻断记录：2", content)
 
     def test_daily_summary_shows_config_version_health_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
