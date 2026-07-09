@@ -238,6 +238,7 @@ class GenerateDailySummaryTest(unittest.TestCase):
                     "conclusion": "blocked",
                     "blocked_count": 2,
                     "needs_review_count": 1,
+                    "downstream_gap_count": 1,
                 },
             )
 
@@ -248,6 +249,7 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("执行闭环存在 2 条阻断记录，先修正再推进下一环节。", summary["operating_actions"])
         self.assertIn("执行闭环总检查：已读取", content)
         self.assertIn("执行闭环阻断记录：2", content)
+        self.assertIn("执行闭环缺失下游记录：1", content)
 
     def test_daily_summary_shows_config_version_health_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
