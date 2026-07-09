@@ -48,6 +48,7 @@
 - [投资体系配置](./docs/投资体系配置.md)
 - [投资体系配置文件](./config/investment-profile.example.yaml)
 - [每日决策流程](./docs/每日决策流程.md)
+- [日常检查流水线](./docs/日常检查流水线.md)
 - [每日操作摘要](./docs/每日操作摘要.md)
 - [交易计划与风控校验](./docs/交易计划与风控校验.md)
 - [数据目录与股票基础信息导入](./docs/数据目录与股票基础信息导入.md)
@@ -202,6 +203,12 @@ python3 tools/run_watchlist_pipeline.py \
   --valuation-metrics data/processed/valuation_metrics.csv \
   --universe data/processed/tradable_universe.csv \
   --report-output reports/watchlist.md
+```
+
+### 运行日常检查流水线
+
+```bash
+python3 tools/run_daily_check_pipeline.py
 ```
 
 ### 生成每日操作摘要
