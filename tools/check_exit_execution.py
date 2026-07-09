@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.manual_confirmation import confirmation_snapshot_confirmed
     from tools.risk_check import as_float, is_missing, load_yaml, value_at
 except ModuleNotFoundError:
+    from manual_confirmation import confirmation_snapshot_confirmed
     from risk_check import as_float, is_missing, load_yaml, value_at
 
 
@@ -38,10 +40,6 @@ def check_required_fields(execution: dict[str, Any]) -> list[CheckItem]:
         if is_missing(value_at(execution, path)):
             blockers.append(CheckItem(f"missing_{path.replace('.', '_')}", f"缺少{label}。"))
     return blockers
-
-
-def confirmation_snapshot_confirmed(execution: dict[str, Any]) -> bool:
-    return bool(value_at(execution, "confirmation_snapshot.available")) and value_at(execution, "confirmation_snapshot.status") == "confirmed"
 
 
 def exit_execution_requires_confirmation(execution: dict[str, Any]) -> bool:

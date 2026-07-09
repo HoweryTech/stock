@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.manual_confirmation import confirmation_snapshot_confirmed
     from tools.new_trade_execution import ALLOWED_GATE_CONCLUSIONS
     from tools.risk_check import as_float, is_missing, load_yaml, value_at
 except ModuleNotFoundError:
+    from manual_confirmation import confirmation_snapshot_confirmed
     from new_trade_execution import ALLOWED_GATE_CONCLUSIONS
     from risk_check import as_float, is_missing, load_yaml, value_at
 
@@ -54,10 +56,6 @@ def check_gate_and_confirmation(execution: dict[str, Any]) -> list[CheckItem]:
     if mode == "real" and not user_confirmed:
         blockers.append(CheckItem("real_execution_without_confirmation", "真实执行必须人工确认。"))
     return blockers
-
-
-def confirmation_snapshot_confirmed(execution: dict[str, Any]) -> bool:
-    return bool(value_at(execution, "confirmation_snapshot.available")) and value_at(execution, "confirmation_snapshot.status") == "confirmed"
 
 
 def check_manual_confirmation_snapshot(execution: dict[str, Any]) -> list[CheckItem]:

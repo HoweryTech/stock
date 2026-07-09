@@ -3,7 +3,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.manual_confirmation import confirmation_is_confirmed, load_confirmation_record, validate_manual_confirmation_required
+from tools.manual_confirmation import (
+    confirmation_is_confirmed,
+    confirmation_snapshot_confirmed,
+    load_confirmation_record,
+    validate_manual_confirmation_required,
+)
 
 
 class ManualConfirmationTest(unittest.TestCase):
@@ -52,6 +57,13 @@ class ManualConfirmationTest(unittest.TestCase):
 
     def test_validate_required_ignores_optional_missing_record(self) -> None:
         validate_manual_confirmation_required(False, {"available": False, "status": "missing", "id": None})
+
+    def test_detects_confirmed_snapshot(self) -> None:
+        self.assertTrue(confirmation_snapshot_confirmed({"confirmation_snapshot": {"available": True, "status": "confirmed"}}))
+
+    def test_rejects_missing_snapshot(self) -> None:
+        self.assertFalse(confirmation_snapshot_confirmed({"confirmation_snapshot": {"available": False, "status": "missing"}}))
+        self.assertFalse(confirmation_snapshot_confirmed({}))
 
 
 if __name__ == "__main__":

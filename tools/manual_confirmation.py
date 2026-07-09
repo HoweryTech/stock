@@ -23,6 +23,11 @@ def confirmation_is_confirmed(record: dict[str, Any]) -> bool:
     return bool(record.get("available")) and record.get("status") == "confirmed"
 
 
+def confirmation_snapshot_confirmed(document: dict[str, Any]) -> bool:
+    snapshot = document.get("confirmation_snapshot") or {}
+    return bool(snapshot.get("available")) and snapshot.get("status") == "confirmed"
+
+
 def validate_manual_confirmation_required(required: bool, record: dict[str, Any]) -> None:
     if not required:
         return
