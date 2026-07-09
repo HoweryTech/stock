@@ -14,12 +14,12 @@ try:
     from tools.check_exit_execution import check_exit_execution
     from tools.check_trade_execution import check_execution
     from tools.check_trade_review_quality import check_trade_review_quality
-    from tools.risk_check import load_yaml
+    from tools.risk_check import load_yaml, value_at
 except ModuleNotFoundError:
     from check_exit_execution import check_exit_execution
     from check_trade_execution import check_execution
     from check_trade_review_quality import check_trade_review_quality
-    from risk_check import load_yaml
+    from risk_check import load_yaml, value_at
 
 
 def expand_paths(patterns: list[str]) -> list[Path]:
@@ -54,6 +54,10 @@ def check_documents(paths: list[Path], checker: Any, id_key: str) -> list[dict[s
     return rows
 
 
+def load_documents(paths: list[Path]) -> list[dict[str, Any]]:
+    return [{"path": str(path), "data": load_yaml(path)} for path in paths]
+
+
 def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "count": len(rows),
@@ -64,17 +68,73 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def source_ids(documents: list[dict[str, Any]], path: str) -> set[str]:
+    ids: set[str] = set()
+    for item in documents:
+        source_id = value_at(item["data"], path)
+        if source_id:
+            ids.add(str(source_id))
+    return ids
+
+
+def downstream_gaps(
+    trade_execution_rows: list[dict[str, Any]],
+    exit_execution_rows: list[dict[str, Any]],
+    position_documents: list[dict[str, Any]],
+    review_documents: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    gaps: list[dict[str, Any]] = []
+    positioned_execution_ids = source_ids(position_documents, "execution_snapshot.execution.id")
+    reviewed_exit_execution_ids = source_ids(review_documents, "review.source_exit_execution_id")
+
+    for row in trade_execution_rows:
+        if row["conclusion"] != "pass" or not row["id"]:
+            continue
+        if str(row["id"]) not in positioned_execution_ids:
+            gaps.append(
+                {
+                    "subject_type": "trade_execution",
+                    "subject_id": row["id"],
+                    "expected_record": "position",
+                    "code": "missing_position_from_trade_execution",
+                    "message": f"买入执行 {row['id']} 已通过检查，但未找到来源执行对应的持仓记录。",
+                }
+            )
+    for row in exit_execution_rows:
+        if row["conclusion"] != "pass" or not row["id"]:
+            continue
+        if str(row["id"]) not in reviewed_exit_execution_ids:
+            gaps.append(
+                {
+                    "subject_type": "exit_execution",
+                    "subject_id": row["id"],
+                    "expected_record": "trade_review",
+                    "code": "missing_review_from_exit_execution",
+                    "message": f"卖出执行 {row['id']} 已通过检查，但未找到来源卖出执行对应的复盘记录。",
+                }
+            )
+    return gaps
+
+
 def build_loop_check(args: argparse.Namespace) -> dict[str, Any]:
     trade_execution_rows = check_documents(expand_paths(args.trade_executions), check_execution, "execution_id")
     exit_execution_rows = check_documents(expand_paths(args.exit_executions), check_exit_execution, "exit_execution_id")
-    review_rows = check_documents(expand_paths(args.reviews), check_trade_review_quality, "review_id")
+    review_paths = expand_paths(args.reviews)
+    review_rows = check_documents(review_paths, check_trade_review_quality, "review_id")
+    gaps = downstream_gaps(
+        trade_execution_rows,
+        exit_execution_rows,
+        load_documents(expand_paths(args.positions)),
+        load_documents(review_paths),
+    )
     sections = {
         "trade_executions": summarize_rows(trade_execution_rows),
         "exit_executions": summarize_rows(exit_execution_rows),
         "reviews": summarize_rows(review_rows),
     }
     blocked_count = sum(section["blocked_count"] for section in sections.values())
-    needs_review_count = sum(section["needs_review_count"] for section in sections.values())
+    downstream_gap_count = len(gaps)
+    needs_review_count = sum(section["needs_review_count"] for section in sections.values()) + downstream_gap_count
     if blocked_count:
         conclusion = "blocked"
     elif needs_review_count:
@@ -85,6 +145,8 @@ def build_loop_check(args: argparse.Namespace) -> dict[str, Any]:
         "conclusion": conclusion,
         "blocked_count": blocked_count,
         "needs_review_count": needs_review_count,
+        "downstream_gap_count": downstream_gap_count,
+        "downstream_gaps": gaps,
         **sections,
     }
 
@@ -122,8 +184,14 @@ def render_loop_check(result: dict[str, Any]) -> str:
         f"- 总结论：{result['conclusion']}",
         f"- 阻断项记录数：{result['blocked_count']}",
         f"- 需复核记录数：{result['needs_review_count']}",
+        f"- 缺失下游记录数：{result['downstream_gap_count']}",
         "",
     ]
+    if result["downstream_gaps"]:
+        lines.extend(["## 缺失下游记录", ""])
+        for gap in result["downstream_gaps"]:
+            lines.append(f"- [{gap['code']}] {gap['message']}")
+        lines.append("")
     lines.extend(render_section("买入执行记录", result["trade_executions"]))
     lines.extend(render_section("卖出执行记录", result["exit_executions"]))
     lines.extend(render_section("交易复盘记录", result["reviews"]))
@@ -144,6 +212,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check execution-to-review workflow integrity.")
     parser.add_argument("--trade-executions", nargs="+", default=["executions/*.yaml"], help="Trade execution YAML paths or glob patterns.")
     parser.add_argument("--exit-executions", nargs="+", default=["exit-executions/*.yaml"], help="Sell execution YAML paths or glob patterns.")
+    parser.add_argument("--positions", nargs="+", default=["positions/*.yaml"], help="Position YAML paths or glob patterns.")
     parser.add_argument("--reviews", nargs="+", default=["reviews/*.yaml"], help="Trade review YAML paths or glob patterns.")
     parser.add_argument("--output", default="reports/execution-loop-check.md", help="Output Markdown report.")
     parser.add_argument("--json-output", help="Optional output JSON summary.")

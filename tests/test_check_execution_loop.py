@@ -15,6 +15,7 @@ def args(base: Path) -> Namespace:
     return Namespace(
         trade_executions=[str(base / "executions/*.yaml")],
         exit_executions=[str(base / "exit-executions/*.yaml")],
+        positions=[str(base / "positions/*.yaml")],
         reviews=[str(base / "reviews/*.yaml")],
         output=str(base / "reports/execution-loop-check.md"),
         json_output=None,
@@ -65,6 +66,31 @@ def blocked_exit_execution() -> dict:
     return execution
 
 
+def valid_exit_execution() -> dict:
+    execution = blocked_exit_execution()
+    execution["execution"]["mode"] = "paper"
+    execution["execution"]["exit_check_conclusion"] = "pass"
+    execution["execution"]["user_confirmed"] = False
+    execution["execution"]["confirmation_id"] = ""
+    execution["confirmation_snapshot"] = {"available": False, "status": "missing"}
+    return execution
+
+
+def position_from_trade_execution() -> dict:
+    position = load_yaml(ROOT / "templates/position.example.yaml")
+    position["position"]["id"] = "POS-LOOP-0001"
+    position["execution_snapshot"] = {"execution": {"id": "EXEC-LOOP-0001"}}
+    return position
+
+
+def review_from_exit_execution() -> dict:
+    review = review_needs_review()
+    review["review"]["source_exit_execution_id"] = "EXITEXEC-LOOP-0001"
+    review["review_questions"]["risk_control_followed"] = True
+    review["review_questions"]["lesson"] = "按计划退出。"
+    return review
+
+
 def review_needs_review() -> dict:
     review = load_yaml(ROOT / "templates/trade-review.example.yaml")
     review["review"]["id"] = "TR-LOOP-0001"
@@ -107,6 +133,34 @@ class CheckExecutionLoopTest(unittest.TestCase):
         self.assertEqual(result["reviews"]["needs_review_count"], 1)
         self.assertIn("missing_confirmed_manual_confirmation_record", content)
         self.assertIn("missing_lesson", content)
+
+    def test_marks_missing_downstream_records_as_needs_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_yaml(base / "executions" / "execution.yaml", valid_trade_execution())
+            write_yaml(base / "exit-executions" / "exit_execution.yaml", valid_exit_execution())
+
+            result = build_loop_check(args(base))
+            content = render_loop_check(result)
+
+        self.assertEqual(result["conclusion"], "needs_review")
+        self.assertEqual(result["downstream_gap_count"], 2)
+        self.assertEqual(result["needs_review_count"], 2)
+        self.assertIn("missing_position_from_trade_execution", content)
+        self.assertIn("missing_review_from_exit_execution", content)
+
+    def test_passes_when_downstream_records_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_yaml(base / "executions" / "execution.yaml", valid_trade_execution())
+            write_yaml(base / "positions" / "position.yaml", position_from_trade_execution())
+            write_yaml(base / "exit-executions" / "exit_execution.yaml", valid_exit_execution())
+            write_yaml(base / "reviews" / "review.yaml", review_from_exit_execution())
+
+            result = build_loop_check(args(base))
+
+        self.assertEqual(result["conclusion"], "pass")
+        self.assertEqual(result["downstream_gap_count"], 0)
 
     def test_empty_inputs_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
