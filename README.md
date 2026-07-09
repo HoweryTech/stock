@@ -77,6 +77,7 @@
 - [卖出执行检查](./docs/卖出执行检查.md)
 - [卖出执行生成复盘](./docs/卖出执行生成复盘.md)
 - [交易复盘质量检查](./docs/交易复盘质量检查.md)
+- [执行闭环总检查](./docs/执行闭环总检查.md)
 - [交易复盘分析](./docs/交易复盘分析.md)
 - [复盘冷静期检查](./docs/复盘冷静期检查.md)
 - [策略健康检查](./docs/策略健康检查.md)
@@ -209,6 +210,14 @@ python3 tools/run_watchlist_pipeline.py \
 python3 tools/generate_daily_summary.py \
   --output reports/daily-summary.md \
   --json-output data/metadata/daily-summary.json
+```
+
+### 执行闭环总检查
+
+```bash
+python3 tools/check_execution_loop.py \
+  --output reports/execution-loop-check.md \
+  --json-output data/metadata/execution-loop-check.json
 ```
 
 ### 交易计划风控校验
