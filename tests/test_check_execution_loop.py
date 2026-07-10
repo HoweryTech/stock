@@ -162,6 +162,8 @@ class CheckExecutionLoopTest(unittest.TestCase):
         self.assertEqual(result["needs_review_count"], 2)
         self.assertIn("missing_position_from_trade_execution", content)
         self.assertIn("missing_review_from_exit_execution", content)
+        self.assertIn("tools/new_position_from_execution.py", content)
+        self.assertIn("tools/new_trade_review_from_exit_execution.py", content)
 
     def test_passes_when_downstream_records_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -189,6 +191,43 @@ class CheckExecutionLoopTest(unittest.TestCase):
         self.assertEqual(result["orphan_record_count"], 2)
         self.assertIn("position_source_execution_not_found", content)
         self.assertIn("review_source_exit_execution_not_found", content)
+        self.assertIn("修正持仓的 execution_snapshot.execution.id", content)
+        self.assertIn("修正 review.source_exit_execution_id", content)
+
+    def test_renders_blocked_rows_before_passed_rows(self) -> None:
+        result = {
+            "conclusion": "blocked",
+            "blocked_count": 1,
+            "needs_review_count": 0,
+            "downstream_gap_count": 0,
+            "downstream_gaps": [],
+            "orphan_record_count": 0,
+            "orphan_records": [],
+            "trade_executions": {
+                "count": 2,
+                "pass_count": 1,
+                "needs_review_count": 0,
+                "blocked_count": 1,
+                "rows": [
+                    {"path": "executions/pass.yaml", "id": "EXEC-PASS", "conclusion": "pass", "blocker_count": 0, "warning_count": 0, "blockers": [], "warnings": []},
+                    {
+                        "path": "executions/blocked.yaml",
+                        "id": "EXEC-BLOCKED",
+                        "conclusion": "blocked",
+                        "blocker_count": 1,
+                        "warning_count": 0,
+                        "blockers": [{"code": "blocked", "message": "阻断。"}],
+                        "warnings": [],
+                    },
+                ],
+            },
+            "exit_executions": {"count": 0, "pass_count": 0, "needs_review_count": 0, "blocked_count": 0, "rows": []},
+            "reviews": {"count": 0, "pass_count": 0, "needs_review_count": 0, "blocked_count": 0, "rows": []},
+        }
+
+        content = render_loop_check(result)
+
+        self.assertLess(content.index("EXEC-BLOCKED"), content.index("EXEC-PASS"))
 
     def test_empty_inputs_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

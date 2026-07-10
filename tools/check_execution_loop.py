@@ -68,6 +68,14 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def conclusion_rank(conclusion: str) -> int:
+    return {"blocked": 0, "needs_review": 1, "pass": 2}.get(conclusion, 3)
+
+
+def sorted_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=lambda row: (conclusion_rank(row["conclusion"]), row.get("id") or "", row.get("path") or ""))
+
+
 def source_ids(documents: list[dict[str, Any]], path: str) -> set[str]:
     ids: set[str] = set()
     for item in documents:
@@ -102,6 +110,7 @@ def downstream_gaps(
                     "expected_record": "position",
                     "code": "missing_position_from_trade_execution",
                     "message": f"买入执行 {row['id']} 已通过检查，但未找到来源执行对应的持仓记录。",
+                    "fix_hint": f"运行 tools/new_position_from_execution.py --execution <{row['path']}> 生成持仓记录。",
                 }
             )
     for row in exit_execution_rows:
@@ -115,6 +124,7 @@ def downstream_gaps(
                     "expected_record": "trade_review",
                     "code": "missing_review_from_exit_execution",
                     "message": f"卖出执行 {row['id']} 已通过检查，但未找到来源卖出执行对应的复盘记录。",
+                    "fix_hint": f"运行 tools/new_trade_review_from_exit_execution.py --exit-execution <{row['path']}> 生成复盘草稿。",
                 }
             )
     return gaps
@@ -141,6 +151,7 @@ def orphan_records(
                     "source_id": None,
                     "code": "position_missing_source_execution",
                     "message": f"持仓 {position_id} 缺少来源买入执行快照。",
+                    "fix_hint": "补齐持仓的 execution_snapshot，或用 tools/new_position_from_execution.py 从执行记录重新生成持仓。",
                 }
             )
         elif str(source_execution_id) not in trade_execution_ids:
@@ -151,6 +162,7 @@ def orphan_records(
                     "source_id": source_execution_id,
                     "code": "position_source_execution_not_found",
                     "message": f"持仓 {position_id} 的来源买入执行 {source_execution_id} 不在执行记录中。",
+                    "fix_hint": "补回来源买入执行记录，或修正持仓的 execution_snapshot.execution.id。",
                 }
             )
     for item in review_documents:
@@ -164,6 +176,7 @@ def orphan_records(
                     "source_id": None,
                     "code": "review_missing_source_exit_execution",
                     "message": f"复盘 {review_id} 缺少来源卖出执行编号。",
+                    "fix_hint": "补齐 review.source_exit_execution_id，或用 tools/new_trade_review_from_exit_execution.py 从卖出执行重新生成复盘。",
                 }
             )
         elif str(source_exit_execution_id) not in exit_execution_ids:
@@ -174,6 +187,7 @@ def orphan_records(
                     "source_id": source_exit_execution_id,
                     "code": "review_source_exit_execution_not_found",
                     "message": f"复盘 {review_id} 的来源卖出执行 {source_exit_execution_id} 不在卖出执行记录中。",
+                    "fix_hint": "补回来源卖出执行记录，或修正 review.source_exit_execution_id。",
                 }
             )
     return orphans
@@ -236,7 +250,7 @@ def render_section(title: str, section: dict[str, Any]) -> list[str]:
         "",
     ]
     if section["rows"]:
-        for row in section["rows"]:
+        for row in sorted_rows(section["rows"]):
             lines.append(
                 f"- {row['id'] or '-'} conclusion={row['conclusion']} blockers={row['blocker_count']} warnings={row['warning_count']} path={row['path']}"
             )
@@ -266,11 +280,13 @@ def render_loop_check(result: dict[str, Any]) -> str:
         lines.extend(["## 缺失下游记录", ""])
         for gap in result["downstream_gaps"]:
             lines.append(f"- [{gap['code']}] {gap['message']}")
+            lines.append(f"  - fix: {gap['fix_hint']}")
         lines.append("")
     if result["orphan_records"]:
         lines.extend(["## 孤儿记录", ""])
         for item in result["orphan_records"]:
             lines.append(f"- [{item['code']}] {item['message']}")
+            lines.append(f"  - fix: {item['fix_hint']}")
         lines.append("")
     lines.extend(render_section("买入执行记录", result["trade_executions"]))
     lines.extend(render_section("卖出执行记录", result["exit_executions"]))
