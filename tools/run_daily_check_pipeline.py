@@ -86,6 +86,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 "blocked_count": loop_result["blocked_count"],
                 "needs_review_count": loop_result["needs_review_count"],
                 "downstream_gap_count": loop_result["downstream_gap_count"],
+                "orphan_record_count": loop_result["orphan_record_count"],
             },
             "daily_summary": {
                 "output": args.daily_summary_output,

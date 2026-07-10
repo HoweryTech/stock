@@ -267,13 +267,21 @@ def summarize_cooldown(cooldown: dict[str, Any] | None) -> dict[str, Any]:
 
 def summarize_execution_loop(loop_doc: dict[str, Any] | None) -> dict[str, Any]:
     if not loop_doc:
-        return {"available": False, "conclusion": "missing", "blocked_count": 0, "needs_review_count": 0, "downstream_gap_count": 0}
+        return {
+            "available": False,
+            "conclusion": "missing",
+            "blocked_count": 0,
+            "needs_review_count": 0,
+            "downstream_gap_count": 0,
+            "orphan_record_count": 0,
+        }
     return {
         "available": True,
         "conclusion": loop_doc.get("conclusion") or "unknown",
         "blocked_count": loop_doc.get("blocked_count", 0),
         "needs_review_count": loop_doc.get("needs_review_count", 0),
         "downstream_gap_count": loop_doc.get("downstream_gap_count", 0),
+        "orphan_record_count": loop_doc.get("orphan_record_count", 0),
     }
 
 
@@ -919,6 +927,7 @@ def render_summary(summary: dict[str, Any]) -> str:
             f"- 执行闭环阻断记录：{execution_loop['blocked_count']}",
             f"- 执行闭环需复核记录：{execution_loop['needs_review_count']}",
             f"- 执行闭环缺失下游记录：{execution_loop['downstream_gap_count']}",
+            f"- 执行闭环孤儿记录：{execution_loop['orphan_record_count']}",
             f"- 复盘分析：{'已生成' if review_analysis_available else '缺失'}",
             f"- 冷静期检查：{'已读取' if cooldown['available'] else '缺失'}",
             f"- 冷静期结论：{cooldown['conclusion']}",

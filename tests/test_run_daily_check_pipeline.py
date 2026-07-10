@@ -48,6 +48,7 @@ class RunDailyCheckPipelineTest(unittest.TestCase):
             pipeline_metadata = load_yaml(base / "metadata/daily-check-pipeline.json")
 
         self.assertEqual(metadata["steps"]["execution_loop_check"]["conclusion"], "pass")
+        self.assertEqual(metadata["steps"]["execution_loop_check"]["orphan_record_count"], 0)
         self.assertEqual(loop_json["conclusion"], "pass")
         self.assertEqual(daily_summary["execution_loop"]["conclusion"], "pass")
         self.assertEqual(pipeline_metadata["steps"]["daily_summary"]["json_output"], str(base / "metadata/daily-summary.json"))
