@@ -205,13 +205,15 @@ python3 tools/run_watchlist_pipeline.py \
   --report-output reports/watchlist.md
 ```
 
-### 运行日常检查流水线
+### 运行日常检查流水线（推荐）
 
 ```bash
 python3 tools/run_daily_check_pipeline.py
 ```
 
-### 生成每日操作摘要
+该命令会先刷新执行闭环总检查，再生成每日操作摘要，避免日报读取旧的闭环元数据。
+
+### 生成每日操作摘要（单独补跑）
 
 ```bash
 python3 tools/generate_daily_summary.py \
@@ -219,7 +221,7 @@ python3 tools/generate_daily_summary.py \
   --json-output data/metadata/daily-summary.json
 ```
 
-### 执行闭环总检查
+### 执行闭环总检查（单独补跑）
 
 ```bash
 python3 tools/check_execution_loop.py \
