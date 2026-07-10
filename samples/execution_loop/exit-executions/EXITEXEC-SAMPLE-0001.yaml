@@ -1,0 +1,71 @@
+execution:
+  id: "EXITEXEC-SAMPLE-0001"
+  status: "recorded"
+  created_at: "2026-07-08"
+  mode: "paper"
+  side: "sell"
+  source_exit_plan_id: "EXIT-SAMPLE-0001"
+  source_position_id: "POS-SAMPLE-0001"
+  source_trade_plan_id: "TP-SAMPLE-0001"
+  exit_check_conclusion: "pass"
+  user_confirmed: false
+  confirmation_id: ""
+  confirmation_text: "样例卖出执行。"
+
+stock:
+  code: "600000"
+  name: "样例股票"
+  exchange: "SSE"
+  industry: "银行"
+
+order:
+  execution_date: "2026-07-08"
+  execution_price: 9.1
+  shares: 1000
+  exited_position_pct_of_total_assets: 5.0
+  fees: 5.0
+  slippage_pct_vs_plan: 0.0
+  price_above_min_acceptable: true
+
+exit_snapshot:
+  exit_type: "stop_loss"
+  urgency: "immediate"
+  planned_exit_price: 9.1
+  min_acceptable_exit_price: 9.0
+  must_exit: true
+  exit_reason: "触发样例止损。"
+  matched_original_plan: true
+  daily_check_conclusion: "needs_action"
+  source_action_codes:
+    - "stop_loss_triggered"
+
+result_estimate:
+  entry_price: 9.9
+  trade_return_pct: -8.0808
+  portfolio_return_pct: -0.404
+
+notes:
+  - "样例卖出。"
+
+strategy_config_snapshot:
+  version_id: "CONFIG-VERSION-SAMPLE"
+confirmation_snapshot: {}
+exit_check_snapshot:
+  conclusion: "pass"
+exit_plan_snapshot:
+  exit_plan:
+    id: "EXIT-SAMPLE-0001"
+  position_snapshot:
+    position_pct_of_total_assets: 5.0
+    entry_price: 9.9
+  position_full_snapshot:
+    entry:
+      entry_date: "2026-07-01"
+    execution_snapshot:
+      execution:
+        id: "EXEC-SAMPLE-0001"
+    trade_plan_snapshot:
+      trade_plan:
+        id: "TP-SAMPLE-0001"
+      strategy_config_snapshot:
+        version_id: "CONFIG-VERSION-SAMPLE"

@@ -89,6 +89,7 @@
 - [复盘维护流水线](./docs/复盘维护流水线.md)
 - [交易计划示例文件](./templates/trade-plan.example.yaml)
 - [持仓记录示例文件](./templates/position.example.yaml)
+- [执行闭环样例数据](./samples/execution_loop/README.md)
 
 ## 当前可执行工具
 

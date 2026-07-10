@@ -1,0 +1,52 @@
+position:
+  id: "POS-SAMPLE-0001"
+  status: "normal"
+  created_at: "2026-07-01"
+  source_trade_plan_id: "TP-SAMPLE-0001"
+
+stock:
+  code: "600000"
+  name: "样例股票"
+  exchange: "SSE"
+  industry: "银行"
+
+entry:
+  entry_date: "2026-07-01"
+  entry_price: 9.9
+  shares: 1000
+  position_pct_of_total_assets: 5.0
+  planned_buy_price: 10.0
+  max_acceptable_buy_price: 10.2
+
+risk:
+  stop_loss_price: 9.2
+  max_loss_pct_of_total_assets: 0.35
+  take_profit_conditions:
+    - "达到计划目标区后分批止盈。"
+  invalidation_conditions:
+    - "趋势强度消失。"
+  observation_items:
+    - "观察成交额。"
+
+strategy:
+  source: "trend_strength"
+  timeframe: "swing"
+  buy_reason: "样例趋势证据。"
+  key_evidence: []
+  counter_evidence_and_risks: []
+
+tracking:
+  current_price: 9.1
+  current_return_pct: -8.0808
+  current_portfolio_return_pct: -0.404
+  days_held: 7
+  notes: []
+
+strategy_config_snapshot:
+  version_id: "CONFIG-VERSION-SAMPLE"
+trade_plan_snapshot:
+  trade_plan:
+    id: "TP-SAMPLE-0001"
+execution_snapshot:
+  execution:
+    id: "EXEC-SAMPLE-0001"

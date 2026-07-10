@@ -1,0 +1,56 @@
+review:
+  id: "TR-SAMPLE-0001"
+  status: "completed"
+  created_at: "2026-07-08"
+  source_trade_plan_id: "TP-SAMPLE-0001"
+  source_position_id: "POS-SAMPLE-0001"
+  source_exit_plan_id: "EXIT-SAMPLE-0001"
+  source_exit_execution_id: "EXITEXEC-SAMPLE-0001"
+
+stock:
+  code: "600000"
+  name: "样例股票"
+  exchange: "SSE"
+  industry: "银行"
+
+execution:
+  entry_date: "2026-07-01"
+  exit_date: "2026-07-08"
+  entry_price: 9.9
+  exit_price: 9.1
+  position_pct_of_total_assets: 5.0
+  exit_reason: "触发样例止损。"
+  followed_plan: true
+
+result:
+  trade_return_pct: -8.0808
+  portfolio_return_pct: -0.404
+  result_category: "strategy_loss"
+  error_tags: []
+
+discipline:
+  cooldown_conclusion_at_entry: "pass"
+  strategy_health_conclusion_at_entry: "healthy"
+  was_cooldown_exception: false
+  was_strategy_health_exception: false
+  exception_reason: ""
+
+review_questions:
+  buy_reason_still_valid: false
+  exit_reason_matches_plan: true
+  risk_control_followed: true
+  position_sizing_followed: true
+  lesson: "样例：按计划止损，控制组合损失。"
+  next_action: "复查该策略在弱市中的过滤条件。"
+
+strategy_config_snapshot:
+  version_id: "CONFIG-VERSION-SAMPLE"
+trade_plan_snapshot:
+  trade_plan:
+    id: "TP-SAMPLE-0001"
+exit_plan_snapshot:
+  exit_plan:
+    id: "EXIT-SAMPLE-0001"
+exit_execution_snapshot:
+  execution:
+    id: "EXITEXEC-SAMPLE-0001"

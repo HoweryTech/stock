@@ -1,0 +1,50 @@
+execution:
+  id: "EXEC-SAMPLE-0001"
+  status: "recorded"
+  created_at: "2026-07-10"
+  mode: "paper"
+  source_trade_plan_id: "TP-SAMPLE-0001"
+  gate_conclusion: "pass"
+  user_confirmed: false
+  confirmation_id: ""
+  cooldown_conclusion: "pass"
+  strategy_health_conclusion: "healthy"
+  cooldown_exception_reason: ""
+
+stock:
+  code: "600000"
+  name: "样例股票"
+  exchange: "SSE"
+  industry: "银行"
+
+order:
+  side: "buy"
+  execution_date: "2026-07-01"
+  execution_price: 9.9
+  shares: 1000
+  position_pct_of_total_assets: 5.0
+  fees: 5.0
+  slippage_pct_vs_plan: -1.0
+  price_within_max_acceptable: true
+
+risk_snapshot:
+  planned_buy_price: 10.0
+  max_acceptable_buy_price: 10.2
+  stop_loss_price: 9.2
+
+confirmation_snapshot: {}
+cooldown_snapshot:
+  conclusion: "pass"
+strategy_health_snapshot:
+  conclusion: "healthy"
+  strategies: []
+
+trade_plan_snapshot:
+  trade_plan:
+    id: "TP-SAMPLE-0001"
+  strategy:
+    source: "trend_strength"
+  position_plan:
+    planned_position_pct_of_total_assets: 5.0
+  strategy_config_snapshot:
+    version_id: "CONFIG-VERSION-SAMPLE"
