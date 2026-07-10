@@ -48,6 +48,7 @@
 - [投资体系配置](./docs/投资体系配置.md)
 - [投资体系配置文件](./config/investment-profile.example.yaml)
 - [每日决策流程](./docs/每日决策流程.md)
+- [运行产物与 Git 边界](./docs/运行产物与Git边界.md)
 - [日常检查流水线](./docs/日常检查流水线.md)
 - [每日操作摘要](./docs/每日操作摘要.md)
 - [交易计划与风控校验](./docs/交易计划与风控校验.md)
