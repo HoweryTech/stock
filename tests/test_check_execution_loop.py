@@ -83,11 +83,25 @@ def position_from_trade_execution() -> dict:
     return position
 
 
+def orphan_position() -> dict:
+    position = position_from_trade_execution()
+    position["position"]["id"] = "POS-ORPHAN-0001"
+    position["execution_snapshot"] = {"execution": {"id": "EXEC-MISSING-0001"}}
+    return position
+
+
 def review_from_exit_execution() -> dict:
     review = review_needs_review()
     review["review"]["source_exit_execution_id"] = "EXITEXEC-LOOP-0001"
     review["review_questions"]["risk_control_followed"] = True
     review["review_questions"]["lesson"] = "按计划退出。"
+    return review
+
+
+def orphan_review() -> dict:
+    review = review_from_exit_execution()
+    review["review"]["id"] = "TR-ORPHAN-0001"
+    review["review"]["source_exit_execution_id"] = "EXITEXEC-MISSING-0001"
     return review
 
 
@@ -161,6 +175,20 @@ class CheckExecutionLoopTest(unittest.TestCase):
 
         self.assertEqual(result["conclusion"], "pass")
         self.assertEqual(result["downstream_gap_count"], 0)
+
+    def test_marks_orphan_records_as_needs_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_yaml(base / "positions" / "position.yaml", orphan_position())
+            write_yaml(base / "reviews" / "review.yaml", orphan_review())
+
+            result = build_loop_check(args(base))
+            content = render_loop_check(result)
+
+        self.assertEqual(result["conclusion"], "needs_review")
+        self.assertEqual(result["orphan_record_count"], 2)
+        self.assertIn("position_source_execution_not_found", content)
+        self.assertIn("review_source_exit_execution_not_found", content)
 
     def test_empty_inputs_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -77,6 +77,10 @@ def source_ids(documents: list[dict[str, Any]], path: str) -> set[str]:
     return ids
 
 
+def row_ids(rows: list[dict[str, Any]]) -> set[str]:
+    return {str(row["id"]) for row in rows if row.get("id")}
+
+
 def downstream_gaps(
     trade_execution_rows: list[dict[str, Any]],
     exit_execution_rows: list[dict[str, Any]],
@@ -116,16 +120,83 @@ def downstream_gaps(
     return gaps
 
 
+def orphan_records(
+    trade_execution_rows: list[dict[str, Any]],
+    exit_execution_rows: list[dict[str, Any]],
+    position_documents: list[dict[str, Any]],
+    review_documents: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    orphans: list[dict[str, Any]] = []
+    trade_execution_ids = row_ids(trade_execution_rows)
+    exit_execution_ids = row_ids(exit_execution_rows)
+
+    for item in position_documents:
+        position_id = value_at(item["data"], "position.id") or item["path"]
+        source_execution_id = value_at(item["data"], "execution_snapshot.execution.id")
+        if not source_execution_id:
+            orphans.append(
+                {
+                    "subject_type": "position",
+                    "subject_id": position_id,
+                    "source_id": None,
+                    "code": "position_missing_source_execution",
+                    "message": f"持仓 {position_id} 缺少来源买入执行快照。",
+                }
+            )
+        elif str(source_execution_id) not in trade_execution_ids:
+            orphans.append(
+                {
+                    "subject_type": "position",
+                    "subject_id": position_id,
+                    "source_id": source_execution_id,
+                    "code": "position_source_execution_not_found",
+                    "message": f"持仓 {position_id} 的来源买入执行 {source_execution_id} 不在执行记录中。",
+                }
+            )
+    for item in review_documents:
+        review_id = value_at(item["data"], "review.id") or item["path"]
+        source_exit_execution_id = value_at(item["data"], "review.source_exit_execution_id")
+        if not source_exit_execution_id:
+            orphans.append(
+                {
+                    "subject_type": "trade_review",
+                    "subject_id": review_id,
+                    "source_id": None,
+                    "code": "review_missing_source_exit_execution",
+                    "message": f"复盘 {review_id} 缺少来源卖出执行编号。",
+                }
+            )
+        elif str(source_exit_execution_id) not in exit_execution_ids:
+            orphans.append(
+                {
+                    "subject_type": "trade_review",
+                    "subject_id": review_id,
+                    "source_id": source_exit_execution_id,
+                    "code": "review_source_exit_execution_not_found",
+                    "message": f"复盘 {review_id} 的来源卖出执行 {source_exit_execution_id} 不在卖出执行记录中。",
+                }
+            )
+    return orphans
+
+
 def build_loop_check(args: argparse.Namespace) -> dict[str, Any]:
     trade_execution_rows = check_documents(expand_paths(args.trade_executions), check_execution, "execution_id")
     exit_execution_rows = check_documents(expand_paths(args.exit_executions), check_exit_execution, "exit_execution_id")
     review_paths = expand_paths(args.reviews)
     review_rows = check_documents(review_paths, check_trade_review_quality, "review_id")
+    position_documents = load_documents(expand_paths(args.positions))
+    review_documents = load_documents(review_paths)
     gaps = downstream_gaps(
         trade_execution_rows,
         exit_execution_rows,
-        load_documents(expand_paths(args.positions)),
-        load_documents(review_paths),
+        position_documents,
+        review_documents,
+    )
+    orphans = orphan_records(
+        trade_execution_rows,
+        exit_execution_rows,
+        position_documents,
+        review_documents,
     )
     sections = {
         "trade_executions": summarize_rows(trade_execution_rows),
@@ -134,7 +205,8 @@ def build_loop_check(args: argparse.Namespace) -> dict[str, Any]:
     }
     blocked_count = sum(section["blocked_count"] for section in sections.values())
     downstream_gap_count = len(gaps)
-    needs_review_count = sum(section["needs_review_count"] for section in sections.values()) + downstream_gap_count
+    orphan_record_count = len(orphans)
+    needs_review_count = sum(section["needs_review_count"] for section in sections.values()) + downstream_gap_count + orphan_record_count
     if blocked_count:
         conclusion = "blocked"
     elif needs_review_count:
@@ -147,6 +219,8 @@ def build_loop_check(args: argparse.Namespace) -> dict[str, Any]:
         "needs_review_count": needs_review_count,
         "downstream_gap_count": downstream_gap_count,
         "downstream_gaps": gaps,
+        "orphan_record_count": orphan_record_count,
+        "orphan_records": orphans,
         **sections,
     }
 
@@ -185,12 +259,18 @@ def render_loop_check(result: dict[str, Any]) -> str:
         f"- 阻断项记录数：{result['blocked_count']}",
         f"- 需复核记录数：{result['needs_review_count']}",
         f"- 缺失下游记录数：{result['downstream_gap_count']}",
+        f"- 孤儿记录数：{result['orphan_record_count']}",
         "",
     ]
     if result["downstream_gaps"]:
         lines.extend(["## 缺失下游记录", ""])
         for gap in result["downstream_gaps"]:
             lines.append(f"- [{gap['code']}] {gap['message']}")
+        lines.append("")
+    if result["orphan_records"]:
+        lines.extend(["## 孤儿记录", ""])
+        for item in result["orphan_records"]:
+            lines.append(f"- [{item['code']}] {item['message']}")
         lines.append("")
     lines.extend(render_section("买入执行记录", result["trade_executions"]))
     lines.extend(render_section("卖出执行记录", result["exit_executions"]))
