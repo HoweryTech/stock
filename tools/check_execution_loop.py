@@ -193,6 +193,51 @@ def orphan_records(
     return orphans
 
 
+def fix_group_for_code(code: str) -> tuple[str, str]:
+    if code == "missing_confirmed_manual_confirmation_record":
+        return "manual_confirmation", "补齐人工确认"
+    if code == "missing_position_from_trade_execution":
+        return "position", "生成持仓记录"
+    if code == "missing_review_from_exit_execution":
+        return "trade_review", "生成复盘记录"
+    if code.startswith("position_") or code.startswith("review_"):
+        return "source_link", "修正来源引用"
+    return "record_fix", "修正阻断或复核记录"
+
+
+def add_fix_action(groups: dict[str, dict[str, Any]], *, code: str, subject_id: Any, message: str, fix_hint: str = "") -> None:
+    group_code, title = fix_group_for_code(code)
+    group = groups.setdefault(group_code, {"group": group_code, "title": title, "count": 0, "items": []})
+    group["count"] += 1
+    group["items"].append(
+        {
+            "code": code,
+            "subject_id": subject_id,
+            "message": message,
+            "fix_hint": fix_hint,
+        }
+    )
+
+
+def summarize_fix_actions(
+    sections: dict[str, dict[str, Any]],
+    downstream_gap_rows: list[dict[str, Any]],
+    orphan_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for section in sections.values():
+        for row in section["rows"]:
+            for item in row["blockers"]:
+                add_fix_action(groups, code=item["code"], subject_id=row["id"], message=item["message"])
+            for item in row["warnings"]:
+                add_fix_action(groups, code=item["code"], subject_id=row["id"], message=item["message"])
+    for gap in downstream_gap_rows:
+        add_fix_action(groups, code=gap["code"], subject_id=gap["subject_id"], message=gap["message"], fix_hint=gap["fix_hint"])
+    for orphan in orphan_rows:
+        add_fix_action(groups, code=orphan["code"], subject_id=orphan["subject_id"], message=orphan["message"], fix_hint=orphan["fix_hint"])
+    return sorted(groups.values(), key=lambda item: item["group"])
+
+
 def build_loop_check(args: argparse.Namespace) -> dict[str, Any]:
     trade_execution_rows = check_documents(expand_paths(args.trade_executions), check_execution, "execution_id")
     exit_execution_rows = check_documents(expand_paths(args.exit_executions), check_exit_execution, "exit_execution_id")
@@ -217,6 +262,7 @@ def build_loop_check(args: argparse.Namespace) -> dict[str, Any]:
         "exit_executions": summarize_rows(exit_execution_rows),
         "reviews": summarize_rows(review_rows),
     }
+    fix_actions = summarize_fix_actions(sections, gaps, orphans)
     blocked_count = sum(section["blocked_count"] for section in sections.values())
     downstream_gap_count = len(gaps)
     orphan_record_count = len(orphans)
@@ -235,6 +281,7 @@ def build_loop_check(args: argparse.Namespace) -> dict[str, Any]:
         "downstream_gaps": gaps,
         "orphan_record_count": orphan_record_count,
         "orphan_records": orphans,
+        "fix_actions": fix_actions,
         **sections,
     }
 
@@ -287,6 +334,15 @@ def render_loop_check(result: dict[str, Any]) -> str:
         for item in result["orphan_records"]:
             lines.append(f"- [{item['code']}] {item['message']}")
             lines.append(f"  - fix: {item['fix_hint']}")
+        lines.append("")
+    if result["fix_actions"]:
+        lines.extend(["## 修复动作分组", ""])
+        for group in result["fix_actions"]:
+            lines.append(f"- {group['title']}：{group['count']} 项")
+            for item in group["items"]:
+                lines.append(f"  - [{item['code']}] {item['subject_id'] or '-'}：{item['message']}")
+                if item["fix_hint"]:
+                    lines.append(f"    - fix: {item['fix_hint']}")
         lines.append("")
     lines.extend(render_section("买入执行记录", result["trade_executions"]))
     lines.extend(render_section("卖出执行记录", result["exit_executions"]))

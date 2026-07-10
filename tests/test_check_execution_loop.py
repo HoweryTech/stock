@@ -145,8 +145,11 @@ class CheckExecutionLoopTest(unittest.TestCase):
         self.assertEqual(result["trade_executions"]["pass_count"], 1)
         self.assertEqual(result["exit_executions"]["blocked_count"], 1)
         self.assertEqual(result["reviews"]["needs_review_count"], 1)
+        self.assertTrue(any(group["group"] == "manual_confirmation" for group in result["fix_actions"]))
+        self.assertTrue(any(group["group"] == "record_fix" for group in result["fix_actions"]))
         self.assertIn("missing_confirmed_manual_confirmation_record", content)
         self.assertIn("missing_lesson", content)
+        self.assertIn("修复动作分组", content)
 
     def test_marks_missing_downstream_records_as_needs_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -160,6 +163,8 @@ class CheckExecutionLoopTest(unittest.TestCase):
         self.assertEqual(result["conclusion"], "needs_review")
         self.assertEqual(result["downstream_gap_count"], 2)
         self.assertEqual(result["needs_review_count"], 2)
+        self.assertTrue(any(group["group"] == "position" for group in result["fix_actions"]))
+        self.assertTrue(any(group["group"] == "trade_review" for group in result["fix_actions"]))
         self.assertIn("missing_position_from_trade_execution", content)
         self.assertIn("missing_review_from_exit_execution", content)
         self.assertIn("tools/new_position_from_execution.py", content)
@@ -189,6 +194,7 @@ class CheckExecutionLoopTest(unittest.TestCase):
 
         self.assertEqual(result["conclusion"], "needs_review")
         self.assertEqual(result["orphan_record_count"], 2)
+        self.assertTrue(any(group["group"] == "source_link" for group in result["fix_actions"]))
         self.assertIn("position_source_execution_not_found", content)
         self.assertIn("review_source_exit_execution_not_found", content)
         self.assertIn("修正持仓的 execution_snapshot.execution.id", content)
@@ -203,6 +209,7 @@ class CheckExecutionLoopTest(unittest.TestCase):
             "downstream_gaps": [],
             "orphan_record_count": 0,
             "orphan_records": [],
+            "fix_actions": [],
             "trade_executions": {
                 "count": 2,
                 "pass_count": 1,
