@@ -240,6 +240,21 @@ class GenerateDailySummaryTest(unittest.TestCase):
                     "needs_review_count": 1,
                     "downstream_gap_count": 1,
                     "orphan_record_count": 1,
+                    "fix_actions": [
+                        {
+                            "group": "position",
+                            "title": "生成持仓记录",
+                            "count": 1,
+                            "items": [
+                                {
+                                    "code": "missing_position_from_trade_execution",
+                                    "subject_id": "EXEC-SUMMARY-0001",
+                                    "message": "买入执行已通过检查，但未找到来源执行对应的持仓记录。",
+                                    "fix_hint": "运行 tools/new_position_from_execution.py --execution <executions/EXEC-SUMMARY-0001.yaml> 生成持仓记录。",
+                                }
+                            ],
+                        }
+                    ],
                 },
             )
 
@@ -252,6 +267,9 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("执行闭环阻断记录：2", content)
         self.assertIn("执行闭环缺失下游记录：1", content)
         self.assertIn("执行闭环孤儿记录：1", content)
+        self.assertIn("执行闭环修复动作", content)
+        self.assertIn("生成持仓记录：1 项", content)
+        self.assertIn("tools/new_position_from_execution.py", content)
 
     def test_daily_summary_shows_config_version_health_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

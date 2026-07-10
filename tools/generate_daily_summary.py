@@ -274,6 +274,7 @@ def summarize_execution_loop(loop_doc: dict[str, Any] | None) -> dict[str, Any]:
             "needs_review_count": 0,
             "downstream_gap_count": 0,
             "orphan_record_count": 0,
+            "fix_actions": [],
         }
     return {
         "available": True,
@@ -282,6 +283,7 @@ def summarize_execution_loop(loop_doc: dict[str, Any] | None) -> dict[str, Any]:
         "needs_review_count": loop_doc.get("needs_review_count", 0),
         "downstream_gap_count": loop_doc.get("downstream_gap_count", 0),
         "orphan_record_count": loop_doc.get("orphan_record_count", 0),
+        "fix_actions": loop_doc.get("fix_actions", []) or [],
     }
 
 
@@ -912,6 +914,16 @@ def render_summary(summary: dict[str, Any]) -> str:
             lines.append(
                 f"- {row['id']} {row['stock']} mode={row['mode']} check={row['exit_check']} execution_check={row['execution_check_conclusion']} confirmation={row['confirmation_status']} trade_return={row['trade_return_pct']}% portfolio={row['portfolio_return_pct']}%"
             )
+        lines.append("")
+
+    if execution_loop["fix_actions"]:
+        lines.append("执行闭环修复动作：")
+        for group in execution_loop["fix_actions"]:
+            lines.append(f"- {group['title']}：{group['count']} 项")
+            for item in group.get("items", []):
+                lines.append(f"  - [{item['code']}] {item.get('subject_id') or '-'}：{item['message']}")
+                if item.get("fix_hint"):
+                    lines.append(f"    - fix: {item['fix_hint']}")
         lines.append("")
 
     lines.extend(
