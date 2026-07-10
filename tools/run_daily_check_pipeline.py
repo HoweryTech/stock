@@ -78,6 +78,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     metadata = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "continue_on_blocked": bool(args.continue_on_blocked),
         "steps": {
             "execution_loop_check": {
                 "output": args.execution_loop_output,
@@ -98,6 +99,12 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     }
     write_json(Path(args.metadata_output), metadata)
     return metadata
+
+
+def pipeline_exit_code(metadata: dict[str, Any]) -> int:
+    if metadata["steps"]["execution_loop_check"]["conclusion"] == "blocked" and not metadata.get("continue_on_blocked"):
+        return 1
+    return 0
 
 
 def parse_args() -> argparse.Namespace:
@@ -125,6 +132,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--daily-summary-output", default="reports/daily-summary.md", help="Daily summary Markdown output.")
     parser.add_argument("--daily-summary-json-output", default="data/metadata/daily-summary.json", help="Daily summary JSON output.")
     parser.add_argument("--metadata-output", default="data/metadata/daily-check-pipeline.json", help="Daily check pipeline metadata JSON.")
+    parser.add_argument("--continue-on-blocked", action="store_true", help="Return success after writing reports even when execution loop conclusion is blocked.")
     parser.add_argument("--json", action="store_true", help="Print pipeline metadata as JSON.")
     return parser.parse_args()
 
@@ -146,7 +154,7 @@ def main() -> int:
         print(f"execution loop output: {loop['output']}")
         print(f"daily summary output: {summary['output']}")
         print(f"metadata: {args.metadata_output}")
-    return 1 if metadata["steps"]["execution_loop_check"]["conclusion"] == "blocked" else 0
+    return pipeline_exit_code(metadata)
 
 
 if __name__ == "__main__":
