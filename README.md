@@ -72,6 +72,7 @@
 - [交易执行偏差检查](./docs/交易执行偏差检查.md)
 - [执行记录生成持仓](./docs/执行记录生成持仓.md)
 - [东方财富持仓导入](./docs/东方财富持仓导入.md)
+- [导入持仓风险计划补全](./docs/导入持仓风险计划补全.md)
 - [持仓日检](./docs/持仓日检.md)
 - [组合持仓日检](./docs/组合持仓日检.md)
 - [做T机会检查](./docs/做T机会检查.md)
@@ -472,6 +473,17 @@ python3 tools/check_portfolio_t_opportunities.py \
 ```
 
 批量结果区分行情形态 `market_setup` 与账户风控结论 `conclusion`，避免把技术观察信号直接当成可执行指令。
+
+为导入持仓生成风险计划补全草案：
+
+```bash
+python3 tools/complete_imported_position_plan.py \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --daily-bars data/processed/daily_bars.csv \
+  --stop-loss-pct-from-entry 12
+```
+
+草案会列出缺失字段、止损参考位、失效条件、止盈/降仓条件和下一步，不直接修改持仓文件。
 
 根据批量检查生成保守的持仓处置草案：
 
