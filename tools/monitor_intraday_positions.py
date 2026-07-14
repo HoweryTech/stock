@@ -292,7 +292,7 @@ def build_reduction_plan(
     steps = [
         f"目标是把单票仓位从{current_pct:.2f}%降至10%以内；按当前价最少需减少{reduction_shares}股。",
         f"优先分批每次100股，预计剩余{remaining_shares}股、仓位约{post_pct:.2f}%。",
-        "若采用反T方式，未回补的卖出股份计入降仓；达到目标后停止继续卖出。",
+        "计划减仓卖出后不回补；反T属于另一套交易计划，不与本减仓步骤混用。",
         "若价格快速下跌或接近跌停，不把市价单作为默认执行方式，先确认流动性。",
     ]
     if status == "granularity_review":

@@ -113,6 +113,7 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertAlmostEqual(plan["estimated_net_proceeds"], 1351.31, places=2)
         self.assertAlmostEqual(plan["estimated_realized_pnl_after_fees"], -789.69, places=2)
         self.assertIn("降低单票风险", plan["objective"])
+        self.assertTrue(any("卖出后不回补" in step for step in plan["steps"]))
 
     def test_action_decision_is_explicit_when_history_is_insufficient(self) -> None:
         reverse = {

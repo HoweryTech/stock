@@ -44,45 +44,60 @@ function automaticDecisionFor(item) {
   const zone = reverse.sell_zone ? `${num(reverse.sell_zone[0])}–${num(reverse.sell_zone[1])}元` : "系统实时区间";
 
   if (item.state === "data_stale") {
-    return {headline: "现在不操作：行情失效", action: "行情恢复前不买、不卖。", reasons: ["实时行情超过允许延迟。"]};
+    return {level: "禁止执行", headline: "现在不操作：行情失效", action: "行情恢复前不买、不卖。", reasons: ["实时行情超过允许延迟。"]};
   }
   if ((item.signals || []).some(signal => signal.code === "limit_down_or_near")) {
-    return {headline: "现在不操作：接近跌停", action: "不补仓、不做T，等待流动性恢复。", reasons: item.signals.map(signal => signal.message)};
+    return {level: "禁止执行", headline: "现在不操作：接近跌停", action: "不补仓、不做T，等待流动性恢复。", reasons: item.signals.map(signal => signal.message)};
   }
   if (reduction.status === "granularity_review") {
     return {
-      headline: "现在不减仓，保持现有股数",
+      level: "当前结论", headline: "现在不减仓，保持现有股数",
       action: `最小卖出100股会把持仓减少${pct(reduction.reduction_ratio_pct)}，不因轻微超限执行。`,
       reasons: [reduction.objective, ...(flags.map(flag => flag.message))].filter(Boolean),
     };
   }
   if (reduction.status === "actionable") {
+    const latest = Number(item.quote.latest_price);
+    const mainFlow = Number(item.capital_flow?.main_net_inflow_ratio_pct);
+    const inZone = reverse.sell_zone && latest >= Number(reverse.sell_zone[0]) && latest <= Number(reverse.sell_zone[1]);
+    const turnedDown = reverse.sell_zone && latest <= Number(reverse.sell_zone[1]) - 0.01;
+    const flowConfirmed = Number.isFinite(mainFlow) && mainFlow <= 3;
+    const executionTriggered = inZone && turnedDown && flowConfirmed && item.state !== "data_stale";
+    if (executionTriggered) {
+      return {
+        level: "执行信号",
+        headline: "现在执行第一笔减仓100股",
+        action: `以不低于${num(reverse.sell_zone[0])}元的限价卖出100股，本信号仅在当前监控周期有效；成交后不回补。`,
+        reasons: [`价格已进入${zone}并从高点回落。`, `主力净流入占比${pct(mainFlow)}，已低于3%确认线。`, `总目标仍为累计减仓${reduction.minimum_reduction_shares}股。`],
+      };
+    }
     return {
-      headline: `等待反弹减仓${reduction.minimum_reduction_shares}股`,
-      action: `价格进入${zone}后转弱时，每次卖出100股，累计${reduction.minimum_reduction_shares}股；未回补部分就是计划降仓。`,
-      reasons: [`完成后预计剩余${reduction.remaining_shares}股，仓位约${pct(reduction.post_reduction_position_pct)}。`, ...(flags.map(flag => flag.message))],
+      level: "待触发计划",
+      headline: `减仓计划待触发：目标${reduction.minimum_reduction_shares}股`,
+      action: `当前不卖。价格进入${zone}并从高点回落、主力净流入占比降至3%以下时，才触发第一笔卖出100股；减仓成交后不回补。`,
+      reasons: [`当前主力净流入占比${pct(mainFlow)}，尚未满足转弱条件。`, `完成后预计剩余${reduction.remaining_shares}股，仓位约${pct(reduction.post_reduction_position_pct)}。`, ...(flags.map(flag => flag.message))],
     };
   }
   if (severeFundamentals && Number(item.position.shares) >= 200) {
     return {
-      headline: "禁止补仓，等待反弹减仓100股",
+      level: "待触发计划", headline: "禁止补仓，等待反弹减仓100股",
       action: `价格进入${zone}后转弱时卖出100股，不回补；未到区间则保持。`,
       reasons: flags.map(flag => flag.message),
     };
   }
   if (flags.length) {
-    return {headline: "持有，禁止补仓", action: "本轮不买、不卖，下一份财报更新后自动重新判定。", reasons: flags.map(flag => flag.message)};
+    return {level: "当前结论", headline: "持有，禁止补仓", action: "本轮不买、不卖，下一份财报更新后自动重新判定。", reasons: flags.map(flag => flag.message)};
   }
   if (item.state === "no_add_watch") {
-    return {headline: "持有，禁止补仓", action: "本轮不买、不卖；趋势重新站上系统均线后自动重新判定。", reasons: (item.signals || []).map(signal => signal.message)};
+    return {level: "当前结论", headline: "持有，禁止补仓", action: "本轮不买、不卖；趋势重新站上系统均线后自动重新判定。", reasons: (item.signals || []).map(signal => signal.message)};
   }
   if (reverse.status === "candidate") {
     if (!backtest || backtest.verdict !== "rule_observation_only") {
-      return {headline: "持有，不做反T", action: "当前反T规则未通过历史验证，不执行卖出和回补。", reasons: [backtest?.verdict_label || "尚无有效回测结果。"]};
+      return {level: "禁止执行", headline: "持有，不做反T", action: "当前反T规则未通过历史验证，不执行卖出和回补。", reasons: [backtest?.verdict_label || "尚无有效回测结果。"]};
     }
-    return {headline: `满足条件可反T ${reverse.trade_shares}股`, action: `在${zone}转弱时卖出，${money(reverse.buyback_max_price)}及以下回补同等股数。`, reasons: [reverse.failure_result]};
+    return {level: "人工候选", headline: `满足条件可反T ${reverse.trade_shares}股`, action: `在${zone}转弱时卖出，${money(reverse.buyback_max_price)}及以下回补同等股数。`, reasons: [reverse.failure_result]};
   }
-  return {headline: "持有，不操作", action: "当前不买、不卖，继续监控。", reasons: (reverse.blockers || []).slice(0, 2)};
+  return {level: "当前结论", headline: "持有，不操作", action: "当前不买、不卖，继续监控。", reasons: (reverse.blockers || []).slice(0, 2)};
 }
 
 function isReverseTCandidate(item) {
@@ -196,10 +211,10 @@ function openDetail(code) {
   ];
   let html = detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
   const decision = item.action_decision;
-  const decisionDetails = backtest?.verdict === "rule_observation_only" && decision
+  const decisionDetails = item.reduction_plan?.status === "actionable" ? "" : backtest?.verdict === "rule_observation_only" && decision
     ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`
-    : `<h4>重新开放反T的条件</h4><ol class="reason-list"><li>扩充分钟样本并重新回测。</li><li>当天回补成功率达到60%以上，且已完成交易净收益合计为正。</li><li>再经过模拟盘验证后，才恢复反T候选。</li></ol>`;
-  html += detailSection("自动操作结论", `<p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
+    : `<h4>重新开放反T的条件</h4><ol class="reason-list"><li>至少积累30次历史触发。</li><li>回补成功率达到65%以上，且95%成功率下限不低于50%。</li><li>再经过模拟盘验证后，才恢复反T候选。</li></ol>`;
+  html += detailSection("自动操作结论", `<p><span class="state-badge state-${item.state}">${escapeHtml(automaticDecision.level)}</span></p><p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
   if (forecast) {
     const forecastZone = forecast.predicted_sell_zone ? `${num(forecast.predicted_sell_zone[0])}–${num(forecast.predicted_sell_zone[1])}元` : "--";
     const forecastMetrics = [
