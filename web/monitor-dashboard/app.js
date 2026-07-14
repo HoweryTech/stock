@@ -238,6 +238,22 @@ function openDetail(code) {
     ];
     html += detailSection("下一次反T概率预测", `<p><strong>${escapeHtml(forecast.status_label)}</strong></p><div class="metric-grid">${forecastMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">${escapeHtml(forecast.note || "预测仅用于提前预警，不代表价格必然到达。")}</p>`);
   }
+  const reverseAudit = item.reverse_t_plan;
+  if (reverseAudit?.sell_zone && item.quote.high && item.quote.latest_price) {
+    const pullbackFromHigh = (Number(item.quote.high) - Number(item.quote.latest_price)) / Number(item.quote.high) * 100;
+    const leftSellZone = Number(item.quote.latest_price) < Number(reverseAudit.sell_zone[0]);
+    const auditReasons = [];
+    if (Number(item.capital_flow?.main_net_inflow_ratio_pct) >= 3) auditReasons.push(`主力净流入占比${pct(item.capital_flow.main_net_inflow_ratio_pct)}高于3%转弱线。`);
+    if (!backtest || backtest.verdict !== "rule_observation_only") auditReasons.push(backtest?.verdict_label || "尚无通过门禁的回测结果。");
+    if (leftSellZone) auditReasons.push(`现价已低于卖出观察区下限${num(reverseAudit.sell_zone[0])}元，当前卖点已经过去。`);
+    if (reverseAudit.buyback_max_price != null && Number(item.quote.latest_price) > Number(reverseAudit.buyback_max_price)) auditReasons.push(`现价尚未降至参考回补上限${num(reverseAudit.buyback_max_price)}元。`);
+    const auditStatus = pullbackFromHigh >= 0.5 ? "已检测到冲高回落" : "尚未形成明显高点回落";
+    const auditMetrics = [
+      ["当日最高", money(item.quote.high)], ["当前价格", money(item.quote.latest_price)],
+      ["高点回落", pct(pullbackFromHigh)], ["卖出观察区", `${num(reverseAudit.sell_zone[0])}–${num(reverseAudit.sell_zone[1])}元`],
+    ];
+    html += detailSection("反T机会审计", `<p><strong>${auditStatus}</strong></p><div class="metric-grid">${auditMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>${auditReasons.length ? `<h4>未发出执行提醒的原因</h4><ul class="reason-list">${auditReasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`);
+  }
   const multi = item.technicals?.multi_timeframe || {};
   const multiMetrics = [
     ["周线方向", multi.alignment === "bullish" ? "周月共振向上" : multi.alignment === "bearish" ? "周月共同偏弱" : multi.alignment === "mixed" ? "周期分歧" : "历史不足"],
