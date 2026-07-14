@@ -217,8 +217,13 @@ function openDetail(code) {
       ["主力确认", reversePlan.main_flow_confirmation === "wait_for_weakening" ? "净流入偏强，等待转弱" : "未见强净流入阻断"],
     ];
     if (reversePlan.cost_estimate) {
-      planMetrics.push(["预计总费用", money(reversePlan.cost_estimate.total_fees)]);
-      planMetrics.push(["预计净收益", money(reversePlan.cost_estimate.net_profit)]);
+      planMetrics.push(["最低达标情景总费用", money(reversePlan.cost_estimate.total_fees)]);
+      planMetrics.push(["卖出佣金", money(reversePlan.cost_estimate.sell_commission)]);
+      planMetrics.push(["买入佣金", money(reversePlan.cost_estimate.buy_commission)]);
+      planMetrics.push(["卖出印花税", money(reversePlan.cost_estimate.stamp_duty)]);
+      planMetrics.push(["过户费", money(reversePlan.cost_estimate.transfer_fee)]);
+      planMetrics.push(["达到回补价时净收益", money(reversePlan.cost_estimate.net_profit)]);
+      planMetrics.push(["收益性质", "最低门槛测算，不是价格预测"]);
     }
     planMetrics.push(["费用参数", reversePlan.cost_model_verified ? "已按交割单核验" : "保守假设，尚未核验"]);
     if (reversePlan.high_position_ratio_warning) planMetrics.push(["仓位风险", "单次涉及半仓，高风险"]);
