@@ -515,6 +515,15 @@ python3 tools/backtest_holding_action_matrix.py \
 
 该回测逐日生成当时可见的趋势状态和价格动作矩阵，并统计触发后 1/3/5/10/20 日收益与回撤；它不模拟真实成交，也不构成买卖建议。可用 `--stop-loss-price` 做不修改持仓文件的假设止损价回测。
 
+批量回测组合持仓：
+
+```bash
+python3 tools/run_portfolio_action_matrix_backtests.py \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --daily-bars data/processed/daily_bars.csv \
+  --stop-loss-pct-from-entry 12
+```
+
 启动持仓准实时监控：
 
 ```bash
