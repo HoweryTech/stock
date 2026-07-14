@@ -18,6 +18,7 @@ API_FILES = {
     "/api/snapshot": ROOT / "data" / "metadata" / "intraday-monitor.latest.json",
     "/api/research": ROOT / "data" / "metadata" / "eastmoney-holding-research.json",
     "/api/action-draft": ROOT / "data" / "metadata" / "eastmoney-holding-action-draft.json",
+    "/api/reverse-t-backtest": ROOT / "data" / "metadata" / "reverse-t-backtest.json",
 }
 PID_FILE = ROOT / "data" / "metadata" / "intraday-monitor.pid"
 EVENT_FILE = ROOT / "data" / "metadata" / "intraday-monitor.events.jsonl"

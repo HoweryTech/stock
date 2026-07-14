@@ -1,6 +1,7 @@
 const state = {
   snapshot: null,
   research: new Map(),
+  backtests: new Map(),
   events: [],
   filter: "all",
   search: "",
@@ -38,6 +39,7 @@ function automaticDecisionFor(item) {
   const severeFundamentals = flagCodes.has("negative_roe") || flagCodes.has("negative_pe");
   const reduction = item.reduction_plan || {};
   const reverse = item.reverse_t_plan || {};
+  const backtest = state.backtests.get(item.code);
   const zone = reverse.sell_zone ? `${num(reverse.sell_zone[0])}–${num(reverse.sell_zone[1])}元` : "系统实时区间";
 
   if (item.state === "data_stale") {
@@ -74,17 +76,20 @@ function automaticDecisionFor(item) {
     return {headline: "持有，禁止补仓", action: "本轮不买、不卖；趋势重新站上系统均线后自动重新判定。", reasons: (item.signals || []).map(signal => signal.message)};
   }
   if (reverse.status === "candidate") {
+    if (!backtest || backtest.verdict !== "rule_observation_only") {
+      return {headline: "持有，不做反T", action: "当前反T规则未通过历史验证，不执行卖出和回补。", reasons: [backtest?.verdict_label || "尚无有效回测结果。"]};
+    }
     return {headline: `满足条件可反T ${reverse.trade_shares}股`, action: `在${zone}转弱时卖出，${money(reverse.buyback_max_price)}及以下回补同等股数。`, reasons: [reverse.failure_result]};
   }
   return {headline: "持有，不操作", action: "当前不买、不卖，继续监控。", reasons: (reverse.blockers || []).slice(0, 2)};
 }
 
 function isReverseTCandidate(item) {
-  return item.reverse_t_plan?.status === "candidate";
+  return item.reverse_t_plan?.status === "candidate" && state.backtests.get(item.code)?.verdict === "rule_observation_only";
 }
 
 function isReverseTWatch(item) {
-  return ["candidate", "watch"].includes(item.reverse_t_plan?.status);
+  return ["candidate", "watch"].includes(item.reverse_t_plan?.status) && state.backtests.get(item.code)?.verdict === "rule_observation_only";
 }
 
 function filteredItems() {
@@ -176,6 +181,7 @@ function openDetail(code) {
   if (!item) return;
   state.selectedCode = code;
   const research = state.research.get(code);
+  const backtest = state.backtests.get(code);
   const automaticDecision = automaticDecisionFor(item);
   document.querySelector("#detailCode").textContent = code;
   document.querySelector("#detailName").textContent = item.name;
@@ -187,7 +193,10 @@ function openDetail(code) {
   ];
   let html = detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
   const decision = item.action_decision;
-  html += detailSection("自动操作结论", `<p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decision ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>` : ""}`);
+  const decisionDetails = backtest?.verdict === "rule_observation_only" && decision
+    ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`
+    : `<h4>重新开放反T的条件</h4><ol class="reason-list"><li>扩充分钟样本并重新回测。</li><li>当天回补成功率达到60%以上，且已完成交易净收益合计为正。</li><li>再经过模拟盘验证后，才恢复反T候选。</li></ol>`;
+  html += detailSection("自动操作结论", `<p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
   const multi = item.technicals?.multi_timeframe || {};
   const multiMetrics = [
     ["周线方向", multi.alignment === "bullish" ? "周月共振向上" : multi.alignment === "bearish" ? "周月共同偏弱" : multi.alignment === "mixed" ? "周期分歧" : "历史不足"],
@@ -197,6 +206,14 @@ function openDetail(code) {
   ];
   html += detailSection("日线 / 周线 / 月线", `<div class="metric-grid">${multiMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
   html += detailSection("当前状态", `<p><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></p>`);
+  if (backtest) {
+    const backtestMetrics = [
+      ["回测交易日", `${backtest.trading_days}日`], ["触发次数", backtest.triggered_count],
+      ["成功回补", backtest.completed_count], ["未回补", backtest.not_bought_back_count],
+      ["回补成功率", pct(backtest.success_rate_pct)], ["已完成净收益合计", money(backtest.total_completed_net_profit)],
+    ];
+    html += detailSection("反T历史回测", `<p><strong>${escapeHtml(backtest.verdict_label)}</strong></p><div class="metric-grid">${backtestMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">仅验证5分钟价格规则和估算费用；未覆盖历史资金流、滑点及盘口排队。</p>`);
+  }
   html += detailSection("盘中信号", item.signals.length ? `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>` : "<p>当前没有新增盘中风险信号。</p>");
   const flow = item.capital_flow || {};
   const flowMetrics = [
@@ -291,14 +308,16 @@ function updateHeader(status) {
 
 async function loadData() {
   try {
-    const [snapshot, research, status, events] = await Promise.all([
+    const [snapshot, research, backtests, status, events] = await Promise.all([
       fetch("/api/snapshot", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/research", { cache: "no-store" }).then(response => response.json()),
+      fetch("/api/reverse-t-backtest", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/status", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/events?limit=20", { cache: "no-store" }).then(response => response.json()),
     ]);
     state.snapshot = snapshot;
     state.research = new Map((research.items || []).map(item => [item.code, item]));
+    state.backtests = new Map((backtests.items || []).map(item => [item.code, item]));
     state.events = events.events || [];
     updateHeader(status);
     renderSummary();
