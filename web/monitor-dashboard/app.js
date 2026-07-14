@@ -62,7 +62,15 @@ function automaticDecisionFor(item) {
     const inZone = reverse.sell_zone && latest >= Number(reverse.sell_zone[0]) && latest <= Number(reverse.sell_zone[1]);
     const turnedDown = reverse.sell_zone && latest <= Number(reverse.sell_zone[1]) - 0.01;
     const flowConfirmed = Number.isFinite(mainFlow) && mainFlow <= 3;
-    const executionTriggered = inZone && turnedDown && flowConfirmed && item.state !== "data_stale";
+    const executionTriggered = reduction.position_limit_verified && inZone && turnedDown && flowConfirmed && item.state !== "data_stale";
+    if (!reduction.position_limit_verified) {
+      return {
+        level: "禁止执行",
+        headline: "仓位上限未确认，暂停减仓",
+        action: `当前10%单票上限只是系统默认值，不据此卖出。确认正式仓位上限后重新计算。`,
+        reasons: [`当前仓位${pct(reduction.current_position_pct)}。`, `按默认10%计算需减仓${reduction.minimum_reduction_shares}股，但100股交易颗粒度可能造成过度减仓。`],
+      };
+    }
     if (executionTriggered) {
       return {
         level: "执行信号",

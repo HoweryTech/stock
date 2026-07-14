@@ -260,6 +260,7 @@ def build_reduction_plan(
     total_assets: float,
     costs: dict[str, float] | None = None,
     max_position_pct: float = 10.0,
+    position_limit_verified: bool = False,
 ) -> dict[str, Any]:
     shares = int(as_float(value_at(position, "entry.shares"), 0.0) or 0.0)
     price = as_float(quote.get("latest_price"))
@@ -269,7 +270,7 @@ def build_reduction_plan(
     current_pct = market_value / total_assets * 100
     target_value = total_assets * max_position_pct / 100
     if current_pct <= max_position_pct:
-        return {"status": "within_limit", "current_position_pct": round(current_pct, 4), "target_position_pct": max_position_pct}
+        return {"status": "within_limit", "current_position_pct": round(current_pct, 4), "target_position_pct": max_position_pct, "position_limit_verified": position_limit_verified}
 
     excess_value = market_value - target_value
     reduction_shares = min(shares, math.ceil(excess_value / price / 100) * 100)
@@ -301,6 +302,7 @@ def build_reduction_plan(
         "status": status,
         "current_position_pct": round(current_pct, 4),
         "target_position_pct": max_position_pct,
+        "position_limit_verified": position_limit_verified,
         "minimum_reduction_shares": reduction_shares,
         "remaining_shares": remaining_shares,
         "post_reduction_position_pct": round(post_pct, 4),
@@ -373,6 +375,8 @@ def analyze_quote(
     costs: dict[str, float],
     max_reverse_t_position_ratio_pct: float,
     now_timestamp: float,
+    max_position_pct: float = 10.0,
+    position_limit_verified: bool = False,
 ) -> dict[str, Any]:
     code = str(value_at(position, "stock.code") or "")
     shares = as_float(value_at(position, "entry.shares"), 0.0) or 0.0
@@ -404,8 +408,9 @@ def analyze_quote(
         signals.append({"code": "below_ma20", "severity": "warning", "message": f"现价低于20日均线 {ma20:.2f} 元。"})
     if price is not None and ma5 is not None and price < ma5:
         signals.append({"code": "below_ma5", "severity": "info", "message": f"现价低于5日均线 {ma5:.2f} 元。"})
-    if position_pct > 10:
-        signals.append({"code": "position_limit_exceeded", "severity": "risk", "message": f"原始单票仓位 {position_pct:.2f}% 超过10%上限。"})
+    if position_pct > max_position_pct:
+        suffix = "" if position_limit_verified else "；该上限尚未由用户确认。"
+        signals.append({"code": "position_limit_exceeded", "severity": "risk", "message": f"原始单票仓位 {position_pct:.2f}% 超过{max_position_pct:.2f}%上限{suffix}"})
 
     main_flow_ratio = as_float(quote.get("main_net_inflow_ratio_pct"))
     main_flow_amount = as_float(quote.get("main_net_inflow"))
@@ -425,7 +430,10 @@ def analyze_quote(
     else:
         state = "observe"
 
-    reduction_plan = build_reduction_plan(position, quote, total_assets=total_assets, costs=costs)
+    reduction_plan = build_reduction_plan(
+        position, quote, total_assets=total_assets, costs=costs,
+        max_position_pct=max_position_pct, position_limit_verified=position_limit_verified,
+    )
     reverse_t_plan = build_reverse_t_plan(
         position,
         quote,
@@ -477,6 +485,8 @@ def build_snapshot(
     max_stale_seconds: int,
     costs: dict[str, float],
     max_reverse_t_position_ratio_pct: float,
+    max_position_pct: float = 10.0,
+    position_limit_verified: bool = False,
 ) -> dict[str, Any]:
     positions = [load_yaml(path) for path in position_paths]
     codes = [str(value_at(position, "stock.code") or "") for position in positions]
@@ -499,6 +509,8 @@ def build_snapshot(
             costs=costs,
             max_reverse_t_position_ratio_pct=max_reverse_t_position_ratio_pct,
             now_timestamp=now.timestamp(),
+            max_position_pct=max_position_pct,
+            position_limit_verified=position_limit_verified,
         )
         item["position_path"] = str(path)
         items.append(item)
@@ -509,6 +521,7 @@ def build_snapshot(
         "interval_note": "公开网页接口无时效和可用性保证，不用于自动下单。",
         "total_assets": total_assets,
         "cost_model": costs,
+        "position_limit": {"max_position_pct": max_position_pct, "verified": position_limit_verified},
         "position_count": len(position_paths),
         "success_count": len(items),
         "errors": errors,
@@ -607,6 +620,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--minimum-net-profit", type=float, default=5.0, help="Minimum estimated net profit required for a T trade.")
     parser.add_argument("--cost-model-verified", action="store_true", help="Mark cost inputs as verified against the broker statement.")
     parser.add_argument("--max-reverse-t-position-ratio", type=float, default=50.0, help="Maximum percent of a holding used in one reverse T trade.")
+    parser.add_argument("--max-position-pct", type=float, default=10.0, help="Maximum single-stock position percent.")
+    parser.add_argument("--position-limit-verified", action="store_true", help="Mark the single-stock position limit as user-confirmed.")
     parser.add_argument("--latest-json", default="data/metadata/intraday-monitor.latest.json")
     parser.add_argument("--latest-markdown", default="reports/intraday-monitor.latest.md")
     parser.add_argument("--event-log", default="data/metadata/intraday-monitor.events.jsonl")
@@ -655,6 +670,8 @@ def main() -> int:
                     max_stale_seconds=args.max_stale_seconds,
                     costs=costs,
                     max_reverse_t_position_ratio_pct=args.max_reverse_t_position_ratio,
+                    max_position_pct=args.max_position_pct,
+                    position_limit_verified=args.position_limit_verified,
                 )
                 write_json(latest_json, snapshot)
                 atomic_write(latest_markdown, render_markdown(snapshot))

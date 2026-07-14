@@ -114,6 +114,12 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertAlmostEqual(plan["estimated_realized_pnl_after_fees"], -789.69, places=2)
         self.assertIn("降低单票风险", plan["objective"])
         self.assertTrue(any("卖出后不回补" in step for step in plan["steps"]))
+        self.assertFalse(plan["position_limit_verified"])
+
+    def test_reduction_plan_can_mark_position_limit_verified(self) -> None:
+        position = {"entry": {"shares": 1000, "entry_price": 3.8}}
+        plan = build_reduction_plan(position, {"latest_price": 3.4}, total_assets=25480, costs=self.costs, position_limit_verified=True)
+        self.assertTrue(plan["position_limit_verified"])
 
     def test_action_decision_is_explicit_when_history_is_insufficient(self) -> None:
         reverse = {
