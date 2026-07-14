@@ -38,12 +38,20 @@ const tone = value => Number(value) > 0 ? "positive" : Number(value) < 0 ? "nega
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 
 function adviceFor(item) {
-  const action = state.actions.get(item.code);
+  const action = currentActionFor(item);
   if (item.state === "data_stale") return "行情过期，暂停判断";
   if (action) return actionLabels[action.action] || action.action_label || "人工复核";
   if (item.state === "risk_review") return "优先处理风险，不新增仓位";
   if (item.state === "no_add_watch") return "等待趋势恢复，禁止补仓";
   return "继续观察，不执行交易";
+}
+
+function currentActionFor(item) {
+  const action = state.actions.get(item.code);
+  if (!action) return null;
+  const liveSignals = new Set((item.signals || []).map(signal => signal.code));
+  if (action.action === "exit_risk_review" && !liveSignals.has("limit_down_or_near")) return null;
+  return action;
 }
 
 function isReverseTCandidate(item) {
@@ -143,7 +151,7 @@ function openDetail(code) {
   if (!item) return;
   state.selectedCode = code;
   const research = state.research.get(code);
-  const action = state.actions.get(code);
+  const action = currentActionFor(item);
   document.querySelector("#detailCode").textContent = code;
   document.querySelector("#detailName").textContent = item.name;
   const metrics = [
