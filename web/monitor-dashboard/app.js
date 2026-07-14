@@ -71,11 +71,15 @@ function automaticDecisionFor(item) {
         reasons: [`价格已进入${zone}并从高点回落。`, `主力净流入占比${pct(mainFlow)}，已低于3%确认线。`, `总目标仍为累计减仓${reduction.minimum_reduction_shares}股。`],
       };
     }
+    const unmetConditions = [];
+    if (!inZone) unmetConditions.push(`现价${num(latest)}元尚未进入${zone}。`);
+    if (inZone && !turnedDown) unmetConditions.push(`现价仍在当日高点附近，尚未从区间高点回落至少0.01元。`);
+    if (!flowConfirmed) unmetConditions.push(`主力净流入占比${pct(mainFlow)}，尚未降至3%以下。`);
     return {
       level: "待触发计划",
       headline: `减仓计划待触发：目标${reduction.minimum_reduction_shares}股`,
       action: `当前不卖。价格进入${zone}并从高点回落、主力净流入占比降至3%以下时，才触发第一笔卖出100股；减仓成交后不回补。`,
-      reasons: [`当前主力净流入占比${pct(mainFlow)}，尚未满足转弱条件。`, `完成后预计剩余${reduction.remaining_shares}股，仓位约${pct(reduction.post_reduction_position_pct)}。`, ...(flags.map(flag => flag.message))],
+      reasons: [...unmetConditions, `完成后预计剩余${reduction.remaining_shares}股，仓位约${pct(reduction.post_reduction_position_pct)}。`, ...(flags.map(flag => flag.message))],
     };
   }
   if (severeFundamentals && Number(item.position.shares) >= 200) {
