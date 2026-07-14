@@ -1,6 +1,6 @@
 import unittest
 
-from tools.forecast_reverse_t import build_samples, feature_vector, quantile
+from tools.forecast_reverse_t import build_samples, feature_vector, forecast, quantile
 
 
 class ForecastReverseTTest(unittest.TestCase):
@@ -27,6 +27,13 @@ class ForecastReverseTTest(unittest.TestCase):
         self.assertGreater(len(samples), 0)
         self.assertIn("max_up_pct", samples[0])
         self.assertIn("pullback_pct", samples[0])
+
+    def test_roundtrip_probability_is_conditional_on_reaching_zone(self):
+        bars = self.bars(180)
+        costs = {"commission_rate": 0.0003, "minimum_commission": 5.0, "stamp_duty_rate": 0.0005, "transfer_fee_rate": 0.00001, "minimum_net_profit": 5.0}
+        result = forecast("000725", "京东方A", bars, 200, costs, neighbors=20)
+        if result["status"] not in {"fee_blocked", "insufficient"}:
+            self.assertGreaterEqual(result["roundtrip_probability_pct"], result["joint_roundtrip_probability_pct"])
 
 
 if __name__ == "__main__":

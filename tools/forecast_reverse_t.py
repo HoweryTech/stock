@@ -12,37 +12,15 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from tools.backtest_reverse_t import fetch_minute_bars
+    from tools.backtest_reverse_t import fetch_minute_bars, fetch_sina_minute_bars
     from tools.check_portfolio_positions import expand_position_paths
-    from tools.fetch_daily_bars_sina import symbol_for_code
-    from tools.fetch_holding_research import get_json
     from tools.monitor_intraday_positions import fee_viable_trade
     from tools.risk_check import as_float, load_yaml, value_at
 except ModuleNotFoundError:
-    from backtest_reverse_t import fetch_minute_bars
+    from backtest_reverse_t import fetch_minute_bars, fetch_sina_minute_bars
     from check_portfolio_positions import expand_position_paths
-    from fetch_daily_bars_sina import symbol_for_code
-    from fetch_holding_research import get_json
     from monitor_intraday_positions import fee_viable_trade
     from risk_check import as_float, load_yaml, value_at
-
-
-SINA_MINUTE_URL = "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData"
-
-
-def fetch_sina_minute_bars(code: str, datalen: int = 1023) -> list[dict[str, Any]]:
-    rows = get_json(SINA_MINUTE_URL, {"symbol": symbol_for_code(code), "scale": 5, "ma": "no", "datalen": datalen})
-    if not isinstance(rows, list):
-        raise ValueError(f"unexpected Sina minute response for {code}")
-    return [
-        {
-            "timestamp": str(row["day"])[:16], "code": code,
-            "open": float(row["open"]), "close": float(row["close"]),
-            "high": float(row["high"]), "low": float(row["low"]),
-            "volume": float(row["volume"]), "turnover": float(row.get("amount") or 0),
-        }
-        for row in rows
-    ]
 
 
 def average(values: list[float]) -> float:
@@ -151,7 +129,8 @@ def forecast(code: str, name: str, bars: list[dict[str, Any]], shares: int, cost
     reached = [sample for sample in nearest if sample["max_up_pct"] >= required_up]
     roundtrips = [sample for sample in reached if sample["pullback_pct"] >= required_pullback]
     reach_probability = len(reached) / len(nearest) * 100
-    roundtrip_probability = len(roundtrips) / len(nearest) * 100
+    roundtrip_probability = len(roundtrips) / len(reached) * 100 if reached else 0
+    joint_probability = len(roundtrips) / len(nearest) * 100
     if reach_probability >= 60 and roundtrip_probability >= 60:
         status, label = "early_warning", "下一次反T机会预警"
     elif reach_probability >= 50:
@@ -164,6 +143,7 @@ def forecast(code: str, name: str, bars: list[dict[str, Any]], shares: int, cost
         "current_price": current_price, "predicted_sell_zone": [zone_low, zone_high],
         "reach_probability_pct": round(reach_probability, 2),
         "roundtrip_probability_pct": round(roundtrip_probability, 2),
+        "joint_roundtrip_probability_pct": round(joint_probability, 2),
         "predicted_buyback_max_price": viable["buyback_max_price"],
         "trade_shares": viable["trade_shares"], "required_gap_pct": required_pullback,
         "estimated_net_profit_at_limit": viable["fees"]["net_profit"],

@@ -205,7 +205,7 @@ function openDetail(code) {
     const forecastMetrics = [
       ["预测周期", forecast.horizon_minutes ? `未来${forecast.horizon_minutes}分钟` : "--"],
       ["预测高点区间", forecastZone], ["到达概率", pct(forecast.reach_probability_pct)],
-      ["到达后可回补概率", pct(forecast.roundtrip_probability_pct)],
+      ["到达后可回补概率", pct(forecast.roundtrip_probability_pct)], ["到达且回补联合概率", pct(forecast.joint_roundtrip_probability_pct)],
       ["预测回补上限", money(forecast.predicted_buyback_max_price)],
       ["相似样本", forecast.neighbor_count || forecast.sample_count || 0],
     ];
@@ -224,7 +224,8 @@ function openDetail(code) {
     const backtestMetrics = [
       ["回测交易日", `${backtest.trading_days}日`], ["触发次数", backtest.triggered_count],
       ["成功回补", backtest.completed_count], ["未回补", backtest.not_bought_back_count],
-      ["回补成功率", pct(backtest.success_rate_pct)], ["已完成净收益合计", money(backtest.total_completed_net_profit)],
+      ["回补成功率", pct(backtest.success_rate_pct)], ["95%成功率下限", pct(backtest.success_rate_wilson_lower_95_pct)],
+      ["已完成净收益合计", money(backtest.total_completed_net_profit)],
     ];
     const intraday = backtest.intraday_observation;
     let intradayText = "今日尚未形成完整反T模拟交易。";

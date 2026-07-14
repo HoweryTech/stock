@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -13,17 +14,30 @@ from typing import Any
 
 try:
     from tools.check_portfolio_positions import expand_position_paths
+    from tools.fetch_daily_bars_sina import symbol_for_code
     from tools.fetch_holding_research import get_json, security_id
     from tools.monitor_intraday_positions import fee_viable_trade, trade_costs
     from tools.risk_check import as_float, load_yaml, value_at
 except ModuleNotFoundError:
     from check_portfolio_positions import expand_position_paths
+    from fetch_daily_bars_sina import symbol_for_code
     from fetch_holding_research import get_json, security_id
     from monitor_intraday_positions import fee_viable_trade, trade_costs
     from risk_check import as_float, load_yaml, value_at
 
 
 KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+SINA_MINUTE_URL = "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData"
+
+
+def wilson_lower_bound(successes: int, trials: int, z: float = 1.96) -> float | None:
+    if trials <= 0:
+        return None
+    proportion = successes / trials
+    denominator = 1 + z * z / trials
+    center = proportion + z * z / (2 * trials)
+    margin = z * math.sqrt(proportion * (1 - proportion) / trials + z * z / (4 * trials * trials))
+    return (center - margin) / denominator * 100
 
 
 def parse_kline(code: str, row: str) -> dict[str, Any]:
@@ -58,6 +72,21 @@ def fetch_minute_bars(code: str, begin: str, end: str, interval_minutes: int = 5
     )
     data = payload.get("data") or {}
     return str(data.get("name") or code), [parse_kline(code, row) for row in data.get("klines") or []]
+
+
+def fetch_sina_minute_bars(code: str, datalen: int = 1023) -> list[dict[str, Any]]:
+    rows = get_json(SINA_MINUTE_URL, {"symbol": symbol_for_code(code), "scale": 5, "ma": "no", "datalen": datalen})
+    if not isinstance(rows, list):
+        raise ValueError(f"unexpected Sina minute response for {code}")
+    return [
+        {
+            "timestamp": str(row["day"])[:16], "code": code,
+            "open": float(row["open"]), "close": float(row["close"]),
+            "high": float(row["high"]), "low": float(row["low"]),
+            "volume": float(row["volume"]), "turnover": float(row.get("amount") or 0),
+        }
+        for row in rows
+    ]
 
 
 def simulate_day(
@@ -138,11 +167,12 @@ def summarize(
     unrecovered = [item for item in trades if item["status"] == "not_bought_back"]
     triggered = len(completed) + len(unrecovered)
     success_rate = len(completed) / triggered * 100 if triggered else None
+    success_rate_lower = wilson_lower_bound(len(completed), triggered)
     total_net = sum(item["net_profit"] for item in completed)
-    if len(grouped) < 20 or triggered < 10:
+    if len(grouped) < 20 or triggered < 30:
         verdict = "insufficient_sample"
-        verdict_label = "样本不足，禁止按回测执行"
-    elif success_rate is not None and success_rate >= 60 and total_net > 0:
+        verdict_label = "样本不足，禁止按回测执行" if success_rate is None or success_rate >= 50 else "样本不足且当前结果偏弱，禁止执行"
+    elif success_rate is not None and success_rate >= 65 and success_rate_lower is not None and success_rate_lower >= 50:
         verdict = "rule_observation_only"
         verdict_label = "规则可继续观察，仍需模拟盘验证"
     else:
@@ -154,6 +184,7 @@ def summarize(
         "triggered_count": triggered, "completed_count": len(completed),
         "not_bought_back_count": len(unrecovered),
         "success_rate_pct": None if success_rate is None else round(success_rate, 2),
+        "success_rate_wilson_lower_95_pct": None if success_rate_lower is None else round(success_rate_lower, 2),
         "total_completed_net_profit": round(total_net, 2),
         "average_completed_net_profit": round(total_net / len(completed), 2) if completed else None,
         "verdict": verdict, "verdict_label": verdict_label,
@@ -173,12 +204,17 @@ def build_report(position_paths: list[Path], begin: str, end: str, costs: dict[s
     for path in position_paths:
         position = load_yaml(path)
         code = str(value_at(position, "stock.code") or "")
+        position_name = str(value_at(position, "stock.name") or code)
         shares = int(as_float(value_at(position, "entry.shares"), 0) or 0)
         try:
             last_error = None
             for attempt in range(3):
                 try:
-                    name, bars = fetch_minute_bars(code, begin, end)
+                    try:
+                        bars = fetch_sina_minute_bars(code)
+                        name = position_name
+                    except Exception:
+                        name, bars = fetch_minute_bars(code, begin, end)
                     break
                 except Exception as exc:
                     last_error = exc

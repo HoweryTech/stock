@@ -1,6 +1,6 @@
 import unittest
 
-from tools.backtest_reverse_t import parse_kline, simulate_day, summarize
+from tools.backtest_reverse_t import parse_kline, simulate_day, summarize, wilson_lower_bound
 
 
 class BacktestReverseTTest(unittest.TestCase):
@@ -41,6 +41,10 @@ class BacktestReverseTTest(unittest.TestCase):
         result = summarize("000725", "京东方A", bars, 200, self.costs, 50, exclude_validation_date="2026-07-14")
         self.assertEqual(result["triggered_count"], 0)
         self.assertEqual(result["intraday_observation"]["status"], "completed")
+
+    def test_wilson_lower_bound_penalizes_small_samples(self) -> None:
+        self.assertLess(wilson_lower_bound(6, 10), 50)
+        self.assertGreater(wilson_lower_bound(70, 100), 50)
 
 
 if __name__ == "__main__":
