@@ -120,6 +120,10 @@ function isReverseTWatch(item) {
   return ["candidate", "watch"].includes(item.reverse_t_plan?.status) && state.backtests.get(item.code)?.verdict === "rule_observation_only";
 }
 
+function isReverseTPriceAlert(item) {
+  return Boolean(item.reverse_t_plan?.price_in_sell_zone) && item.state !== "data_stale";
+}
+
 function filteredItems() {
   const items = state.snapshot?.items || [];
   return items.filter(item => {
@@ -139,12 +143,13 @@ function renderSummary() {
   const maxLag = Math.max(0, ...items.map(item => Number(item.quote.quote_lag_seconds || 0)));
   const reverseT = items.filter(isReverseTWatch).length;
   const forecastAlerts = items.filter(item => state.forecasts.get(item.code)?.status === "early_warning").length;
+  const priceAlerts = items.filter(isReverseTPriceAlert).length;
   const blocks = [
     ["账户总资产", money(state.snapshot?.total_assets), "持仓基准"],
     ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
     ["浮动盈亏", money(pnl), "按最新快照估算"],
     ["风险处置", `${risk} 只`, `${noAdd} 只禁止补仓`],
-    ["反T预测预警", `${forecastAlerts} 只`, `${reverseT} 只通过回测门禁`],
+    ["反T价格提醒", `${priceAlerts} 只`, `${forecastAlerts} 只概率预警 · ${reverseT} 只通过回测门禁`],
     ["最大行情延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
   ];
   document.querySelector("#summaryBand").innerHTML = blocks.map(([label, value, sub]) => `
@@ -157,7 +162,9 @@ function renderSummary() {
 
 function tableRow(item) {
   const lag = item.quote.quote_lag_seconds;
-  const reverseTag = isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
+  const reverseTag = isReverseTPriceAlert(item)
+    ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
+    : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   return `<tr data-code="${item.code}" tabindex="0">
     <td><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></td>
     <td class="number"><div>${num(item.quote.latest_price)}</div><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></td>
@@ -171,7 +178,9 @@ function tableRow(item) {
 }
 
 function mobileCard(item) {
-  const reverseTag = isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
+  const reverseTag = isReverseTPriceAlert(item)
+    ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
+    : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
     <div class="card-top">
       <div><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></div>
@@ -227,6 +236,9 @@ function openDetail(code) {
     ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`
     : `<h4>重新开放反T的条件</h4><ol class="reason-list"><li>至少积累30次历史触发。</li><li>回补成功率达到65%以上，且95%成功率下限不低于50%。</li><li>再经过模拟盘验证后，才恢复反T候选。</li></ol>`;
   html += detailSection("自动操作结论", `<p><span class="state-badge state-${item.state}">${escapeHtml(automaticDecision.level)}</span></p><p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
+  if (isReverseTPriceAlert(item)) {
+    html += detailSection("反T价格提醒", `<p><strong>实时价格已进入卖出观察区</strong></p><p>这是价格到位提醒，不等待回补价出现，也不代表保证能够低价买回。</p><div class="metric-grid"><dl class="metric"><dt>卖出观察区</dt><dd>${num(item.reverse_t_plan.sell_zone[0])}–${num(item.reverse_t_plan.sell_zone[1])}元</dd></dl><dl class="metric"><dt>回补参考上限</dt><dd>${money(item.reverse_t_plan.buyback_max_price)}</dd></dl></div>`);
+  }
   if (forecast) {
     const forecastZone = forecast.predicted_sell_zone ? `${num(forecast.predicted_sell_zone[0])}–${num(forecast.predicted_sell_zone[1])}元` : "--";
     const forecastMetrics = [
@@ -356,7 +368,7 @@ function renderEvents() {
     return;
   }
   container.innerHTML = state.events.map(event => {
-    const tags = Object.entries(event.signature || {}).map(([code, info]) => `<span class="event-tag">${code} · ${labels[info.state] || info.state}</span>`).join("");
+    const tags = Object.entries(event.signature || {}).map(([code, info]) => `<span class="event-tag">${code} · ${labels[info.state] || info.state}${info.reverse_t_price_alert ? " · 反T价格提醒" : ""}</span>`).join("");
     return `<article class="event-item"><div class="event-time">${escapeHtml(event.generated_at)}</div><div class="event-changes">${tags}</div></article>`;
   }).join("");
 }

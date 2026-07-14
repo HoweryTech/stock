@@ -56,6 +56,11 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         second = {"items": [{"code": "000725", "state": "observe", "signals": [], "quote": {"latest_price": 6.9}}]}
         self.assertEqual(state_signature(first), state_signature(second))
 
+    def test_state_signature_tracks_reverse_t_price_alert(self) -> None:
+        first = {"items": [{"code": "000725", "state": "observe", "signals": [], "reverse_t_plan": {"price_in_sell_zone": False}}]}
+        second = {"items": [{"code": "000725", "state": "observe", "signals": [], "reverse_t_plan": {"price_in_sell_zone": True}}]}
+        self.assertNotEqual(state_signature(first), state_signature(second))
+
     def test_reverse_t_candidate_near_intraday_high(self) -> None:
         position = {
             "stock": {"code": "000723"},

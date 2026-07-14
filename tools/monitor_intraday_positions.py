@@ -195,7 +195,6 @@ def build_reverse_t_plan(
         and change_pct > 0
         and range_position is not None
         and range_position >= 0.7
-        and not strong_main_inflow
     )
     if blockers:
         status = "not_suitable"
@@ -243,6 +242,10 @@ def build_reverse_t_plan(
         "failure_result": "未回补可计入计划降仓。" if failure_as_reduction_acceptable else "未回补会形成计划外减仓，执行前必须明确接受。",
         "high_position_ratio_warning": bool(trade_ratio_pct is not None and trade_ratio_pct >= 50),
         "main_flow_confirmation": "wait_for_weakening" if strong_main_inflow else "not_strong_inflow",
+        "price_in_sell_zone": bool(
+            price is not None and sell_zone_low is not None and sell_zone_high is not None
+            and sell_zone_low <= price <= sell_zone_high
+        ),
         "blockers": blockers,
         "instructions": [
             f"只在价格进入卖出观察区后转弱时卖出{trade_shares}股，不在快速拉升中抢跑。",
@@ -581,6 +584,7 @@ def state_signature(snapshot: dict[str, Any]) -> dict[str, Any]:
             "state": item["state"],
             "signals": sorted(signal["code"] for signal in item["signals"]),
             "reverse_t_status": item.get("reverse_t_plan", {}).get("status"),
+            "reverse_t_price_alert": bool(item.get("reverse_t_plan", {}).get("price_in_sell_zone")),
             "reduction_status": item.get("reduction_plan", {}).get("status"),
         }
         for item in snapshot["items"]
