@@ -19,6 +19,7 @@ def args(tmp_dir: str) -> Namespace:
         watchlist_metadata=str(base / "watchlist.json"),
         portfolio_check=str(base / "portfolio.json"),
         holding_action_draft=str(base / "holding-action-draft.json"),
+        portfolio_action_backtests=str(base / "portfolio-action-backtests.json"),
         exit_plans=[str(base / "exit-plans/*.yaml")],
         trade_executions=[str(base / "executions/*.yaml")],
         exit_executions=[str(base / "exit-executions/*.yaml")],
@@ -211,6 +212,53 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("## 持仓处置草案", content)
         self.assertIn("趋势状态分布：{'stop_loss_risk': 1}", content)
         self.assertIn("critical price_lte_stop_loss price=8.5", content)
+
+    def test_daily_summary_shows_portfolio_action_backtests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "portfolio.json",
+                {
+                    "conclusion": "normal",
+                    "position_count": 2,
+                    "total_position_pct": 10.0,
+                    "needs_action_count": 0,
+                    "warning_count": 0,
+                    "positions": [],
+                },
+            )
+            write_json(
+                base / "portfolio-action-backtests.json",
+                {
+                    "position_count": 2,
+                    "backtested_count": 1,
+                    "error_count": 1,
+                    "source": {"stop_loss_pct_from_entry": 12.0, "primary_horizon": 20},
+                    "items": [
+                        {
+                            "stock": {"code": "000723", "name": "美锦能源"},
+                            "event_count": 300,
+                            "weak_rule_count": 9,
+                            "best_state": {"state": "trend_intact", "average_return_pct": 2.4},
+                            "weakest_state": {"state": "overheated", "average_return_pct": -6.7},
+                        }
+                    ],
+                    "errors": [
+                        {"path": "positions/POS-001248.yaml", "message": "not enough bars for 001248: 8 < 21"}
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 9, 6, 0))
+            content = render_summary(summary)
+
+        self.assertTrue(summary["portfolio_action_backtests"]["available"])
+        self.assertEqual(summary["portfolio_action_backtests"]["error_count"], 1)
+        self.assertIn("复核 1 个组合动作矩阵回测错误。", summary["operating_actions"])
+        self.assertIn("复核 1 只弱规则较多的持仓。", summary["operating_actions"])
+        self.assertIn("## 动作矩阵回测", content)
+        self.assertIn("000723 美锦能源 weak_rules=9", content)
+        self.assertIn("not enough bars for 001248", content)
 
     def test_daily_summary_shows_trade_execution_missing_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -590,11 +590,41 @@ def summarize_holding_action_draft(draft_doc: dict[str, Any] | None) -> dict[str
     }
 
 
+def summarize_portfolio_action_backtests(backtest_doc: dict[str, Any] | None) -> dict[str, Any]:
+    if not backtest_doc:
+        return {
+            "available": False,
+            "position_count": 0,
+            "backtested_count": 0,
+            "error_count": 0,
+            "top_weak_items": [],
+            "errors": [],
+            "stop_loss_pct_from_entry": None,
+            "primary_horizon": None,
+        }
+    items = backtest_doc.get("items", []) or []
+    top_weak_items = sorted(
+        items,
+        key=lambda item: (-(item.get("weak_rule_count") or 0), value_at(item, "stock.code") or ""),
+    )[:5]
+    return {
+        "available": True,
+        "position_count": backtest_doc.get("position_count", 0),
+        "backtested_count": backtest_doc.get("backtested_count", len(items)),
+        "error_count": backtest_doc.get("error_count", len(backtest_doc.get("errors", []) or [])),
+        "top_weak_items": top_weak_items,
+        "errors": backtest_doc.get("errors", []) or [],
+        "stop_loss_pct_from_entry": value_at(backtest_doc, "source.stop_loss_pct_from_entry"),
+        "primary_horizon": value_at(backtest_doc, "source.primary_horizon"),
+    }
+
+
 def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
     actions: list[str] = []
     watchlist = summary["watchlist"]
     portfolio = summary["portfolio"]
     holding_action_draft = summary["holding_action_draft"]
+    portfolio_action_backtests = summary["portfolio_action_backtests"]
     exits = summary["exit_plans"]
     trade_executions = summary["trade_executions"]
     exit_executions = summary["exit_executions"]
@@ -626,6 +656,13 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
         actions.append(f"复核 {holding_action_draft['critical_rule_count']} 条持仓关键价格触发动作。")
     elif holding_action_draft["high_rule_count"]:
         actions.append(f"复核 {holding_action_draft['high_rule_count']} 条持仓高优先级动作条件。")
+    if portfolio["available"] and not portfolio_action_backtests["available"]:
+        actions.append("生成组合动作矩阵回测，验证当前规则在持仓上的历史区分度。")
+    elif portfolio_action_backtests["error_count"]:
+        actions.append(f"复核 {portfolio_action_backtests['error_count']} 个组合动作矩阵回测错误。")
+    weak_items = [item for item in portfolio_action_backtests["top_weak_items"] if (item.get("weak_rule_count") or 0) > 0]
+    if weak_items:
+        actions.append(f"复核 {len(weak_items)} 只弱规则较多的持仓。")
 
     urgent_exits = [row for row in exits["rows"] if row["must_exit"] or row["urgency"] == "immediate"]
     if urgent_exits:
@@ -860,6 +897,7 @@ def build_summary(args: argparse.Namespace, generated_at: datetime | None = None
         "watchlist": summarize_watchlist(load_json_if_exists(Path(args.watchlist_metadata))),
         "portfolio": summarize_portfolio(load_json_if_exists(Path(args.portfolio_check))),
         "holding_action_draft": summarize_holding_action_draft(load_json_if_exists(Path(args.holding_action_draft))),
+        "portfolio_action_backtests": summarize_portfolio_action_backtests(load_json_if_exists(Path(args.portfolio_action_backtests))),
         "exit_plans": summarize_exit_plans(load_yaml_files(args.exit_plans)),
         "trade_executions": summarize_trade_executions(load_yaml_files(args.trade_executions)),
         "exit_executions": summarize_exit_executions(load_yaml_files(args.exit_executions)),
@@ -893,6 +931,7 @@ def render_summary(summary: dict[str, Any]) -> str:
     watchlist = summary["watchlist"]
     portfolio = summary["portfolio"]
     holding_action_draft = summary["holding_action_draft"]
+    portfolio_action_backtests = summary["portfolio_action_backtests"]
     exits = summary["exit_plans"]
     trade_executions = summary["trade_executions"]
     executions = summary["exit_executions"]
@@ -950,6 +989,15 @@ def render_summary(summary: dict[str, Any]) -> str:
         f"- 高优先级动作数：{holding_action_draft['high_rule_count']}",
         f"- 趋势状态分布：{holding_action_draft['trend_states'] if holding_action_draft['trend_states'] else '-'}",
         "",
+        "## 动作矩阵回测",
+        "",
+        f"- 回测状态：{'已读取' if portfolio_action_backtests['available'] else '缺失'}",
+        f"- 持仓数：{portfolio_action_backtests['position_count']}",
+        f"- 完成回测：{portfolio_action_backtests['backtested_count']}",
+        f"- 回测错误：{portfolio_action_backtests['error_count']}",
+        f"- 主观察窗口：{portfolio_action_backtests['primary_horizon'] if portfolio_action_backtests['primary_horizon'] is not None else '-'}",
+        f"- 假设止损：{portfolio_action_backtests['stop_loss_pct_from_entry'] if portfolio_action_backtests['stop_loss_pct_from_entry'] is not None else '持仓文件现有止损价'}",
+        "",
         "## 退出与卖出",
         "",
         f"- 退出计划数量：{exits['count']}",
@@ -976,6 +1024,24 @@ def render_summary(summary: dict[str, Any]) -> str:
             for rule in row["high_rules"][:2]:
                 price_text = "" if rule.get("price") is None else f" price={rule['price']}"
                 lines.append(f"  - high {rule.get('trigger')}{price_text}: {rule.get('action_label')}")
+        lines.append("")
+
+    if portfolio_action_backtests["top_weak_items"]:
+        lines.append("弱规则较多持仓：")
+        for item in portfolio_action_backtests["top_weak_items"]:
+            stock = item.get("stock", {})
+            best = item.get("best_state") or {}
+            weakest = item.get("weakest_state") or {}
+            best_text = "-" if not best else f"{best.get('state')} avg={best.get('average_return_pct')}%"
+            weakest_text = "-" if not weakest else f"{weakest.get('state')} avg={weakest.get('average_return_pct')}%"
+            lines.append(
+                f"- {stock.get('code')} {stock.get('name')} weak_rules={item.get('weak_rule_count')} best={best_text} weakest={weakest_text}"
+            )
+        lines.append("")
+    if portfolio_action_backtests["errors"]:
+        lines.append("动作矩阵回测错误：")
+        for item in portfolio_action_backtests["errors"]:
+            lines.append(f"- {item.get('path')}: {item.get('message')}")
         lines.append("")
 
     if exits["rows"]:
@@ -1139,6 +1205,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--watchlist-metadata", default="data/metadata/watchlist_pipeline.json", help="Watchlist pipeline metadata JSON.")
     parser.add_argument("--portfolio-check", default="data/metadata/portfolio_positions.check.json", help="Portfolio position check JSON.")
     parser.add_argument("--holding-action-draft", default="data/metadata/holding-action-draft.json", help="Holding action draft JSON generated by build_holding_action_draft.py.")
+    parser.add_argument("--portfolio-action-backtests", default="data/metadata/portfolio-action-matrix-backtests.json", help="Portfolio action matrix backtest JSON generated by run_portfolio_action_matrix_backtests.py.")
     parser.add_argument("--exit-plans", nargs="+", default=["exit-plans/*.yaml"], help="Exit plan YAML paths or glob patterns.")
     parser.add_argument("--trade-executions", nargs="+", default=["executions/*.yaml"], help="Trade execution YAML paths or glob patterns.")
     parser.add_argument("--exit-executions", nargs="+", default=["exit-executions/*.yaml"], help="Sell execution YAML paths or glob patterns.")
