@@ -1,6 +1,7 @@
 import unittest
+from datetime import date, timedelta
 
-from tools.monitor_intraday_positions import analyze_quote, build_reduction_plan, build_reverse_t_plan, moving_averages, state_signature
+from tools.monitor_intraday_positions import analyze_quote, build_reduction_plan, build_reverse_t_plan, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
 
 
 class MonitorIntradayPositionsTest(unittest.TestCase):
@@ -9,6 +10,18 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
             "stock": {"code": "000725", "name": "京东方A"},
             "entry": {"shares": 200, "entry_price": 9.115, "position_pct_of_total_assets": 5.3611},
         }
+        self.costs = {
+            "commission_rate": 0.0003,
+            "minimum_commission": 5.0,
+            "stamp_duty_rate": 0.0005,
+            "transfer_fee_rate": 0.00001,
+            "minimum_net_profit": 5.0,
+            "verified": False,
+        }
+
+    def history(self, count: int = 260, close: float = 7.0) -> list[dict]:
+        start = date(2025, 1, 1)
+        return [{"trade_date": (start + timedelta(days=index)).isoformat(), "close": close} for index in range(count)]
 
     def test_moving_averages(self) -> None:
         ma5, ma20 = moving_averages([float(value) for value in range(1, 21)])
@@ -26,9 +39,10 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         item = analyze_quote(
             self.position,
             quote,
-            [7.0] * 20,
+            self.history(),
             total_assets=25480,
             max_stale_seconds=60,
+            costs=self.costs,
             now_timestamp=1003,
         )
         self.assertEqual(item["state"], "risk_review")
@@ -48,15 +62,24 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
             "broker_import_snapshot": {"available_shares": 1000},
         }
         quote = {"latest_price": 3.29, "open": 3.24, "high": 3.31, "low": 3.23, "change_pct": 1.54}
-        plan = build_reverse_t_plan(position, quote, stale=False)
+        plan = build_reverse_t_plan(
+            position,
+            quote,
+            stale=False,
+            costs=self.costs,
+            timeframe={"alignment": "bearish"},
+            preferred_reduction_shares=300,
+        )
         self.assertEqual(plan["status"], "candidate")
-        self.assertEqual(plan["trade_shares"], 100)
-        self.assertEqual(plan["buyback_max_price"], 3.25)
+        self.assertEqual(plan["trade_shares"], 200)
+        self.assertEqual(plan["buyback_max_price"], 3.21)
+        self.assertGreater(plan["required_gap_pct"], 2.0)
+        self.assertGreaterEqual(plan["cost_estimate"]["net_profit"], 5.0)
         self.assertTrue(plan["failure_as_reduction_acceptable"])
 
     def test_small_position_is_not_suitable_for_reverse_t(self) -> None:
         quote = {"latest_price": 6.8, "open": 6.7, "high": 6.9, "low": 6.6, "change_pct": 1.0}
-        plan = build_reverse_t_plan(self.position, quote, stale=False)
+        plan = build_reverse_t_plan(self.position, quote, stale=False, costs=self.costs, timeframe={"alignment": "bearish"})
         self.assertEqual(plan["status"], "not_suitable")
         self.assertTrue(any("少于300股" in blocker for blocker in plan["blockers"]))
 
@@ -66,6 +89,18 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertEqual(plan["status"], "actionable")
         self.assertEqual(plan["minimum_reduction_shares"], 300)
         self.assertLessEqual(plan["post_reduction_position_pct"], 10.0)
+
+    def test_trade_costs_include_minimum_commissions_and_sell_tax(self) -> None:
+        costs = trade_costs(3.29, 3.25, 100, self.costs)
+        self.assertEqual(costs["sell_commission"], 5.0)
+        self.assertEqual(costs["buy_commission"], 5.0)
+        self.assertLess(costs["net_profit"], 0)
+
+    def test_multi_timeframe_metrics(self) -> None:
+        metrics = multi_timeframe_metrics(self.history(close=7.0), 7.5)
+        self.assertGreaterEqual(metrics["weekly_closes_count"], 12)
+        self.assertGreaterEqual(metrics["monthly_closes_count"], 6)
+        self.assertEqual(metrics["alignment"], "bullish")
 
 
 if __name__ == "__main__":

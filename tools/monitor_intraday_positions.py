@@ -26,7 +26,7 @@ except ModuleNotFoundError:
     from risk_check import as_float, load_yaml, value_at
 
 
-def read_close_history(path: Path) -> dict[str, list[float]]:
+def read_close_history(path: Path) -> dict[str, list[dict[str, Any]]]:
     histories: dict[str, list[tuple[str, float]]] = {}
     with path.open("r", encoding="utf-8-sig", newline="") as file:
         for row in csv.DictReader(file):
@@ -34,7 +34,7 @@ def read_close_history(path: Path) -> dict[str, list[float]]:
             code = str(row.get("code") or "")
             if code and close is not None:
                 histories.setdefault(code, []).append((str(row.get("trade_date") or ""), close))
-    return {code: [close for _, close in sorted(rows)] for code, rows in histories.items()}
+    return {code: [{"trade_date": trade_date, "close": close} for trade_date, close in sorted(rows)] for code, rows in histories.items()}
 
 
 def average(values: list[float]) -> float | None:
@@ -47,8 +47,97 @@ def moving_averages(closes: list[float]) -> tuple[float | None, float | None]:
     return ma5, ma20
 
 
+def multi_timeframe_metrics(rows: list[dict[str, Any]], current_price: float | None) -> dict[str, Any]:
+    weekly: dict[str, float] = {}
+    monthly: dict[str, float] = {}
+    for row in rows:
+        trade_date = datetime.strptime(str(row["trade_date"]), "%Y-%m-%d")
+        weekly[f"{trade_date.isocalendar().year}-{trade_date.isocalendar().week:02d}"] = float(row["close"])
+        monthly[trade_date.strftime("%Y-%m")] = float(row["close"])
+    weekly_closes = list(weekly.values())
+    monthly_closes = list(monthly.values())
+    weekly_ma4 = average(weekly_closes[-4:]) if len(weekly_closes) >= 4 else None
+    weekly_ma12 = average(weekly_closes[-12:]) if len(weekly_closes) >= 12 else None
+    monthly_ma3 = average(monthly_closes[-3:]) if len(monthly_closes) >= 3 else None
+    monthly_ma6 = average(monthly_closes[-6:]) if len(monthly_closes) >= 6 else None
+
+    def period_return(values: list[float], periods: int) -> float | None:
+        if current_price is None or len(values) < periods or values[-periods] == 0:
+            return None
+        return (current_price / values[-periods] - 1) * 100
+
+    weekly_return_4 = period_return(weekly_closes, 4)
+    monthly_return_3 = period_return(monthly_closes, 3)
+    if current_price is None or weekly_ma4 is None or monthly_ma3 is None:
+        alignment = "insufficient"
+    elif current_price >= weekly_ma4 and current_price >= monthly_ma3 and (weekly_return_4 or 0) >= 0 and (monthly_return_3 or 0) >= 0:
+        alignment = "bullish"
+    elif current_price < weekly_ma4 and current_price < monthly_ma3:
+        alignment = "bearish"
+    else:
+        alignment = "mixed"
+    return {
+        "weekly_closes_count": len(weekly_closes),
+        "monthly_closes_count": len(monthly_closes),
+        "weekly_ma4": weekly_ma4,
+        "weekly_ma12": weekly_ma12,
+        "weekly_return_4_pct": weekly_return_4,
+        "monthly_ma3": monthly_ma3,
+        "monthly_ma6": monthly_ma6,
+        "monthly_return_3_pct": monthly_return_3,
+        "alignment": alignment,
+    }
+
+
 def floor_to_tick(price: float, tick: float = 0.01) -> float:
     return round(math.floor((price + 1e-9) / tick) * tick, 2)
+
+
+def trade_costs(
+    sell_price: float,
+    buy_price: float,
+    shares: int,
+    costs: dict[str, float],
+) -> dict[str, float]:
+    sell_amount = sell_price * shares
+    buy_amount = buy_price * shares
+    commission_rate = costs["commission_rate"]
+    minimum_commission = costs["minimum_commission"]
+    sell_commission = max(sell_amount * commission_rate, minimum_commission)
+    buy_commission = max(buy_amount * commission_rate, minimum_commission)
+    stamp_duty = sell_amount * costs["stamp_duty_rate"]
+    transfer_fee = (sell_amount + buy_amount) * costs["transfer_fee_rate"]
+    total_fees = sell_commission + buy_commission + stamp_duty + transfer_fee
+    gross_profit = (sell_price - buy_price) * shares
+    return {
+        "sell_commission": round(sell_commission, 4),
+        "buy_commission": round(buy_commission, 4),
+        "stamp_duty": round(stamp_duty, 4),
+        "transfer_fee": round(transfer_fee, 4),
+        "total_fees": round(total_fees, 4),
+        "gross_profit": round(gross_profit, 4),
+        "net_profit": round(gross_profit - total_fees, 4),
+    }
+
+
+def fee_viable_trade(
+    sell_price: float,
+    max_shares: int,
+    costs: dict[str, float],
+    *,
+    min_gap_pct: float,
+    max_gap_pct: float = 3.0,
+) -> dict[str, Any] | None:
+    minimum_net_profit = costs["minimum_net_profit"]
+    for shares in range(100, max_shares + 1, 100):
+        gap_pct = min_gap_pct
+        while gap_pct <= max_gap_pct + 1e-9:
+            buy_price = floor_to_tick(sell_price * (1 - gap_pct / 100))
+            fees = trade_costs(sell_price, buy_price, shares, costs)
+            if fees["net_profit"] >= minimum_net_profit:
+                return {"trade_shares": shares, "buyback_max_price": buy_price, "required_gap_pct": round((sell_price / buy_price - 1) * 100, 4), "fees": fees}
+            gap_pct += 0.1
+    return None
 
 
 def build_reverse_t_plan(
@@ -56,6 +145,9 @@ def build_reverse_t_plan(
     quote: dict[str, Any],
     *,
     stale: bool,
+    costs: dict[str, float],
+    timeframe: dict[str, Any],
+    preferred_reduction_shares: int | None = None,
     min_gap_pct: float = 1.2,
 ) -> dict[str, Any]:
     shares = int(as_float(value_at(position, "entry.shares"), 0.0) or 0.0)
@@ -65,6 +157,9 @@ def build_reverse_t_plan(
     low = as_float(quote.get("low"))
     open_price = as_float(quote.get("open"))
     change_pct = as_float(quote.get("change_pct"))
+    max_trade_shares = math.floor(shares / 3 / 100) * 100
+    if preferred_reduction_shares:
+        max_trade_shares = min(max_trade_shares, preferred_reduction_shares)
     trade_shares = 100
     trade_ratio_pct = trade_shares / shares * 100 if shares else None
     original_position_pct = as_float(value_at(position, "entry.position_pct_of_total_assets"), 0.0) or 0.0
@@ -74,7 +169,7 @@ def build_reverse_t_plan(
     blockers: list[str] = []
     if stale:
         blockers.append("行情过期。")
-    if available < trade_shares:
+    if available < 100:
         blockers.append("可用股份不足100股。")
     if shares < 300:
         blockers.append("持仓少于300股，卖出100股会影响至少一半底仓。")
@@ -82,6 +177,10 @@ def build_reverse_t_plan(
         blockers.append("接近或达到跌停，不做反T。")
     if range_pct is None or range_pct < 1.5:
         blockers.append("当日振幅不足1.5%，价差空间不够。")
+    if timeframe.get("alignment") == "insufficient":
+        blockers.append("周线或月线历史不足，无法完成多周期验证。")
+    if timeframe.get("alignment") == "bearish" and not failure_as_reduction_acceptable:
+        blockers.append("周线和月线均偏弱，且该股票没有计划降仓目标，不宜卖出后再回补。")
 
     setup_ready = (
         not blockers
@@ -104,11 +203,22 @@ def build_reverse_t_plan(
     sell_zone_high = None
     buyback_max = None
     estimated_cost_reduction = None
+    cost_estimate = None
+    required_gap_pct = None
     if high is not None:
         sell_zone_high = round(high, 2)
         sell_zone_low = max(round(high - 0.02, 2), round(open_price or high, 2))
-        buyback_max = floor_to_tick(sell_zone_low * (1 - min_gap_pct / 100))
-        estimated_cost_reduction = round((sell_zone_low - buyback_max) * trade_shares / shares, 4) if shares else None
+        viable = fee_viable_trade(sell_zone_low, max_trade_shares, costs, min_gap_pct=min_gap_pct) if not blockers and max_trade_shares >= 100 else None
+        if viable:
+            trade_shares = viable["trade_shares"]
+            trade_ratio_pct = trade_shares / shares * 100 if shares else None
+            buyback_max = viable["buyback_max_price"]
+            required_gap_pct = viable["required_gap_pct"]
+            cost_estimate = viable["fees"]
+            estimated_cost_reduction = round(cost_estimate["net_profit"] / shares, 4) if shares else None
+        elif not blockers:
+            blockers.append(f"在最多动用三分之一持仓、最大3%价差下，扣除估算费用后净收益不足{costs['minimum_net_profit']:.2f}元。")
+            status = "fee_blocked"
 
     return {
         "status": status,
@@ -119,13 +229,17 @@ def build_reverse_t_plan(
         "sell_zone": [sell_zone_low, sell_zone_high] if sell_zone_low is not None else None,
         "buyback_max_price": buyback_max,
         "min_gap_pct": min_gap_pct,
+        "required_gap_pct": required_gap_pct,
         "estimated_cost_reduction_per_share": estimated_cost_reduction,
+        "cost_estimate": cost_estimate,
+        "cost_model_verified": bool(costs.get("verified")),
+        "timeframe_alignment": timeframe.get("alignment"),
         "failure_as_reduction_acceptable": failure_as_reduction_acceptable,
         "failure_result": "未回补可计入计划降仓。" if failure_as_reduction_acceptable else "未回补会形成计划外减仓，执行前必须明确接受。",
         "blockers": blockers,
         "instructions": [
-            "只在价格进入卖出观察区后转弱时卖出100股，不在快速拉升中抢跑。",
-            f"卖出后仅在价格降至回补上限且行情未失效时买回100股，目标价差至少{min_gap_pct:.1f}%。",
+            f"只在价格进入卖出观察区后转弱时卖出{trade_shares}股，不在快速拉升中抢跑。",
+            "卖出后仅在价格降至费用模型给出的回补上限且行情未失效时买回同等股数。",
             "若未到回补价，不追价买回；只有事先接受减仓结果时才允许执行反T。",
             "同一股票当日最多执行一轮，成交后记录实际卖价、买价和费用。",
         ],
@@ -158,7 +272,7 @@ def build_reduction_plan(
     steps = [
         f"目标是把单票仓位从{current_pct:.2f}%降至10%以内；按当前价最少需减少{reduction_shares}股。",
         f"优先分批每次100股，预计剩余{remaining_shares}股、仓位约{post_pct:.2f}%。",
-        "若采用反T方式，未回补的100股计入降仓；达到目标后停止继续卖出。",
+        "若采用反T方式，未回补的卖出股份计入降仓；达到目标后停止继续卖出。",
         "若价格快速下跌或接近跌停，不把市价单作为默认执行方式，先确认流动性。",
     ]
     if status == "granularity_review":
@@ -178,10 +292,11 @@ def build_reduction_plan(
 def analyze_quote(
     position: dict[str, Any],
     quote: dict[str, Any],
-    closes: list[float],
+    history: list[dict[str, Any]],
     *,
     total_assets: float,
     max_stale_seconds: int,
+    costs: dict[str, float],
     now_timestamp: float,
 ) -> dict[str, Any]:
     code = str(value_at(position, "stock.code") or "")
@@ -192,7 +307,9 @@ def analyze_quote(
     change_pct = as_float(quote.get("change_pct"))
     quote_timestamp = as_float(quote.get("quote_timestamp"))
     quote_lag_seconds = None if quote_timestamp is None else max(0.0, now_timestamp - quote_timestamp)
+    closes = [float(row["close"]) for row in history]
     ma5, ma20 = moving_averages(closes)
+    timeframe = multi_timeframe_metrics(history, price)
 
     market_value = price * shares if price is not None else None
     unrealized_pnl = (price - entry_price) * shares if price is not None and entry_price is not None else None
@@ -225,8 +342,15 @@ def analyze_quote(
     else:
         state = "observe"
 
-    reverse_t_plan = build_reverse_t_plan(position, quote, stale="stale_quote" in signal_codes)
     reduction_plan = build_reduction_plan(position, quote, total_assets=total_assets)
+    reverse_t_plan = build_reverse_t_plan(
+        position,
+        quote,
+        stale="stale_quote" in signal_codes,
+        costs=costs,
+        timeframe=timeframe,
+        preferred_reduction_shares=reduction_plan.get("minimum_reduction_shares") if reduction_plan.get("status") == "actionable" else None,
+    )
 
     return {
         "code": code,
@@ -242,7 +366,7 @@ def analyze_quote(
             "original_position_pct": position_pct,
             "live_position_pct": None if live_position_pct is None else round(live_position_pct, 4),
         },
-        "technicals": {"ma5": ma5, "ma20": ma20},
+        "technicals": {"ma5": ma5, "ma20": ma20, "multi_timeframe": timeframe},
         "signals": signals,
         "reverse_t_plan": reverse_t_plan,
         "reduction_plan": reduction_plan,
@@ -256,6 +380,7 @@ def build_snapshot(
     *,
     total_assets: float,
     max_stale_seconds: int,
+    costs: dict[str, float],
 ) -> dict[str, Any]:
     positions = [load_yaml(path) for path in position_paths]
     codes = [str(value_at(position, "stock.code") or "") for position in positions]
@@ -275,6 +400,7 @@ def build_snapshot(
             histories.get(code, []),
             total_assets=total_assets,
             max_stale_seconds=max_stale_seconds,
+            costs=costs,
             now_timestamp=now.timestamp(),
         )
         item["position_path"] = str(path)
@@ -285,6 +411,7 @@ def build_snapshot(
         "mode": "quasi_realtime_non_guaranteed",
         "interval_note": "公开网页接口无时效和可用性保证，不用于自动下单。",
         "total_assets": total_assets,
+        "cost_model": costs,
         "position_count": len(position_paths),
         "success_count": len(items),
         "errors": errors,
@@ -335,7 +462,12 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
 
 def state_signature(snapshot: dict[str, Any]) -> dict[str, Any]:
     return {
-        item["code"]: {"state": item["state"], "signals": sorted(signal["code"] for signal in item["signals"])}
+        item["code"]: {
+            "state": item["state"],
+            "signals": sorted(signal["code"] for signal in item["signals"]),
+            "reverse_t_status": item.get("reverse_t_plan", {}).get("status"),
+            "reduction_status": item.get("reduction_plan", {}).get("status"),
+        }
         for item in snapshot["items"]
     }
 
@@ -371,6 +503,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interval", type=float, default=30.0)
     parser.add_argument("--archive-interval", type=float, default=300.0)
     parser.add_argument("--max-stale-seconds", type=int, default=60)
+    parser.add_argument("--commission-rate", type=float, default=0.0003, help="Broker commission rate per side; conservative default 0.03%.")
+    parser.add_argument("--minimum-commission", type=float, default=5.0, help="Minimum broker commission per order.")
+    parser.add_argument("--stamp-duty-rate", type=float, default=0.0005, help="Sell-side stamp duty rate.")
+    parser.add_argument("--transfer-fee-rate", type=float, default=0.00001, help="Transfer fee rate per side.")
+    parser.add_argument("--minimum-net-profit", type=float, default=5.0, help="Minimum estimated net profit required for a T trade.")
+    parser.add_argument("--cost-model-verified", action="store_true", help="Mark cost inputs as verified against the broker statement.")
     parser.add_argument("--latest-json", default="data/metadata/intraday-monitor.latest.json")
     parser.add_argument("--latest-markdown", default="reports/intraday-monitor.latest.md")
     parser.add_argument("--event-log", default="data/metadata/intraday-monitor.events.jsonl")
@@ -393,6 +531,14 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
     paths = expand_position_paths(args.positions)
+    costs = {
+        "commission_rate": args.commission_rate,
+        "minimum_commission": args.minimum_commission,
+        "stamp_duty_rate": args.stamp_duty_rate,
+        "transfer_fee_rate": args.transfer_fee_rate,
+        "minimum_net_profit": args.minimum_net_profit,
+        "verified": args.cost_model_verified,
+    }
     latest_json = Path(args.latest_json)
     latest_markdown = Path(args.latest_markdown)
     event_log = Path(args.event_log)
@@ -409,6 +555,7 @@ def main() -> int:
                     Path(args.daily_bars),
                     total_assets=args.total_assets,
                     max_stale_seconds=args.max_stale_seconds,
+                    costs=costs,
                 )
                 write_json(latest_json, snapshot)
                 atomic_write(latest_markdown, render_markdown(snapshot))

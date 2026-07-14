@@ -144,18 +144,31 @@ function openDetail(code) {
     ["5日均线", money(item.technicals.ma5)], ["20日均线", money(item.technicals.ma20)],
   ];
   let html = detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
+  const multi = item.technicals?.multi_timeframe || {};
+  const multiMetrics = [
+    ["周线方向", multi.alignment === "bullish" ? "周月共振向上" : multi.alignment === "bearish" ? "周月共同偏弱" : multi.alignment === "mixed" ? "周期分歧" : "历史不足"],
+    ["4周均价", money(multi.weekly_ma4)], ["12周均价", money(multi.weekly_ma12)],
+    ["4周收益", pct(multi.weekly_return_4_pct)], ["3月均价", money(multi.monthly_ma3)],
+    ["6月均价", money(multi.monthly_ma6)], ["3月收益", pct(multi.monthly_return_3_pct)],
+  ];
+  html += detailSection("日线 / 周线 / 月线", `<div class="metric-grid">${multiMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
   html += detailSection("当前建议", `<p><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></p><p>${escapeHtml(adviceFor(item))}</p>${action?.reasons?.length ? `<ul class="reason-list">${action.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`);
   html += detailSection("盘中信号", item.signals.length ? `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>` : "<p>当前没有新增盘中风险信号。</p>");
   const reversePlan = item.reverse_t_plan;
   if (reversePlan) {
-    const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : "当前不适合";
+    const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "当前不适合";
     const zone = reversePlan.sell_zone ? `${num(reversePlan.sell_zone[0])}–${num(reversePlan.sell_zone[1])}元` : "--";
     const planMetrics = [
       ["状态", reverseStatus], ["试做数量", `${reversePlan.trade_shares || 100}股`],
       ["卖出观察区", zone], ["最高回补价", money(reversePlan.buyback_max_price)],
-      ["最低目标价差", pct(reversePlan.min_gap_pct)], ["占当前持仓", pct(reversePlan.trade_ratio_pct)],
+      ["实际所需价差", pct(reversePlan.required_gap_pct)], ["占当前持仓", pct(reversePlan.trade_ratio_pct)],
       ["未回补后果", reversePlan.failure_as_reduction_acceptable ? "计入计划降仓" : "形成计划外减仓"],
     ];
+    if (reversePlan.cost_estimate) {
+      planMetrics.push(["预计总费用", money(reversePlan.cost_estimate.total_fees)]);
+      planMetrics.push(["预计净收益", money(reversePlan.cost_estimate.net_profit)]);
+    }
+    planMetrics.push(["费用参数", reversePlan.cost_model_verified ? "已按交割单核验" : "保守假设，尚未核验"]);
     const blockers = reversePlan.blockers || [];
     html += detailSection("反T降低成本", `<div class="metric-grid">${planMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p>${escapeHtml(reversePlan.failure_result || "")}</p>${blockers.length ? `<ul class="reason-list">${blockers.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<ol class="reason-list">${reversePlan.instructions.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`}`);
   }
