@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>持仓监控台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>持仓监控台</h1>
+      <p id="updatedAt">等待第一轮数据</p>
+    </div>
+    <div class="header-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="monitorStatus">连接中</span>
+      <span class="latency" id="latencyText">--</span>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="视图切换">
+    <button class="tab active" data-view="positions">持仓</button>
+    <button class="tab" data-view="events">事件</button>
+  </nav>
+
+  <main>
+    <section class="summary-band" id="summaryBand" aria-label="账户汇总"></section>
+
+    <section class="toolbar" id="positionsToolbar">
+      <label class="search-box">
+        <span>搜索</span>
+        <input id="searchInput" type="search" placeholder="代码或名称" autocomplete="off">
+      </label>
+      <div class="filter-group" aria-label="风险筛选">
+        <button class="filter active" data-filter="all">全部</button>
+        <button class="filter" data-filter="risk_review">风险复核</button>
+        <button class="filter" data-filter="no_add_watch">禁止补仓</button>
+        <button class="filter" data-filter="observe">观察</button>
+      </div>
+    </section>
+
+    <section id="positionsView" class="view active">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>证券</th>
+              <th class="number">现价 / 涨跌</th>
+              <th class="number">持仓盈亏</th>
+              <th class="number">仓位</th>
+              <th>状态</th>
+              <th>建议</th>
+              <th class="number">行情延迟</th>
+            </tr>
+          </thead>
+          <tbody id="positionsBody"></tbody>
+        </table>
+      </div>
+      <div class="mobile-list" id="mobileList"></div>
+      <div class="empty-state" id="emptyState" hidden>没有符合条件的持仓</div>
+    </section>
+
+    <section id="eventsView" class="view">
+      <div class="event-list" id="eventList"></div>
+    </section>
+  </main>
+
+  <aside class="detail-panel" id="detailPanel" aria-hidden="true">
+    <div class="detail-header">
+      <div>
+        <p id="detailCode"></p>
+        <h2 id="detailName"></h2>
+      </div>
+      <button class="close-button" id="closeDetail" aria-label="关闭详情" title="关闭">×</button>
+    </div>
+    <div id="detailContent"></div>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

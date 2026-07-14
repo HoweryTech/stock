@@ -71,8 +71,11 @@
 - [交易执行记录](./docs/交易执行记录.md)
 - [交易执行偏差检查](./docs/交易执行偏差检查.md)
 - [执行记录生成持仓](./docs/执行记录生成持仓.md)
+- [东方财富持仓导入](./docs/东方财富持仓导入.md)
 - [持仓日检](./docs/持仓日检.md)
 - [组合持仓日检](./docs/组合持仓日检.md)
+- [做T机会检查](./docs/做T机会检查.md)
+- [持仓准实时监控](./docs/持仓准实时监控.md)
 - [退出计划](./docs/退出计划.md)
 - [退出计划检查](./docs/退出计划检查.md)
 - [卖出执行记录](./docs/卖出执行记录.md)
@@ -115,6 +118,24 @@ python3 tools/filter_universe.py \
 ```
 
 ### 导入日线行情
+
+自动拉取：
+
+```bash
+python3 tools/fetch_daily_bars_sina.py \
+  --codes 600000 300750 \
+  --output data/processed/daily_bars.csv
+```
+
+从持仓文件自动拉取：
+
+```bash
+python3 tools/fetch_daily_bars_sina.py \
+  --positions positions/*.yaml \
+  --output data/processed/daily_bars.csv
+```
+
+手工 CSV 导入：
 
 ```bash
 python3 tools/import_daily_bars.py \
@@ -386,6 +407,19 @@ python3 tools/new_position.py \
 
 ### 持仓日检
 
+### 东方财富持仓导入
+
+```bash
+python3 tools/import_eastmoney_positions.py \
+  --input data/raw/eastmoney_positions.csv \
+  --total-assets 100000 \
+  --default-stop-loss-pct 8
+```
+
+该工具读取东方财富导出的持仓 CSV，生成项目标准 `positions/*.yaml`。不接收券商账号密码，不自动登录，不自动下单。
+
+### 持仓日检
+
 ```bash
 python3 tools/update_position_daily.py \
   --position positions/POS-示例.yaml \
@@ -416,6 +450,78 @@ python3 tools/position_check.py \
 ```bash
 python3 tools/position_check.py --position positions/POS-示例.yaml --json
 ```
+
+### 做T机会检查
+
+```bash
+python3 tools/check_t_trade_opportunity.py \
+  --position positions/POS-示例.yaml \
+  --daily-bars data/processed/daily_bars.csv \
+  --auto-fetch
+```
+
+该工具基于持仓、止损、仓位和最近日线行情筛查正T/反T观察机会。日线结论只用于盘前/盘后筛查，真实执行仍需要分时确认和人工记录。
+
+批量刷新行情并检查多个持仓：
+
+```bash
+python3 tools/check_portfolio_t_opportunities.py \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --auto-fetch
+```
+
+批量结果区分行情形态 `market_setup` 与账户风控结论 `conclusion`，避免把技术观察信号直接当成可执行指令。
+
+根据批量检查生成保守的持仓处置草案：
+
+```bash
+python3 tools/build_holding_action_draft.py \
+  --t-report data/metadata/portfolio-t-opportunities.check.json
+```
+
+草案只进行风险排序并给出补仓/做T解锁条件，不自动设置止损价或生成订单。
+
+自动补齐持仓行业、估值、最新财务指标和近期公告：
+
+```bash
+python3 tools/fetch_holding_research.py \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --update-position-industries
+```
+
+将基本面与公告快照接入持仓处置草案：
+
+```bash
+python3 tools/build_holding_action_draft.py \
+  --t-report data/metadata/portfolio-t-opportunities.check.json \
+  --research-report data/metadata/holding-research.json
+```
+
+财务阈值和公告标题关键词只用于筛查，必须核对正式财报或公告原文后才能形成交易结论。
+
+启动持仓准实时监控：
+
+```bash
+python3 tools/monitor_intraday_positions.py \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --total-assets 25480 \
+  --interval 30 \
+  --archive-interval 300
+```
+
+停止监控：
+
+```bash
+python3 tools/stop_intraday_monitor.py
+```
+
+启动本地持仓监控界面：
+
+```bash
+python3 tools/serve_monitor_dashboard.py --host 127.0.0.1 --port 8765
+```
+
+打开 `http://127.0.0.1:8765` 查看持仓状态、实时盈亏、风险筛选、个股分析建议、基本面和事件记录。
 
 ### 新建退出计划
 
