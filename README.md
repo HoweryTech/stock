@@ -76,6 +76,7 @@
 - [组合持仓日检](./docs/组合持仓日检.md)
 - [做T机会检查](./docs/做T机会检查.md)
 - [持仓准实时监控](./docs/持仓准实时监控.md)
+- [持仓动作矩阵回测](./docs/持仓动作矩阵回测.md)
 - [退出计划](./docs/退出计划.md)
 - [退出计划检查](./docs/退出计划检查.md)
 - [卖出执行记录](./docs/卖出执行记录.md)
@@ -503,6 +504,16 @@ python3 tools/build_holding_action_draft.py \
 ```
 
 财务阈值和公告标题关键词只用于筛查，必须核对正式财报或公告原文后才能形成交易结论。
+
+回测单只持仓的趋势状态和动作矩阵：
+
+```bash
+python3 tools/backtest_holding_action_matrix.py \
+  --position positions/POS-EASTMONEY-示例.yaml \
+  --daily-bars data/processed/daily_bars.csv
+```
+
+该回测逐日生成当时可见的趋势状态和价格动作矩阵，并统计触发后 1/3/5/10/20 日收益与回撤；它不模拟真实成交，也不构成买卖建议。
 
 启动持仓准实时监控：
 
