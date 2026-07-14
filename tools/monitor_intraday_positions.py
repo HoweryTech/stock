@@ -213,7 +213,7 @@ def build_reverse_t_plan(
     if high is not None:
         sell_zone_high = round(high, 2)
         sell_zone_low = max(round(high - 0.02, 2), round(open_price or high, 2))
-        viable = fee_viable_trade(sell_zone_low, max_trade_shares, costs, min_gap_pct=min_gap_pct) if not blockers and max_trade_shares >= 100 else None
+        viable = fee_viable_trade(sell_zone_low, max_trade_shares, costs, min_gap_pct=min_gap_pct) if max_trade_shares >= 100 else None
         if viable:
             trade_shares = viable["trade_shares"]
             trade_ratio_pct = trade_shares / shares * 100 if shares else None
@@ -222,7 +222,7 @@ def build_reverse_t_plan(
             cost_estimate = viable["fees"]
             estimated_cost_reduction = round(cost_estimate["net_profit"] / shares, 4) if shares else None
         elif not blockers:
-            blockers.append(f"在最多动用三分之一持仓、最大3%价差下，扣除估算费用后净收益不足{costs['minimum_net_profit']:.2f}元。")
+            blockers.append(f"在允许动用的持仓比例和最大3%价差下，扣除估算费用后净收益不足{costs['minimum_net_profit']:.2f}元。")
             status = "fee_blocked"
 
     return {
@@ -258,6 +258,7 @@ def build_reduction_plan(
     quote: dict[str, Any],
     *,
     total_assets: float,
+    costs: dict[str, float] | None = None,
     max_position_pct: float = 10.0,
 ) -> dict[str, Any]:
     shares = int(as_float(value_at(position, "entry.shares"), 0.0) or 0.0)
@@ -276,6 +277,18 @@ def build_reduction_plan(
     post_pct = remaining_shares * price / total_assets * 100
     reduction_ratio_pct = reduction_shares / shares * 100
     status = "granularity_review" if reduction_ratio_pct >= 40 else "actionable"
+    entry_price = as_float(value_at(position, "entry.entry_price"))
+    gross_proceeds = price * reduction_shares
+    sell_fees = None
+    net_proceeds = None
+    realized_pnl_after_fees = None
+    if costs:
+        sell_fees = max(gross_proceeds * costs["commission_rate"], costs["minimum_commission"])
+        sell_fees += gross_proceeds * costs["stamp_duty_rate"]
+        sell_fees += gross_proceeds * costs["transfer_fee_rate"]
+        net_proceeds = gross_proceeds - sell_fees
+        if entry_price is not None:
+            realized_pnl_after_fees = net_proceeds - entry_price * reduction_shares
     steps = [
         f"目标是把单票仓位从{current_pct:.2f}%降至10%以内；按当前价最少需减少{reduction_shares}股。",
         f"优先分批每次100股，预计剩余{remaining_shares}股、仓位约{post_pct:.2f}%。",
@@ -292,6 +305,11 @@ def build_reduction_plan(
         "remaining_shares": remaining_shares,
         "post_reduction_position_pct": round(post_pct, 4),
         "reduction_ratio_pct": round(reduction_ratio_pct, 2),
+        "estimated_gross_proceeds": round(gross_proceeds, 2),
+        "estimated_sell_fees": None if sell_fees is None else round(sell_fees, 2),
+        "estimated_net_proceeds": None if net_proceeds is None else round(net_proceeds, 2),
+        "estimated_realized_pnl_after_fees": None if realized_pnl_after_fees is None else round(realized_pnl_after_fees, 2),
+        "objective": "降低单票风险并释放现金，不以卖出动作本身创造收益。",
         "steps": steps,
     }
 
@@ -358,7 +376,7 @@ def analyze_quote(
     else:
         state = "observe"
 
-    reduction_plan = build_reduction_plan(position, quote, total_assets=total_assets)
+    reduction_plan = build_reduction_plan(position, quote, total_assets=total_assets, costs=costs)
     reverse_t_plan = build_reverse_t_plan(
         position,
         quote,

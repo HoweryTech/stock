@@ -40,6 +40,7 @@ const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "
 function adviceFor(item) {
   const action = currentActionFor(item);
   if (item.state === "data_stale") return "行情过期，暂停判断";
+  if (item.reduction_plan?.status === "granularity_review") return "仓位略超限，100股减仓幅度过大，暂不机械降仓";
   if (action) return actionLabels[action.action] || action.action_label || "人工复核";
   if (item.state === "risk_review") return "优先处理风险，不新增仓位";
   if (item.state === "no_add_watch") return "等待趋势恢复，禁止补仓";
@@ -51,6 +52,7 @@ function currentActionFor(item) {
   if (!action) return null;
   const liveSignals = new Set((item.signals || []).map(signal => signal.code));
   if (action.action === "exit_risk_review" && !liveSignals.has("limit_down_or_near")) return null;
+  if (action.action === "risk_reduction_review" && item.reduction_plan?.status === "granularity_review") return null;
   return action;
 }
 
@@ -180,11 +182,11 @@ function openDetail(code) {
   html += detailSection("主力资金流", `<div class="metric-grid">${flowMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">${escapeHtml(flow.interpretation || "")}</p>`);
   const reversePlan = item.reverse_t_plan;
   if (reversePlan) {
-    const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "当前不适合";
+    const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "仅供观察，不可执行";
     const zone = reversePlan.sell_zone ? `${num(reversePlan.sell_zone[0])}–${num(reversePlan.sell_zone[1])}元` : "--";
     const planMetrics = [
       ["状态", reverseStatus], ["试做数量", `${reversePlan.trade_shares || 100}股`],
-      ["卖出观察区", zone], ["最高回补价", money(reversePlan.buyback_max_price)],
+      ["卖出观察区", zone], ["参考回补上限", money(reversePlan.buyback_max_price)],
       ["实际所需价差", pct(reversePlan.required_gap_pct)], ["占当前持仓", pct(reversePlan.trade_ratio_pct)],
       ["未回补后果", reversePlan.failure_as_reduction_acceptable ? "计入计划降仓" : "形成计划外减仓"],
       ["主力确认", reversePlan.main_flow_confirmation === "wait_for_weakening" ? "净流入偏强，等待转弱" : "未见强净流入阻断"],
@@ -204,8 +206,9 @@ function openDetail(code) {
       ["当前仓位", pct(reductionPlan.current_position_pct)], ["目标上限", pct(reductionPlan.target_position_pct)],
       ["最少减少", `${reductionPlan.minimum_reduction_shares}股`], ["预计剩余", `${reductionPlan.remaining_shares}股`],
       ["降仓后仓位", pct(reductionPlan.post_reduction_position_pct)], ["减少比例", pct(reductionPlan.reduction_ratio_pct)],
+      ["预计释放现金", money(reductionPlan.estimated_net_proceeds)], ["预计实现盈亏", money(reductionPlan.estimated_realized_pnl_after_fees)],
     ];
-    html += detailSection("具体降仓步骤", `<div class="metric-grid">${reductionMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><ol class="reason-list">${reductionPlan.steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`);
+    html += detailSection("具体降仓步骤", `<div class="metric-grid">${reductionMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p>${escapeHtml(reductionPlan.objective || "")}</p><ol class="reason-list">${reductionPlan.steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`);
   }
   if (research) {
     const fin = research.latest_financials || {};

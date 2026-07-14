@@ -91,12 +91,28 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertEqual(plan["status"], "not_suitable")
         self.assertTrue(any("无法保留底仓" in blocker for blocker in plan["blockers"]))
 
+    def test_blocked_reverse_t_still_exposes_fee_aware_reference_range(self) -> None:
+        quote = {"latest_price": 13.66, "open": 12.96, "high": 13.68, "low": 12.7, "change_pct": 4.59}
+        plan = build_reverse_t_plan(self.position, quote, stale=False, costs=self.costs, timeframe={"alignment": "insufficient"})
+        self.assertEqual(plan["status"], "not_suitable")
+        self.assertEqual(plan["sell_zone"], [13.66, 13.68])
+        self.assertIsNotNone(plan["buyback_max_price"])
+        self.assertGreaterEqual(plan["cost_estimate"]["net_profit"], 5.0)
+
     def test_reduction_plan_rounds_to_board_lots(self) -> None:
         position = {"entry": {"shares": 1000}}
         plan = build_reduction_plan(position, {"latest_price": 3.29}, total_assets=25480)
         self.assertEqual(plan["status"], "actionable")
         self.assertEqual(plan["minimum_reduction_shares"], 300)
         self.assertLessEqual(plan["post_reduction_position_pct"], 10.0)
+
+    def test_reduction_plan_explains_cash_and_realized_loss(self) -> None:
+        position = {"entry": {"shares": 200, "entry_price": 21.41}}
+        plan = build_reduction_plan(position, {"latest_price": 13.57}, total_assets=25480, costs=self.costs)
+        self.assertEqual(plan["minimum_reduction_shares"], 100)
+        self.assertAlmostEqual(plan["estimated_net_proceeds"], 1351.31, places=2)
+        self.assertAlmostEqual(plan["estimated_realized_pnl_after_fees"], -789.69, places=2)
+        self.assertIn("降低单票风险", plan["objective"])
 
     def test_trade_costs_include_minimum_commissions_and_sell_tax(self) -> None:
         costs = trade_costs(3.29, 3.25, 100, self.costs)
