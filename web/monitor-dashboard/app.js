@@ -1,7 +1,6 @@
 const state = {
   snapshot: null,
   research: new Map(),
-  actions: new Map(),
   events: [],
   filter: "all",
   search: "",
@@ -9,19 +8,10 @@ const state = {
 };
 
 const labels = {
-  risk_review: "风险复核",
+  risk_review: "风险处置",
   no_add_watch: "禁止补仓",
   observe: "观察",
   data_stale: "数据失效",
-};
-
-const actionLabels = {
-  exit_risk_review: "优先核验退出风险",
-  risk_reduction_review: "优先评估降仓",
-  fundamental_review: "优先复核基本面",
-  hold_no_add: "持有观察，禁止补仓",
-  t_watch_only: "做T观察，不执行",
-  data_insufficient: "数据不足，暂不决策",
 };
 
 const money = value => value == null ? "--" : `¥${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -38,22 +28,55 @@ const tone = value => Number(value) > 0 ? "positive" : Number(value) < 0 ? "nega
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 
 function adviceFor(item) {
-  const action = currentActionFor(item);
-  if (item.state === "data_stale") return "行情过期，暂停判断";
-  if (item.reduction_plan?.status === "granularity_review") return "仓位略超限，100股减仓幅度过大，暂不机械降仓";
-  if (action) return actionLabels[action.action] || action.action_label || "人工复核";
-  if (item.state === "risk_review") return "优先处理风险，不新增仓位";
-  if (item.state === "no_add_watch") return "等待趋势恢复，禁止补仓";
-  return "继续观察，不执行交易";
+  return automaticDecisionFor(item).headline;
 }
 
-function currentActionFor(item) {
-  const action = state.actions.get(item.code);
-  if (!action) return null;
-  const liveSignals = new Set((item.signals || []).map(signal => signal.code));
-  if (action.action === "exit_risk_review" && !liveSignals.has("limit_down_or_near")) return null;
-  if (action.action === "risk_reduction_review" && item.reduction_plan?.status === "granularity_review") return null;
-  return action;
+function automaticDecisionFor(item) {
+  const research = state.research.get(item.code);
+  const flags = research?.financial_review?.flags || [];
+  const flagCodes = new Set(flags.map(flag => flag.code));
+  const severeFundamentals = flagCodes.has("negative_roe") || flagCodes.has("negative_pe");
+  const reduction = item.reduction_plan || {};
+  const reverse = item.reverse_t_plan || {};
+  const zone = reverse.sell_zone ? `${num(reverse.sell_zone[0])}–${num(reverse.sell_zone[1])}元` : "系统实时区间";
+
+  if (item.state === "data_stale") {
+    return {headline: "现在不操作：行情失效", action: "行情恢复前不买、不卖。", reasons: ["实时行情超过允许延迟。"]};
+  }
+  if ((item.signals || []).some(signal => signal.code === "limit_down_or_near")) {
+    return {headline: "现在不操作：接近跌停", action: "不补仓、不做T，等待流动性恢复。", reasons: item.signals.map(signal => signal.message)};
+  }
+  if (reduction.status === "granularity_review") {
+    return {
+      headline: "现在不减仓，保持现有股数",
+      action: `最小卖出100股会把持仓减少${pct(reduction.reduction_ratio_pct)}，不因轻微超限执行。`,
+      reasons: [reduction.objective, ...(flags.map(flag => flag.message))].filter(Boolean),
+    };
+  }
+  if (reduction.status === "actionable") {
+    return {
+      headline: `等待反弹减仓${reduction.minimum_reduction_shares}股`,
+      action: `价格进入${zone}后转弱时，每次卖出100股，累计${reduction.minimum_reduction_shares}股；未回补部分就是计划降仓。`,
+      reasons: [`完成后预计剩余${reduction.remaining_shares}股，仓位约${pct(reduction.post_reduction_position_pct)}。`, ...(flags.map(flag => flag.message))],
+    };
+  }
+  if (severeFundamentals && Number(item.position.shares) >= 200) {
+    return {
+      headline: "禁止补仓，等待反弹减仓100股",
+      action: `价格进入${zone}后转弱时卖出100股，不回补；未到区间则保持。`,
+      reasons: flags.map(flag => flag.message),
+    };
+  }
+  if (flags.length) {
+    return {headline: "持有，禁止补仓", action: "本轮不买、不卖，下一份财报更新后自动重新判定。", reasons: flags.map(flag => flag.message)};
+  }
+  if (item.state === "no_add_watch") {
+    return {headline: "持有，禁止补仓", action: "本轮不买、不卖；趋势重新站上系统均线后自动重新判定。", reasons: (item.signals || []).map(signal => signal.message)};
+  }
+  if (reverse.status === "candidate") {
+    return {headline: `满足条件可反T ${reverse.trade_shares}股`, action: `在${zone}转弱时卖出，${money(reverse.buyback_max_price)}及以下回补同等股数。`, reasons: [reverse.failure_result]};
+  }
+  return {headline: "持有，不操作", action: "当前不买、不卖，继续监控。", reasons: (reverse.blockers || []).slice(0, 2)};
 }
 
 function isReverseTCandidate(item) {
@@ -86,7 +109,7 @@ function renderSummary() {
     ["账户总资产", money(state.snapshot?.total_assets), "持仓基准"],
     ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
     ["浮动盈亏", money(pnl), "按最新快照估算"],
-    ["风险复核", `${risk} 只`, `${noAdd} 只禁止补仓`],
+    ["风险处置", `${risk} 只`, `${noAdd} 只禁止补仓`],
     ["反T可观察", `${reverseT} 只`, "其中形态触发后才是候选"],
     ["最大行情延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
   ];
@@ -153,7 +176,7 @@ function openDetail(code) {
   if (!item) return;
   state.selectedCode = code;
   const research = state.research.get(code);
-  const action = currentActionFor(item);
+  const automaticDecision = automaticDecisionFor(item);
   document.querySelector("#detailCode").textContent = code;
   document.querySelector("#detailName").textContent = item.name;
   const metrics = [
@@ -164,9 +187,7 @@ function openDetail(code) {
   ];
   let html = detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
   const decision = item.action_decision;
-  if (decision) {
-    html += detailSection("系统结论", `<p><strong>${escapeHtml(decision.headline)}</strong></p><p>${escapeHtml(decision.what_to_do_now)}</p><h4>什么时候再做</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`);
-  }
+  html += detailSection("自动操作结论", `<p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decision ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>` : ""}`);
   const multi = item.technicals?.multi_timeframe || {};
   const multiMetrics = [
     ["周线方向", multi.alignment === "bullish" ? "周月共振向上" : multi.alignment === "bearish" ? "周月共同偏弱" : multi.alignment === "mixed" ? "周期分歧" : "历史不足"],
@@ -175,7 +196,7 @@ function openDetail(code) {
     ["6月均价", money(multi.monthly_ma6)], ["3月收益", pct(multi.monthly_return_3_pct)],
   ];
   html += detailSection("日线 / 周线 / 月线", `<div class="metric-grid">${multiMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
-  html += detailSection("当前建议", `<p><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></p><p>${escapeHtml(adviceFor(item))}</p>${action?.reasons?.length ? `<ul class="reason-list">${action.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`);
+  html += detailSection("当前状态", `<p><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></p>`);
   html += detailSection("盘中信号", item.signals.length ? `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>` : "<p>当前没有新增盘中风险信号。</p>");
   const flow = item.capital_flow || {};
   const flowMetrics = [
@@ -265,16 +286,14 @@ function updateHeader(status) {
 
 async function loadData() {
   try {
-    const [snapshot, research, actions, status, events] = await Promise.all([
+    const [snapshot, research, status, events] = await Promise.all([
       fetch("/api/snapshot", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/research", { cache: "no-store" }).then(response => response.json()),
-      fetch("/api/action-draft", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/status", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/events?limit=20", { cache: "no-store" }).then(response => response.json()),
     ]);
     state.snapshot = snapshot;
     state.research = new Map((research.items || []).map(item => [item.code, item]));
-    state.actions = new Map((actions.items || []).map(item => [item.stock_code, item]));
     state.events = events.events || [];
     updateHeader(status);
     renderSummary();
