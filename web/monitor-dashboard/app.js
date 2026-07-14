@@ -163,6 +163,10 @@ function openDetail(code) {
     ["5日均线", money(item.technicals.ma5)], ["20日均线", money(item.technicals.ma20)],
   ];
   let html = detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
+  const decision = item.action_decision;
+  if (decision) {
+    html += detailSection("系统结论", `<p><strong>${escapeHtml(decision.headline)}</strong></p><p>${escapeHtml(decision.what_to_do_now)}</p><h4>什么时候再做</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`);
+  }
   const multi = item.technicals?.multi_timeframe || {};
   const multiMetrics = [
     ["周线方向", multi.alignment === "bullish" ? "周月共振向上" : multi.alignment === "bearish" ? "周月共同偏弱" : multi.alignment === "mixed" ? "周期分歧" : "历史不足"],

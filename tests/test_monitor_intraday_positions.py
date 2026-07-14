@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 
-from tools.monitor_intraday_positions import analyze_quote, build_reduction_plan, build_reverse_t_plan, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
+from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_reduction_plan, build_reverse_t_plan, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
 
 
 class MonitorIntradayPositionsTest(unittest.TestCase):
@@ -113,6 +113,19 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertAlmostEqual(plan["estimated_net_proceeds"], 1351.31, places=2)
         self.assertAlmostEqual(plan["estimated_realized_pnl_after_fees"], -789.69, places=2)
         self.assertIn("降低单票风险", plan["objective"])
+
+    def test_action_decision_is_explicit_when_history_is_insufficient(self) -> None:
+        reverse = {
+            "status": "not_suitable", "trade_shares": 100, "sell_zone": [13.66, 13.68],
+            "buyback_max_price": 13.49, "cost_estimate": {"net_profit": 6.29},
+            "blockers": ["周线或月线历史不足，无法完成多周期验证。"],
+            "failure_result": "未回补可计入计划降仓。",
+        }
+        reduction = {"status": "granularity_review", "minimum_reduction_shares": 100}
+        decision = build_action_decision(reverse, reduction)
+        self.assertEqual(decision["verdict"], "do_not_execute_now")
+        self.assertEqual(decision["headline"], "现在不做反T")
+        self.assertIn("不因轻微超限", decision["reduction_decision"])
 
     def test_trade_costs_include_minimum_commissions_and_sell_tax(self) -> None:
         costs = trade_costs(3.29, 3.25, 100, self.costs)

@@ -314,6 +314,55 @@ def build_reduction_plan(
     }
 
 
+def build_action_decision(reverse_t_plan: dict[str, Any], reduction_plan: dict[str, Any]) -> dict[str, Any]:
+    if reduction_plan.get("status") == "granularity_review":
+        reduction_now = "不因轻微超限机械卖出；100股会使持仓直接减半。"
+    elif reduction_plan.get("status") == "actionable":
+        reduction_now = f"按降仓计划优先减少{reduction_plan.get('minimum_reduction_shares')}股。"
+    else:
+        reduction_now = "当前仓位无需按上限规则减仓。"
+
+    status = reverse_t_plan.get("status")
+    shares = reverse_t_plan.get("trade_shares") or 100
+    if status == "candidate":
+        headline = f"可进入{shares}股反T人工执行候选"
+        now = f"只在卖出观察区出现转弱且主力净流入不再偏强时，卖出{shares}股。"
+    else:
+        headline = "现在不做反T"
+        now = "保持现有持仓，不卖出、不回补。"
+
+    conditions: list[str] = []
+    blockers = reverse_t_plan.get("blockers") or []
+    if any("历史不足" in blocker for blocker in blockers):
+        conditions.append("等待周线和月线样本达到系统要求后重新评估；新股阶段不预测稳定区间。")
+    conditions.extend(
+        [
+            "实时价格进入系统更新后的卖出观察区，并位于当日振幅上部。",
+            "主力净流入占比降到3%以下，且价格不再快速上涨。",
+            "扣除双边佣金、印花税和过户费后，预计净收益不少于5元。",
+        ]
+    )
+
+    effects = [reduction_now]
+    cost_estimate = reverse_t_plan.get("cost_estimate") or {}
+    if reverse_t_plan.get("sell_zone") and reverse_t_plan.get("buyback_max_price") is not None:
+        low, high = reverse_t_plan["sell_zone"]
+        effects.append(
+            f"参考情景：{low:.2f}-{high:.2f}元卖出{shares}股、{reverse_t_plan['buyback_max_price']:.2f}元及以下回补，"
+            f"预计净收益{cost_estimate.get('net_profit', 0):.2f}元。"
+        )
+    effects.append(reverse_t_plan.get("failure_result") or "未按计划回补会改变原持仓规模。")
+    return {
+        "verdict": "manual_candidate" if status == "candidate" else "do_not_execute_now",
+        "headline": headline,
+        "what_to_do_now": now,
+        "reduction_decision": reduction_now,
+        "execute_when": conditions,
+        "expected_effects": effects,
+        "prediction_note": "这是条件决策，不是对未来价格的保证性预测。",
+    }
+
+
 def analyze_quote(
     position: dict[str, Any],
     quote: dict[str, Any],
@@ -386,6 +435,7 @@ def analyze_quote(
         preferred_reduction_shares=reduction_plan.get("minimum_reduction_shares") if reduction_plan.get("status") == "actionable" else None,
         max_trade_ratio_pct=max_reverse_t_position_ratio_pct,
     )
+    action_decision = build_action_decision(reverse_t_plan, reduction_plan)
 
     return {
         "code": code,
@@ -414,6 +464,7 @@ def analyze_quote(
         "signals": signals,
         "reverse_t_plan": reverse_t_plan,
         "reduction_plan": reduction_plan,
+        "action_decision": action_decision,
         "guardrails": {"add_allowed": False, "t_trade_allowed": False, "auto_order": False},
     }
 
