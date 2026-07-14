@@ -15,7 +15,7 @@ except ModuleNotFoundError:
     from risk_check import CheckItem, as_float, is_missing, load_yaml, value_at
 
 
-def validate_position(profile: dict[str, Any], position: dict[str, Any], near_stop_pct: float = 3.0) -> dict[str, Any]:
+def validate_position(profile: dict[str, Any], position: dict[str, Any], near_stop_pct: float | None = None) -> dict[str, Any]:
     risk_config = profile.get("risk", {})
     max_stock_pct = as_float(risk_config.get("max_position_pct_per_stock"), 100.0) or 100.0
     max_industry_pct = as_float(risk_config.get("max_position_pct_per_industry"), 100.0) or 100.0
@@ -32,6 +32,7 @@ def validate_position(profile: dict[str, Any], position: dict[str, Any], near_st
     industry_pct = as_float(value_at(position, "portfolio_context.industry_position_pct"), position_pct)
     total_pct = as_float(value_at(position, "portfolio_context.total_position_pct"), position_pct)
     status = value_at(position, "position.status")
+    effective_near_stop_pct = as_float(near_stop_pct, as_float(value_at(profile, "risk.near_stop_warning_pct"), 3.0)) or 3.0
 
     if is_missing(value_at(position, "strategy.buy_reason")):
         warnings.append(CheckItem("missing_buy_reason", "持仓缺少买入理由，需要复核。"))
@@ -51,7 +52,7 @@ def validate_position(profile: dict[str, Any], position: dict[str, Any], near_st
             )
         elif current_price > 0:
             distance_to_stop_pct = (current_price - stop_loss_price) / current_price * 100
-            if distance_to_stop_pct <= near_stop_pct:
+            if distance_to_stop_pct <= effective_near_stop_pct:
                 warnings.append(
                     CheckItem(
                         "near_stop_loss",
@@ -99,6 +100,7 @@ def validate_position(profile: dict[str, Any], position: dict[str, Any], near_st
             "current_price": current_price,
             "stop_loss_price": stop_loss_price,
             "distance_to_stop_pct": distance_to_stop_pct,
+            "near_stop_warning_pct": effective_near_stop_pct,
             "position_pct_of_total_assets": position_pct,
             "industry_position_pct": industry_pct,
             "total_position_pct": total_pct,

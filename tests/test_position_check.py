@@ -32,6 +32,18 @@ class PositionCheckTest(unittest.TestCase):
         self.assertEqual(result["conclusion"], "warning")
         self.assertIn("near_stop_loss", warning_codes)
 
+    def test_uses_profile_near_stop_warning_threshold(self) -> None:
+        profile = copy.deepcopy(self.profile)
+        profile["risk"]["near_stop_warning_pct"] = 1.0
+        position = copy.deepcopy(self.position)
+        position["tracking"]["current_price"] = 19.0
+        position["risk"]["stop_loss_price"] = 18.5
+
+        result = validate_position(profile, position)
+
+        self.assertEqual(result["conclusion"], "normal")
+        self.assertEqual(result["calculations"]["near_stop_warning_pct"], 1.0)
+
     def test_stop_loss_and_position_limits_need_action(self) -> None:
         position = copy.deepcopy(self.position)
         position["tracking"]["current_price"] = 18.4

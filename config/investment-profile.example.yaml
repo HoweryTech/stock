@@ -16,6 +16,7 @@ profile:
     - "event_catalyst"
 
 risk:
+  near_stop_warning_pct: 3.0
   max_loss_per_trade_pct_of_total_assets: 1.0
   max_position_pct_per_stock: 10.0
   max_position_pct_per_industry: 25.0
@@ -33,6 +34,12 @@ market_regime:
     enabled: true
     max_total_position_pct: 30.0
     require_stronger_signal: true
+
+t_trading:
+  near_stop_block_pct: 3.0
+  minimum_net_profit_cny: 10.0
+  max_round_trips_per_stock_per_day: 1
+  max_position_ratio_pct_per_trade: 50.0
 
 universe_filters:
   exclude_st: true

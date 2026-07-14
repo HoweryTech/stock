@@ -163,6 +163,39 @@ class CheckTTradeOpportunityTest(unittest.TestCase):
         self.assertEqual(result["conclusion"], "blocked")
         self.assertTrue(any(item["code"] == "near_stop_loss" for item in result["blockers"]))
 
+    def test_uses_profile_near_stop_block_threshold(self) -> None:
+        profile = copy.deepcopy(self.profile)
+        profile["t_trading"] = {"near_stop_block_pct": 1.0}
+        position = copy.deepcopy(self.position)
+        position["risk"]["stop_loss_price"] = 10.5
+        closes = [
+            10.0,
+            10.1,
+            10.2,
+            10.3,
+            10.4,
+            10.5,
+            10.6,
+            10.7,
+            10.8,
+            10.9,
+            11.0,
+            11.1,
+            11.2,
+            11.3,
+            11.4,
+            11.2,
+            11.0,
+            10.85,
+            10.75,
+            10.7,
+        ]
+
+        result = check_t_opportunity(profile, position, read_bars(self.write_bars(closes), "600000"))
+
+        self.assertNotEqual(result["conclusion"], "blocked")
+        self.assertEqual(result["calculations"]["near_stop_block_pct"], 1.0)
+
     def test_retains_market_setup_when_execution_is_blocked(self) -> None:
         position = copy.deepcopy(self.position)
         position["risk"]["stop_loss_price"] = None

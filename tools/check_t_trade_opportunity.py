@@ -123,7 +123,7 @@ def check_t_opportunity(
     *,
     short_window: int = 5,
     mid_window: int = 20,
-    near_stop_pct: float = 3.0,
+    near_stop_pct: float | None = None,
     pullback_pct: float = 3.0,
     overextended_pct: float = 6.0,
     min_spread_pct: float = 1.2,
@@ -146,6 +146,7 @@ def check_t_opportunity(
     position_pct = as_float(value_at(position, "entry.position_pct_of_total_assets"), 0.0) or 0.0
     current_price = as_float(value_at(position, "tracking.current_price"))
     max_stock_pct = as_float(value_at(profile, "risk.max_position_pct_per_stock"), 100.0) or 100.0
+    effective_near_stop_pct = as_float(near_stop_pct, as_float(value_at(profile, "t_trading.near_stop_block_pct"), 3.0)) or 3.0
 
     if latest_close is not None and current_price is not None and abs(latest_close - current_price) / latest_close > 0.03:
         warnings.append(CheckItem("position_price_stale", "持仓 current_price 与最新日线收盘价偏离超过 3%，建议先更新持仓价格。"))
@@ -163,7 +164,7 @@ def check_t_opportunity(
             blockers.append(CheckItem("stop_loss_triggered", f"最新收盘价 {latest_close:.2f} 已触发止损价 {stop_loss_price:.2f}，不做T。"))
         else:
             distance_to_stop_pct = (latest_close - stop_loss_price) / latest_close * 100
-            if distance_to_stop_pct <= near_stop_pct:
+            if distance_to_stop_pct <= effective_near_stop_pct:
                 blockers.append(CheckItem("near_stop_loss", f"最新收盘价距离止损价仅 {distance_to_stop_pct:.2f}%，不做T，先处理退出风险。"))
     else:
         blockers.append(CheckItem("missing_price_or_stop_loss", "缺少最新价格或止损价，无法验证做T风险。"))
@@ -234,6 +235,7 @@ def check_t_opportunity(
         action = "no_clear_t_setup"
 
     metrics["distance_to_stop_pct"] = distance_to_stop_pct
+    metrics["near_stop_block_pct"] = effective_near_stop_pct
     metrics["bars_count"] = len(bars)
 
     return {
@@ -304,7 +306,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fetch-datalen", type=int, default=120, help="Daily bars to fetch when --auto-fetch is set.")
     parser.add_argument("--short-window", type=int, default=5, help="Short window for T setup checks.")
     parser.add_argument("--mid-window", type=int, default=20, help="Mid window for trend checks.")
-    parser.add_argument("--near-stop-pct", type=float, default=3.0, help="Block T when close is this close above stop loss.")
+    parser.add_argument("--near-stop-pct", type=float, help="Block T when close is this close above stop loss. Defaults to t_trading.near_stop_block_pct.")
     parser.add_argument("--pullback-pct", type=float, default=3.0, help="Recent-high drawdown threshold for positive T watch.")
     parser.add_argument("--overextended-pct", type=float, default=6.0, help="Short-term overextension threshold for reverse T watch.")
     parser.add_argument("--min-spread-pct", type=float, default=1.2, help="Minimum average daily range for T watch.")

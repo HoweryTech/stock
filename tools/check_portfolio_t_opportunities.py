@@ -76,7 +76,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fetch-datalen", type=int, default=120)
     parser.add_argument("--short-window", type=int, default=5)
     parser.add_argument("--mid-window", type=int, default=20)
-    parser.add_argument("--near-stop-pct", type=float, default=3.0)
+    parser.add_argument("--near-stop-pct", type=float, help="Defaults to t_trading.near_stop_block_pct in profile.")
     parser.add_argument("--pullback-pct", type=float, default=3.0)
     parser.add_argument("--overextended-pct", type=float, default=6.0)
     parser.add_argument("--min-spread-pct", type=float, default=1.2)

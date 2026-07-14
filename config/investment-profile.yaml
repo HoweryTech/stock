@@ -7,6 +7,7 @@ profile:
 
 risk:
   position_limits_confirmed: true
+  near_stop_warning_pct: 3.0
   warning_position_pct_per_stock: 12.0
   max_position_pct_per_stock: 15.0
   max_position_pct_per_industry: 30.0
@@ -16,6 +17,7 @@ risk:
   max_account_drawdown_pct: 10.0
 
 t_trading:
+  near_stop_block_pct: 1.0
   minimum_net_profit_cny: 10.0
   max_round_trips_per_stock_per_day: 1
   max_position_ratio_pct_per_trade: 50.0

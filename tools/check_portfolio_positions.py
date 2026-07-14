@@ -37,7 +37,7 @@ def expand_position_paths(patterns: list[str]) -> list[Path]:
     return unique
 
 
-def summarize_positions(profile: dict[str, Any], position_paths: list[Path], near_stop_pct: float = 3.0) -> dict[str, Any]:
+def summarize_positions(profile: dict[str, Any], position_paths: list[Path], near_stop_pct: float | None = None) -> dict[str, Any]:
     position_results: list[dict[str, Any]] = []
     total_position_pct = 0.0
     industry_position_pct: dict[str, float] = {}
@@ -121,7 +121,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check and summarize multiple positions.")
     parser.add_argument("--profile", default="config/investment-profile.example.yaml", help="Path to investment profile YAML.")
     parser.add_argument("--positions", nargs="+", default=["positions/*.yaml"], help="Position YAML paths or glob patterns.")
-    parser.add_argument("--near-stop-pct", type=float, default=3.0, help="Warn when current price is within this percent above stop loss.")
+    parser.add_argument("--near-stop-pct", type=float, help="Warn when current price is within this percent above stop loss. Defaults to risk.near_stop_warning_pct.")
     parser.add_argument("--output", default="data/metadata/portfolio_positions.check.json", help="Output portfolio check JSON.")
     parser.add_argument("--json", action="store_true", help="Print result as JSON.")
     return parser.parse_args()

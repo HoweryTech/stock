@@ -70,7 +70,7 @@ def run_update(
     check_output_path: Path | None,
     days_held: int | None = None,
     notes: list[str] | None = None,
-    near_stop_pct: float = 3.0,
+    near_stop_pct: float | None = None,
     overwrite: bool = False,
 ) -> dict[str, Any]:
     profile = load_yaml(profile_path)
@@ -104,7 +104,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--current-price", type=float, required=True, help="Latest current price.")
     parser.add_argument("--days-held", type=int, help="Update days held.")
     parser.add_argument("--note", action="append", default=[], help="Tracking note. Can be repeated.")
-    parser.add_argument("--near-stop-pct", type=float, default=3.0, help="Warn when current price is within this percent above stop loss.")
+    parser.add_argument("--near-stop-pct", type=float, help="Warn when current price is within this percent above stop loss. Defaults to risk.near_stop_warning_pct.")
     parser.add_argument("--output", help="Output position YAML. Defaults to updating --position in place.")
     parser.add_argument("--check-output", help="Optional daily check JSON output.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite output file if it exists.")
