@@ -39,10 +39,18 @@ function adviceFor(item) {
   return "继续观察，不执行交易";
 }
 
+function isReverseTCandidate(item) {
+  return item.reverse_t_plan?.status === "candidate";
+}
+
+function isReverseTWatch(item) {
+  return ["candidate", "watch"].includes(item.reverse_t_plan?.status);
+}
+
 function filteredItems() {
   const items = state.snapshot?.items || [];
   return items.filter(item => {
-    const matchesFilter = state.filter === "all" || item.state === state.filter;
+    const matchesFilter = state.filter === "all" || (state.filter === "reverse_t" ? isReverseTWatch(item) : item.state === state.filter);
     const query = state.search.trim().toLowerCase();
     const matchesSearch = !query || item.code.includes(query) || String(item.name).toLowerCase().includes(query);
     return matchesFilter && matchesSearch;
@@ -56,11 +64,13 @@ function renderSummary() {
   const risk = items.filter(item => item.state === "risk_review").length;
   const noAdd = items.filter(item => item.state === "no_add_watch").length;
   const maxLag = Math.max(0, ...items.map(item => Number(item.quote.quote_lag_seconds || 0)));
+  const reverseT = items.filter(isReverseTWatch).length;
   const blocks = [
     ["账户总资产", money(state.snapshot?.total_assets), "持仓基准"],
     ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
     ["浮动盈亏", money(pnl), "按最新快照估算"],
     ["风险复核", `${risk} 只`, `${noAdd} 只禁止补仓`],
+    ["反T可观察", `${reverseT} 只`, "其中形态触发后才是候选"],
     ["最大行情延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
   ];
   document.querySelector("#summaryBand").innerHTML = blocks.map(([label, value, sub]) => `
@@ -73,18 +83,20 @@ function renderSummary() {
 
 function tableRow(item) {
   const lag = item.quote.quote_lag_seconds;
+  const reverseTag = isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   return `<tr data-code="${item.code}" tabindex="0">
     <td><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></td>
     <td class="number"><div>${num(item.quote.latest_price)}</div><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></td>
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
     <td><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></td>
-    <td class="advice">${escapeHtml(adviceFor(item))}</td>
+    <td class="advice">${escapeHtml(adviceFor(item))}${reverseTag}</td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
 }
 
 function mobileCard(item) {
+  const reverseTag = isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
     <div class="card-top">
       <div><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></div>
@@ -92,7 +104,7 @@ function mobileCard(item) {
     </div>
     <div class="card-row"><span>持仓盈亏</span><span class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)} · ${pct(item.position.return_pct)}</span></div>
     <div class="card-row"><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
-    <div class="card-advice">${escapeHtml(adviceFor(item))}</div>
+    <div class="card-advice">${escapeHtml(adviceFor(item))}${reverseTag}</div>
   </article>`;
 }
 
@@ -134,6 +146,28 @@ function openDetail(code) {
   let html = detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
   html += detailSection("当前建议", `<p><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></p><p>${escapeHtml(adviceFor(item))}</p>${action?.reasons?.length ? `<ul class="reason-list">${action.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`);
   html += detailSection("盘中信号", item.signals.length ? `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>` : "<p>当前没有新增盘中风险信号。</p>");
+  const reversePlan = item.reverse_t_plan;
+  if (reversePlan) {
+    const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : "当前不适合";
+    const zone = reversePlan.sell_zone ? `${num(reversePlan.sell_zone[0])}–${num(reversePlan.sell_zone[1])}元` : "--";
+    const planMetrics = [
+      ["状态", reverseStatus], ["试做数量", `${reversePlan.trade_shares || 100}股`],
+      ["卖出观察区", zone], ["最高回补价", money(reversePlan.buyback_max_price)],
+      ["最低目标价差", pct(reversePlan.min_gap_pct)], ["占当前持仓", pct(reversePlan.trade_ratio_pct)],
+      ["未回补后果", reversePlan.failure_as_reduction_acceptable ? "计入计划降仓" : "形成计划外减仓"],
+    ];
+    const blockers = reversePlan.blockers || [];
+    html += detailSection("反T降低成本", `<div class="metric-grid">${planMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p>${escapeHtml(reversePlan.failure_result || "")}</p>${blockers.length ? `<ul class="reason-list">${blockers.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<ol class="reason-list">${reversePlan.instructions.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`}`);
+  }
+  const reductionPlan = item.reduction_plan;
+  if (reductionPlan && !["within_limit", "unavailable"].includes(reductionPlan.status)) {
+    const reductionMetrics = [
+      ["当前仓位", pct(reductionPlan.current_position_pct)], ["目标上限", pct(reductionPlan.target_position_pct)],
+      ["最少减少", `${reductionPlan.minimum_reduction_shares}股`], ["预计剩余", `${reductionPlan.remaining_shares}股`],
+      ["降仓后仓位", pct(reductionPlan.post_reduction_position_pct)], ["减少比例", pct(reductionPlan.reduction_ratio_pct)],
+    ];
+    html += detailSection("具体降仓步骤", `<div class="metric-grid">${reductionMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><ol class="reason-list">${reductionPlan.steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`);
+  }
   if (research) {
     const fin = research.latest_financials || {};
     const quote = research.quote_profile || {};

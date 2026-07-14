@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import signal
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +45,134 @@ def moving_averages(closes: list[float]) -> tuple[float | None, float | None]:
     ma5 = average(closes[-5:]) if len(closes) >= 5 else None
     ma20 = average(closes[-20:]) if len(closes) >= 20 else None
     return ma5, ma20
+
+
+def floor_to_tick(price: float, tick: float = 0.01) -> float:
+    return round(math.floor((price + 1e-9) / tick) * tick, 2)
+
+
+def build_reverse_t_plan(
+    position: dict[str, Any],
+    quote: dict[str, Any],
+    *,
+    stale: bool,
+    min_gap_pct: float = 1.2,
+) -> dict[str, Any]:
+    shares = int(as_float(value_at(position, "entry.shares"), 0.0) or 0.0)
+    available = int(as_float(position.get("broker_import_snapshot", {}).get("available_shares"), shares) or 0.0)
+    price = as_float(quote.get("latest_price"))
+    high = as_float(quote.get("high"))
+    low = as_float(quote.get("low"))
+    open_price = as_float(quote.get("open"))
+    change_pct = as_float(quote.get("change_pct"))
+    trade_shares = 100
+    trade_ratio_pct = trade_shares / shares * 100 if shares else None
+    original_position_pct = as_float(value_at(position, "entry.position_pct_of_total_assets"), 0.0) or 0.0
+    failure_as_reduction_acceptable = original_position_pct > 10.0
+    range_pct = (high - low) / low * 100 if high is not None and low not in (None, 0) else None
+    range_position = (price - low) / (high - low) if price is not None and high is not None and low is not None and high > low else None
+    blockers: list[str] = []
+    if stale:
+        blockers.append("行情过期。")
+    if available < trade_shares:
+        blockers.append("可用股份不足100股。")
+    if shares < 300:
+        blockers.append("持仓少于300股，卖出100股会影响至少一半底仓。")
+    if change_pct is not None and change_pct <= -9.8:
+        blockers.append("接近或达到跌停，不做反T。")
+    if range_pct is None or range_pct < 1.5:
+        blockers.append("当日振幅不足1.5%，价差空间不够。")
+
+    setup_ready = (
+        not blockers
+        and price is not None
+        and open_price is not None
+        and price >= open_price
+        and change_pct is not None
+        and change_pct > 0
+        and range_position is not None
+        and range_position >= 0.7
+    )
+    if blockers:
+        status = "not_suitable"
+    elif setup_ready:
+        status = "candidate"
+    else:
+        status = "watch"
+
+    sell_zone_low = None
+    sell_zone_high = None
+    buyback_max = None
+    estimated_cost_reduction = None
+    if high is not None:
+        sell_zone_high = round(high, 2)
+        sell_zone_low = max(round(high - 0.02, 2), round(open_price or high, 2))
+        buyback_max = floor_to_tick(sell_zone_low * (1 - min_gap_pct / 100))
+        estimated_cost_reduction = round((sell_zone_low - buyback_max) * trade_shares / shares, 4) if shares else None
+
+    return {
+        "status": status,
+        "trade_shares": trade_shares,
+        "trade_ratio_pct": None if trade_ratio_pct is None else round(trade_ratio_pct, 2),
+        "intraday_range_pct": None if range_pct is None else round(range_pct, 4),
+        "range_position_pct": None if range_position is None else round(range_position * 100, 2),
+        "sell_zone": [sell_zone_low, sell_zone_high] if sell_zone_low is not None else None,
+        "buyback_max_price": buyback_max,
+        "min_gap_pct": min_gap_pct,
+        "estimated_cost_reduction_per_share": estimated_cost_reduction,
+        "failure_as_reduction_acceptable": failure_as_reduction_acceptable,
+        "failure_result": "未回补可计入计划降仓。" if failure_as_reduction_acceptable else "未回补会形成计划外减仓，执行前必须明确接受。",
+        "blockers": blockers,
+        "instructions": [
+            "只在价格进入卖出观察区后转弱时卖出100股，不在快速拉升中抢跑。",
+            f"卖出后仅在价格降至回补上限且行情未失效时买回100股，目标价差至少{min_gap_pct:.1f}%。",
+            "若未到回补价，不追价买回；只有事先接受减仓结果时才允许执行反T。",
+            "同一股票当日最多执行一轮，成交后记录实际卖价、买价和费用。",
+        ],
+    }
+
+
+def build_reduction_plan(
+    position: dict[str, Any],
+    quote: dict[str, Any],
+    *,
+    total_assets: float,
+    max_position_pct: float = 10.0,
+) -> dict[str, Any]:
+    shares = int(as_float(value_at(position, "entry.shares"), 0.0) or 0.0)
+    price = as_float(quote.get("latest_price"))
+    if price is None or shares <= 0 or total_assets <= 0:
+        return {"status": "unavailable", "reason": "缺少价格、持股数或账户总资产。"}
+    market_value = price * shares
+    current_pct = market_value / total_assets * 100
+    target_value = total_assets * max_position_pct / 100
+    if current_pct <= max_position_pct:
+        return {"status": "within_limit", "current_position_pct": round(current_pct, 4), "target_position_pct": max_position_pct}
+
+    excess_value = market_value - target_value
+    reduction_shares = min(shares, math.ceil(excess_value / price / 100) * 100)
+    remaining_shares = shares - reduction_shares
+    post_pct = remaining_shares * price / total_assets * 100
+    reduction_ratio_pct = reduction_shares / shares * 100
+    status = "granularity_review" if reduction_ratio_pct >= 40 else "actionable"
+    steps = [
+        f"目标是把单票仓位从{current_pct:.2f}%降至10%以内；按当前价最少需减少{reduction_shares}股。",
+        f"优先分批每次100股，预计剩余{remaining_shares}股、仓位约{post_pct:.2f}%。",
+        "若采用反T方式，未回补的100股计入降仓；达到目标后停止继续卖出。",
+        "若价格快速下跌或接近跌停，不把市价单作为默认执行方式，先确认流动性。",
+    ]
+    if status == "granularity_review":
+        steps.insert(1, "最小100股会造成较大比例减仓，不应只为轻微超限机械执行。")
+    return {
+        "status": status,
+        "current_position_pct": round(current_pct, 4),
+        "target_position_pct": max_position_pct,
+        "minimum_reduction_shares": reduction_shares,
+        "remaining_shares": remaining_shares,
+        "post_reduction_position_pct": round(post_pct, 4),
+        "reduction_ratio_pct": round(reduction_ratio_pct, 2),
+        "steps": steps,
+    }
 
 
 def analyze_quote(
@@ -95,6 +225,9 @@ def analyze_quote(
     else:
         state = "observe"
 
+    reverse_t_plan = build_reverse_t_plan(position, quote, stale="stale_quote" in signal_codes)
+    reduction_plan = build_reduction_plan(position, quote, total_assets=total_assets)
+
     return {
         "code": code,
         "name": quote.get("name") or value_at(position, "stock.name"),
@@ -111,6 +244,8 @@ def analyze_quote(
         },
         "technicals": {"ma5": ma5, "ma20": ma20},
         "signals": signals,
+        "reverse_t_plan": reverse_t_plan,
+        "reduction_plan": reduction_plan,
         "guardrails": {"add_allowed": False, "t_trade_allowed": False, "auto_order": False},
     }
 
@@ -250,11 +385,10 @@ def main() -> int:
     args = parse_args()
     pid_path = Path(args.pid_file)
     ensure_single_instance(pid_path)
-    stop_requested = False
+    stop_event = threading.Event()
 
     def request_stop(_signum: int, _frame: Any) -> None:
-        nonlocal stop_requested
-        stop_requested = True
+        stop_event.set()
 
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
@@ -267,7 +401,7 @@ def main() -> int:
     last_archive = 0.0
     iteration = 0
     try:
-        while not stop_requested:
+        while not stop_event.is_set():
             started = time.time()
             try:
                 snapshot = build_snapshot(
@@ -294,7 +428,7 @@ def main() -> int:
                 break
             remaining = max(0.0, args.interval - (time.time() - started))
             if remaining:
-                time.sleep(remaining)
+                stop_event.wait(remaining)
     finally:
         pid_path.unlink(missing_ok=True)
     return 0
