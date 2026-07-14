@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -110,14 +111,27 @@ def simulate_day(
     }
 
 
-def summarize(code: str, name: str, bars: list[dict[str, Any]], shares: int, costs: dict[str, float], max_trade_ratio_pct: float) -> dict[str, Any]:
+def summarize(
+    code: str,
+    name: str,
+    bars: list[dict[str, Any]],
+    shares: int,
+    costs: dict[str, float],
+    max_trade_ratio_pct: float,
+    *,
+    exclude_validation_date: str | None = None,
+) -> dict[str, Any]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for bar in bars:
         grouped[bar["timestamp"][:10]].append(bar)
     max_shares = int(shares * max_trade_ratio_pct / 100 // 100 * 100)
     trades = []
+    intraday_observation = None
     for trade_date, day_bars in sorted(grouped.items()):
         result = simulate_day(day_bars, max_shares=max_shares, costs=costs)
+        if trade_date == exclude_validation_date:
+            intraday_observation = None if result is None else {"trade_date": trade_date, **result}
+            continue
         if result:
             trades.append({"trade_date": trade_date, **result})
     completed = [item for item in trades if item["status"] == "completed"]
@@ -143,6 +157,8 @@ def summarize(code: str, name: str, bars: list[dict[str, Any]], shares: int, cos
         "total_completed_net_profit": round(total_net, 2),
         "average_completed_net_profit": round(total_net / len(completed), 2) if completed else None,
         "verdict": verdict, "verdict_label": verdict_label,
+        "validation_excluded_date": exclude_validation_date,
+        "intraday_observation": intraday_observation,
         "coverage": {"price_rule": True, "fees": True, "capital_flow_history": False, "slippage": False},
         "trades": trades[-30:],
     }
@@ -151,17 +167,35 @@ def summarize(code: str, name: str, bars: list[dict[str, Any]], shares: int, cos
 def build_report(position_paths: list[Path], begin: str, end: str, costs: dict[str, float], max_trade_ratio_pct: float) -> dict[str, Any]:
     items = []
     errors = []
+    now = datetime.now().astimezone()
+    today = now.strftime("%Y-%m-%d")
+    exclude_validation_date = today if end == now.strftime("%Y%m%d") and (now.hour, now.minute) < (15, 5) else None
     for path in position_paths:
         position = load_yaml(path)
         code = str(value_at(position, "stock.code") or "")
         shares = int(as_float(value_at(position, "entry.shares"), 0) or 0)
         try:
-            name, bars = fetch_minute_bars(code, begin, end)
-            items.append(summarize(code, name, bars, shares, costs, max_trade_ratio_pct))
+            last_error = None
+            for attempt in range(3):
+                try:
+                    name, bars = fetch_minute_bars(code, begin, end)
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < 2:
+                        time.sleep(0.5 * (attempt + 1))
+            else:
+                raise RuntimeError(f"failed after 3 attempts: {last_error}")
+            items.append(
+                summarize(
+                    code, name, bars, shares, costs, max_trade_ratio_pct,
+                    exclude_validation_date=exclude_validation_date,
+                )
+            )
         except Exception as exc:
             errors.append({"code": code, "message": str(exc)})
     return {
-        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "generated_at": now.isoformat(timespec="seconds"),
         "source": "eastmoney_5minute_kline", "begin": begin, "end": end,
         "method": "signal confirmed at 5-minute close; sell no earlier than next bar open; buyback only after later low touches fee-aware limit",
         "limitations": ["历史资金流未纳入回测。", "未模拟滑点和盘口排队。", "回测结果不代表未来表现。"],
@@ -194,8 +228,9 @@ def main() -> int:
     report = build_report(expand_position_paths(args.positions), args.begin, args.end, costs, args.max_trade_ratio)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"backtested: {len(report['items'])}, errors: {len(report['errors'])}, output: {output}")
+    target = output if not report["errors"] else output.with_suffix(".failed.json")
+    target.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"backtested: {len(report['items'])}, errors: {len(report['errors'])}, output: {target}")
     return 0 if not report["errors"] else 1
 
 

@@ -212,7 +212,14 @@ function openDetail(code) {
       ["成功回补", backtest.completed_count], ["未回补", backtest.not_bought_back_count],
       ["回补成功率", pct(backtest.success_rate_pct)], ["已完成净收益合计", money(backtest.total_completed_net_profit)],
     ];
-    html += detailSection("反T历史回测", `<p><strong>${escapeHtml(backtest.verdict_label)}</strong></p><div class="metric-grid">${backtestMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">仅验证5分钟价格规则和估算费用；未覆盖历史资金流、滑点及盘口排队。</p>`);
+    const intraday = backtest.intraday_observation;
+    let intradayText = "今日尚未形成完整反T模拟交易。";
+    if (intraday?.status === "completed") {
+      intradayText = `今日模拟已完成：${intraday.sell_time.slice(11)}按${num(intraday.sell_price)}元卖出${intraday.shares}股，${intraday.buy_time.slice(11)}触及${num(intraday.buy_price)}元回补，扣费后${money(intraday.net_profit)}。该机会已经发生，不追单。`;
+    } else if (intraday?.status === "not_bought_back") {
+      intradayText = `今日模拟卖出后尚未回补，当前属于未完成风险，不计入历史胜率。`;
+    }
+    html += detailSection("反T历史回测", `<p><strong>${escapeHtml(backtest.verdict_label)}</strong></p><p>${escapeHtml(intradayText)}</p><div class="metric-grid">${backtestMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">盘中当天不计入历史验证。仅验证5分钟价格规则和估算费用；未覆盖历史资金流、滑点及盘口排队。</p>`);
   }
   html += detailSection("盘中信号", item.signals.length ? `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>` : "<p>当前没有新增盘中风险信号。</p>");
   const flow = item.capital_flow || {};

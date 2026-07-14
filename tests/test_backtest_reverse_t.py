@@ -32,6 +32,16 @@ class BacktestReverseTTest(unittest.TestCase):
         result = summarize("000725", "京东方A", bars, 200, self.costs, 50)
         self.assertEqual(result["verdict"], "insufficient_sample")
 
+    def test_current_intraday_result_is_excluded_from_validation(self) -> None:
+        bars = [
+            {"timestamp": "2026-07-14 09:35", "open": 10.0, "close": 10.2, "high": 10.25, "low": 9.95},
+            {"timestamp": "2026-07-14 09:40", "open": 10.2, "close": 10.22, "high": 10.3, "low": 10.15},
+            {"timestamp": "2026-07-14 09:45", "open": 10.21, "close": 10.0, "high": 10.22, "low": 9.9},
+        ]
+        result = summarize("000725", "京东方A", bars, 200, self.costs, 50, exclude_validation_date="2026-07-14")
+        self.assertEqual(result["triggered_count"], 0)
+        self.assertEqual(result["intraday_observation"]["status"], "completed")
+
 
 if __name__ == "__main__":
     unittest.main()
