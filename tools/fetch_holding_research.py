@@ -103,7 +103,7 @@ def fetch_realtime_quotes(codes: list[str]) -> list[dict[str, Any]]:
         QUOTE_URL.replace("/stock/get", "/ulist.np/get"),
         {
             "secids": ",".join(security_id(code) for code in codes),
-            "fields": "f2,f3,f4,f5,f6,f12,f14,f15,f16,f17,f18,f86,f124",
+            "fields": "f2,f3,f4,f5,f6,f12,f14,f15,f16,f17,f18,f62,f66,f69,f72,f75,f78,f81,f84,f87,f184,f86,f124",
         },
     )
     rows = ((payload.get("data") or {}).get("diff") or [])
@@ -122,6 +122,16 @@ def fetch_realtime_quotes(codes: list[str]) -> list[dict[str, Any]]:
                 "low": scaled(row.get("f16")),
                 "open": scaled(row.get("f17")),
                 "previous_close": scaled(row.get("f18")),
+                "main_net_inflow": row.get("f62"),
+                "main_net_inflow_ratio_pct": scaled(row.get("f184")),
+                "super_large_net_inflow": row.get("f66"),
+                "super_large_net_inflow_ratio_pct": scaled(row.get("f69")),
+                "large_net_inflow": row.get("f72"),
+                "large_net_inflow_ratio_pct": scaled(row.get("f75")),
+                "medium_net_inflow": row.get("f78"),
+                "medium_net_inflow_ratio_pct": scaled(row.get("f81")),
+                "small_net_inflow": row.get("f84"),
+                "small_net_inflow_ratio_pct": scaled(row.get("f87")),
                 "quote_clock": row.get("f86"),
                 "quote_timestamp": row.get("f124"),
             }

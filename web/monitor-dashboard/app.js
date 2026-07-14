@@ -27,6 +27,13 @@ const actionLabels = {
 const money = value => value == null ? "--" : `¥${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pct = value => value == null ? "--" : `${Number(value).toFixed(2)}%`;
 const num = (value, digits = 2) => value == null ? "--" : Number(value).toFixed(digits);
+const compactMoney = value => {
+  if (value == null) return "--";
+  const amount = Number(value);
+  if (Math.abs(amount) >= 100000000) return `${(amount / 100000000).toFixed(2)}亿`;
+  if (Math.abs(amount) >= 10000) return `${(amount / 10000).toFixed(1)}万`;
+  return `${amount.toFixed(0)}元`;
+};
 const tone = value => Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "";
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 
@@ -91,6 +98,7 @@ function tableRow(item) {
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
     <td><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></td>
     <td class="advice">${escapeHtml(adviceFor(item))}${reverseTag}</td>
+    <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
 }
@@ -104,6 +112,7 @@ function mobileCard(item) {
     </div>
     <div class="card-row"><span>持仓盈亏</span><span class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)} · ${pct(item.position.return_pct)}</span></div>
     <div class="card-row"><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
+    <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
     <div class="card-advice">${escapeHtml(adviceFor(item))}${reverseTag}</div>
   </article>`;
 }
@@ -154,6 +163,13 @@ function openDetail(code) {
   html += detailSection("日线 / 周线 / 月线", `<div class="metric-grid">${multiMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
   html += detailSection("当前建议", `<p><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></p><p>${escapeHtml(adviceFor(item))}</p>${action?.reasons?.length ? `<ul class="reason-list">${action.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`);
   html += detailSection("盘中信号", item.signals.length ? `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>` : "<p>当前没有新增盘中风险信号。</p>");
+  const flow = item.capital_flow || {};
+  const flowMetrics = [
+    ["主力净额", compactMoney(flow.main_net_inflow)], ["主力净占比", pct(flow.main_net_inflow_ratio_pct)],
+    ["超大单净额", compactMoney(flow.super_large_net_inflow)], ["大单净额", compactMoney(flow.large_net_inflow)],
+    ["中单净额", compactMoney(flow.medium_net_inflow)], ["小单净额", compactMoney(flow.small_net_inflow)],
+  ];
+  html += detailSection("主力资金流", `<div class="metric-grid">${flowMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">${escapeHtml(flow.interpretation || "")}</p>`);
   const reversePlan = item.reverse_t_plan;
   if (reversePlan) {
     const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "当前不适合";
@@ -163,12 +179,14 @@ function openDetail(code) {
       ["卖出观察区", zone], ["最高回补价", money(reversePlan.buyback_max_price)],
       ["实际所需价差", pct(reversePlan.required_gap_pct)], ["占当前持仓", pct(reversePlan.trade_ratio_pct)],
       ["未回补后果", reversePlan.failure_as_reduction_acceptable ? "计入计划降仓" : "形成计划外减仓"],
+      ["主力确认", reversePlan.main_flow_confirmation === "wait_for_weakening" ? "净流入偏强，等待转弱" : "未见强净流入阻断"],
     ];
     if (reversePlan.cost_estimate) {
       planMetrics.push(["预计总费用", money(reversePlan.cost_estimate.total_fees)]);
       planMetrics.push(["预计净收益", money(reversePlan.cost_estimate.net_profit)]);
     }
     planMetrics.push(["费用参数", reversePlan.cost_model_verified ? "已按交割单核验" : "保守假设，尚未核验"]);
+    if (reversePlan.high_position_ratio_warning) planMetrics.push(["仓位风险", "单次涉及半仓，高风险"]);
     const blockers = reversePlan.blockers || [];
     html += detailSection("反T降低成本", `<div class="metric-grid">${planMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p>${escapeHtml(reversePlan.failure_result || "")}</p>${blockers.length ? `<ul class="reason-list">${blockers.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<ol class="reason-list">${reversePlan.instructions.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`}`);
   }

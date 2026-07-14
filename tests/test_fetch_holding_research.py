@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from tools.fetch_holding_research import announcement_risk_keywords, financial_review_flags, scaled, security_code_with_exchange, security_id
+from tools.fetch_holding_research import announcement_risk_keywords, fetch_realtime_quotes, financial_review_flags, scaled, security_code_with_exchange, security_id
 
 
 class FetchHoldingResearchTest(unittest.TestCase):
@@ -27,6 +28,14 @@ class FetchHoldingResearchTest(unittest.TestCase):
             [item["code"] for item in flags],
             ["revenue_decline", "profit_decline", "negative_roe", "high_debt_ratio", "negative_pe"],
         )
+
+    def test_realtime_quotes_include_capital_flow(self) -> None:
+        payload = {"data": {"diff": [{"f12": "000725", "f14": "京东方A", "f2": 695, "f3": 176, "f62": 280000000, "f184": 317, "f66": 240000000, "f72": 40000000, "f78": -170000000, "f84": -110000000, "f124": 1000}]}}
+        with patch("tools.fetch_holding_research.get_json", return_value=payload):
+            quote = fetch_realtime_quotes(["000725"])[0]
+        self.assertEqual(quote["latest_price"], 6.95)
+        self.assertEqual(quote["main_net_inflow"], 280000000)
+        self.assertEqual(quote["main_net_inflow_ratio_pct"], 3.17)
 
 
 if __name__ == "__main__":

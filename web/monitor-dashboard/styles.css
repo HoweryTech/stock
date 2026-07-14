@@ -113,7 +113,7 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 .view { display: none; }
 .view.active { display: block; }
 .table-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
-table { width: 100%; border-collapse: collapse; min-width: 980px; table-layout: fixed; }
+table { width: 100%; border-collapse: collapse; min-width: 1080px; table-layout: fixed; }
 th { height: 38px; padding: 0 12px; text-align: left; color: var(--muted); background: #f8fafb; border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; }
 td { height: 62px; padding: 8px 12px; border-bottom: 1px solid #e8ebef; vertical-align: middle; }
 tbody tr:last-child td { border-bottom: 0; }
@@ -123,7 +123,8 @@ th:nth-child(1) { width: 150px; }
 th:nth-child(2), th:nth-child(3), th:nth-child(4) { width: 130px; }
 th:nth-child(5) { width: 130px; }
 th:nth-child(6) { width: auto; }
-th:nth-child(7) { width: 100px; }
+th:nth-child(7) { width: 125px; }
+th:nth-child(8) { width: 100px; }
 .number { text-align: right; font-variant-numeric: tabular-nums; }
 .stock-name { font-weight: 600; margin-bottom: 3px; }
 .stock-code, .secondary { color: var(--muted); font-size: 12px; }

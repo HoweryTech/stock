@@ -43,6 +43,7 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
             total_assets=25480,
             max_stale_seconds=60,
             costs=self.costs,
+            max_reverse_t_position_ratio_pct=50.0,
             now_timestamp=1003,
         )
         self.assertEqual(item["state"], "risk_review")
@@ -81,7 +82,14 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         quote = {"latest_price": 6.8, "open": 6.7, "high": 6.9, "low": 6.6, "change_pct": 1.0}
         plan = build_reverse_t_plan(self.position, quote, stale=False, costs=self.costs, timeframe={"alignment": "bearish"})
         self.assertEqual(plan["status"], "not_suitable")
-        self.assertTrue(any("少于300股" in blocker for blocker in plan["blockers"]))
+        self.assertTrue(plan["high_position_ratio_warning"])
+
+    def test_one_lot_position_cannot_keep_base_position(self) -> None:
+        position = {"entry": {"shares": 100}}
+        quote = {"latest_price": 5.5, "open": 5.4, "high": 5.6, "low": 5.3, "change_pct": 1.0}
+        plan = build_reverse_t_plan(position, quote, stale=False, costs=self.costs, timeframe={"alignment": "mixed"})
+        self.assertEqual(plan["status"], "not_suitable")
+        self.assertTrue(any("无法保留底仓" in blocker for blocker in plan["blockers"]))
 
     def test_reduction_plan_rounds_to_board_lots(self) -> None:
         position = {"entry": {"shares": 1000}}

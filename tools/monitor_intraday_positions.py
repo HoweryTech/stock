@@ -148,6 +148,7 @@ def build_reverse_t_plan(
     costs: dict[str, float],
     timeframe: dict[str, Any],
     preferred_reduction_shares: int | None = None,
+    max_trade_ratio_pct: float = 50.0,
     min_gap_pct: float = 1.2,
 ) -> dict[str, Any]:
     shares = int(as_float(value_at(position, "entry.shares"), 0.0) or 0.0)
@@ -157,7 +158,7 @@ def build_reverse_t_plan(
     low = as_float(quote.get("low"))
     open_price = as_float(quote.get("open"))
     change_pct = as_float(quote.get("change_pct"))
-    max_trade_shares = math.floor(shares / 3 / 100) * 100
+    max_trade_shares = math.floor(shares * max_trade_ratio_pct / 100 / 100) * 100
     if preferred_reduction_shares:
         max_trade_shares = min(max_trade_shares, preferred_reduction_shares)
     trade_shares = 100
@@ -171,8 +172,8 @@ def build_reverse_t_plan(
         blockers.append("行情过期。")
     if available < 100:
         blockers.append("可用股份不足100股。")
-    if shares < 300:
-        blockers.append("持仓少于300股，卖出100股会影响至少一半底仓。")
+    if shares < 200:
+        blockers.append("持仓少于200股，卖出100股后无法保留底仓。")
     if change_pct is not None and change_pct <= -9.8:
         blockers.append("接近或达到跌停，不做反T。")
     if range_pct is None or range_pct < 1.5:
@@ -181,6 +182,9 @@ def build_reverse_t_plan(
         blockers.append("周线或月线历史不足，无法完成多周期验证。")
     if timeframe.get("alignment") == "bearish" and not failure_as_reduction_acceptable:
         blockers.append("周线和月线均偏弱，且该股票没有计划降仓目标，不宜卖出后再回补。")
+
+    main_flow_ratio = as_float(quote.get("main_net_inflow_ratio_pct"))
+    strong_main_inflow = main_flow_ratio is not None and main_flow_ratio >= 3.0
 
     setup_ready = (
         not blockers
@@ -191,6 +195,7 @@ def build_reverse_t_plan(
         and change_pct > 0
         and range_position is not None
         and range_position >= 0.7
+        and not strong_main_inflow
     )
     if blockers:
         status = "not_suitable"
@@ -236,6 +241,8 @@ def build_reverse_t_plan(
         "timeframe_alignment": timeframe.get("alignment"),
         "failure_as_reduction_acceptable": failure_as_reduction_acceptable,
         "failure_result": "未回补可计入计划降仓。" if failure_as_reduction_acceptable else "未回补会形成计划外减仓，执行前必须明确接受。",
+        "high_position_ratio_warning": bool(trade_ratio_pct is not None and trade_ratio_pct >= 50),
+        "main_flow_confirmation": "wait_for_weakening" if strong_main_inflow else "not_strong_inflow",
         "blockers": blockers,
         "instructions": [
             f"只在价格进入卖出观察区后转弱时卖出{trade_shares}股，不在快速拉升中抢跑。",
@@ -297,6 +304,7 @@ def analyze_quote(
     total_assets: float,
     max_stale_seconds: int,
     costs: dict[str, float],
+    max_reverse_t_position_ratio_pct: float,
     now_timestamp: float,
 ) -> dict[str, Any]:
     code = str(value_at(position, "stock.code") or "")
@@ -332,6 +340,14 @@ def analyze_quote(
     if position_pct > 10:
         signals.append({"code": "position_limit_exceeded", "severity": "risk", "message": f"原始单票仓位 {position_pct:.2f}% 超过10%上限。"})
 
+    main_flow_ratio = as_float(quote.get("main_net_inflow_ratio_pct"))
+    main_flow_amount = as_float(quote.get("main_net_inflow"))
+    if main_flow_ratio is not None and change_pct is not None:
+        if change_pct > 0 and main_flow_ratio <= -3:
+            signals.append({"code": "price_up_main_outflow", "severity": "warning", "message": f"股价上涨但主力净流出占比 {main_flow_ratio:.2f}%，关注冲高分歧。"})
+        elif change_pct < 0 and main_flow_ratio >= 3:
+            signals.append({"code": "price_down_main_inflow", "severity": "info", "message": f"股价下跌但主力净流入占比 {main_flow_ratio:.2f}%，观察承接是否持续。"})
+
     signal_codes = {item["code"] for item in signals}
     if "stale_quote" in signal_codes:
         state = "data_stale"
@@ -350,6 +366,7 @@ def analyze_quote(
         costs=costs,
         timeframe=timeframe,
         preferred_reduction_shares=reduction_plan.get("minimum_reduction_shares") if reduction_plan.get("status") == "actionable" else None,
+        max_trade_ratio_pct=max_reverse_t_position_ratio_pct,
     )
 
     return {
@@ -367,6 +384,15 @@ def analyze_quote(
             "live_position_pct": None if live_position_pct is None else round(live_position_pct, 4),
         },
         "technicals": {"ma5": ma5, "ma20": ma20, "multi_timeframe": timeframe},
+        "capital_flow": {
+            "main_net_inflow": main_flow_amount,
+            "main_net_inflow_ratio_pct": main_flow_ratio,
+            "super_large_net_inflow": as_float(quote.get("super_large_net_inflow")),
+            "large_net_inflow": as_float(quote.get("large_net_inflow")),
+            "medium_net_inflow": as_float(quote.get("medium_net_inflow")),
+            "small_net_inflow": as_float(quote.get("small_net_inflow")),
+            "interpretation": "按成交单大小统计的资金流，不代表识别具体机构身份。",
+        },
         "signals": signals,
         "reverse_t_plan": reverse_t_plan,
         "reduction_plan": reduction_plan,
@@ -381,6 +407,7 @@ def build_snapshot(
     total_assets: float,
     max_stale_seconds: int,
     costs: dict[str, float],
+    max_reverse_t_position_ratio_pct: float,
 ) -> dict[str, Any]:
     positions = [load_yaml(path) for path in position_paths]
     codes = [str(value_at(position, "stock.code") or "") for position in positions]
@@ -401,6 +428,7 @@ def build_snapshot(
             total_assets=total_assets,
             max_stale_seconds=max_stale_seconds,
             costs=costs,
+            max_reverse_t_position_ratio_pct=max_reverse_t_position_ratio_pct,
             now_timestamp=now.timestamp(),
         )
         item["position_path"] = str(path)
@@ -509,6 +537,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transfer-fee-rate", type=float, default=0.00001, help="Transfer fee rate per side.")
     parser.add_argument("--minimum-net-profit", type=float, default=5.0, help="Minimum estimated net profit required for a T trade.")
     parser.add_argument("--cost-model-verified", action="store_true", help="Mark cost inputs as verified against the broker statement.")
+    parser.add_argument("--max-reverse-t-position-ratio", type=float, default=50.0, help="Maximum percent of a holding used in one reverse T trade.")
     parser.add_argument("--latest-json", default="data/metadata/intraday-monitor.latest.json")
     parser.add_argument("--latest-markdown", default="reports/intraday-monitor.latest.md")
     parser.add_argument("--event-log", default="data/metadata/intraday-monitor.events.jsonl")
@@ -556,6 +585,7 @@ def main() -> int:
                     total_assets=args.total_assets,
                     max_stale_seconds=args.max_stale_seconds,
                     costs=costs,
+                    max_reverse_t_position_ratio_pct=args.max_reverse_t_position_ratio,
                 )
                 write_json(latest_json, snapshot)
                 atomic_write(latest_markdown, render_markdown(snapshot))
