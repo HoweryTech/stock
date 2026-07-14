@@ -190,6 +190,9 @@ def build_report(
             "end": bars[-1]["trade_date"] if bars else None,
             "min_history": min_history,
             "horizons": horizons,
+            "risk": {
+                "stop_loss_price": as_float(value_at(position, "risk.stop_loss_price")),
+            },
         },
         "method": "逐日仅使用当日及以前日线生成趋势状态和动作矩阵，再统计后续收益与回撤。",
         "limitations": [
@@ -211,6 +214,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"生成时间：{report['generated_at']}",
         f"标的：{report['stock']['code']} {report['stock']['name']}",
         f"样本：{report['source']['start']} -> {report['source']['end']}，{report['source']['bar_count']} 条日线",
+        f"止损价假设：{report['source']['risk']['stop_loss_price'] if report['source']['risk']['stop_loss_price'] is not None else '-'}",
         "",
         "本报告只验证规则触发后的历史表现，不构成买卖建议。",
         "",
@@ -260,6 +264,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile", default="config/investment-profile.yaml", help="Investment profile YAML.")
     parser.add_argument("--horizons", type=parse_horizons, default=DEFAULT_HORIZONS, help="Forward horizons, comma-separated.")
     parser.add_argument("--min-history", type=int, default=20, help="Minimum daily bars before replay starts.")
+    parser.add_argument("--stop-loss-price", type=float, help="Optional what-if stop loss used only for this backtest.")
     parser.add_argument("--output", default="data/metadata/holding-action-matrix-backtest.json")
     parser.add_argument("--markdown-output", default="reports/holding-action-matrix-backtest.md")
     parser.add_argument("--json", action="store_true")
@@ -270,6 +275,9 @@ def main() -> int:
     args = parse_args()
     try:
         position = load_yaml(Path(args.position))
+        if args.stop_loss_price is not None:
+            position.setdefault("risk", {})
+            position["risk"]["stop_loss_price"] = args.stop_loss_price
         profile_path = Path(args.profile)
         profile = load_yaml(profile_path) if profile_path.exists() else load_yaml(Path("config/investment-profile.example.yaml"))
         code = str(value_at(position, "stock.code") or "")

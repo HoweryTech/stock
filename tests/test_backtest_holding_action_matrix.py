@@ -55,6 +55,7 @@ class BacktestHoldingActionMatrixTest(unittest.TestCase):
         )
 
         self.assertGreater(report["event_count"], 0)
+        self.assertEqual(report["source"]["risk"]["stop_loss_price"], 8.5)
         self.assertIn("trend_weakened", report["summary_by_trend_state"])
         self.assertIn("close_lt_ma20", report["summary_by_rule_trigger"])
         recent = report["recent_events"][-1]
