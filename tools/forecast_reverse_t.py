@@ -205,12 +205,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default="data/metadata/reverse-t-forecast.json")
     parser.add_argument("--cache-dir", default="data/processed/minute-bars")
     parser.add_argument("--interval", type=float, default=0, help="Refresh interval in seconds; zero runs once.")
+    parser.add_argument("--profile", default="config/investment-profile.yaml")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    costs = {"commission_rate": 0.0003, "minimum_commission": 5.0, "stamp_duty_rate": 0.0005, "transfer_fee_rate": 0.00001, "minimum_net_profit": 5.0, "verified": False}
+    profile_path = Path(args.profile)
+    profile = load_yaml(profile_path) if profile_path.exists() else {}
+    minimum_net_profit = as_float(value_at(profile, "t_trading.minimum_net_profit_cny"), 5.0) or 5.0
+    costs = {"commission_rate": 0.0003, "minimum_commission": 5.0, "stamp_duty_rate": 0.0005, "transfer_fee_rate": 0.00001, "minimum_net_profit": minimum_net_profit, "verified": False}
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     paths = expand_position_paths(args.positions)

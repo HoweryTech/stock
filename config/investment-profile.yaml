@@ -1,0 +1,26 @@
+profile:
+  name: "personal-a-share-investment-profile"
+  market_scope:
+    - "A_SHARE"
+  decision_mode: "human_confirmed"
+  primary_goal: "risk_controlled_return"
+
+risk:
+  position_limits_confirmed: true
+  warning_position_pct_per_stock: 12.0
+  max_position_pct_per_stock: 15.0
+  max_position_pct_per_industry: 30.0
+  max_total_position_pct: 80.0
+  min_cash_pct: 20.0
+  max_loss_per_trade_pct_of_total_assets: 1.0
+  max_account_drawdown_pct: 10.0
+
+t_trading:
+  minimum_net_profit_cny: 10.0
+  max_round_trips_per_stock_per_day: 1
+  max_position_ratio_pct_per_trade: 50.0
+
+execution:
+  mode: "human_confirmed"
+  auto_order: false
+  fundamental_flags_can_auto_sell: false

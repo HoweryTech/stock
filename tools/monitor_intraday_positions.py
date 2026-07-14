@@ -376,6 +376,7 @@ def analyze_quote(
     max_reverse_t_position_ratio_pct: float,
     now_timestamp: float,
     max_position_pct: float = 10.0,
+    warning_position_pct: float | None = None,
     position_limit_verified: bool = False,
 ) -> dict[str, Any]:
     code = str(value_at(position, "stock.code") or "")
@@ -411,6 +412,8 @@ def analyze_quote(
     if position_pct > max_position_pct:
         suffix = "" if position_limit_verified else "；该上限尚未由用户确认。"
         signals.append({"code": "position_limit_exceeded", "severity": "risk", "message": f"原始单票仓位 {position_pct:.2f}% 超过{max_position_pct:.2f}%上限{suffix}"})
+    elif warning_position_pct is not None and position_pct > warning_position_pct:
+        signals.append({"code": "position_near_limit", "severity": "warning", "message": f"原始单票仓位 {position_pct:.2f}% 超过{warning_position_pct:.2f}%预警线，但未超过{max_position_pct:.2f}%硬上限。"})
 
     main_flow_ratio = as_float(quote.get("main_net_inflow_ratio_pct"))
     main_flow_amount = as_float(quote.get("main_net_inflow"))
@@ -486,6 +489,7 @@ def build_snapshot(
     costs: dict[str, float],
     max_reverse_t_position_ratio_pct: float,
     max_position_pct: float = 10.0,
+    warning_position_pct: float | None = None,
     position_limit_verified: bool = False,
 ) -> dict[str, Any]:
     positions = [load_yaml(path) for path in position_paths]
@@ -510,6 +514,7 @@ def build_snapshot(
             max_reverse_t_position_ratio_pct=max_reverse_t_position_ratio_pct,
             now_timestamp=now.timestamp(),
             max_position_pct=max_position_pct,
+            warning_position_pct=warning_position_pct,
             position_limit_verified=position_limit_verified,
         )
         item["position_path"] = str(path)
@@ -521,7 +526,7 @@ def build_snapshot(
         "interval_note": "公开网页接口无时效和可用性保证，不用于自动下单。",
         "total_assets": total_assets,
         "cost_model": costs,
-        "position_limit": {"max_position_pct": max_position_pct, "verified": position_limit_verified},
+        "position_limit": {"warning_position_pct": warning_position_pct, "max_position_pct": max_position_pct, "verified": position_limit_verified},
         "position_count": len(position_paths),
         "success_count": len(items),
         "errors": errors,
@@ -621,7 +626,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cost-model-verified", action="store_true", help="Mark cost inputs as verified against the broker statement.")
     parser.add_argument("--max-reverse-t-position-ratio", type=float, default=50.0, help="Maximum percent of a holding used in one reverse T trade.")
     parser.add_argument("--max-position-pct", type=float, default=10.0, help="Maximum single-stock position percent.")
+    parser.add_argument("--warning-position-pct", type=float, help="Single-stock position warning percent.")
     parser.add_argument("--position-limit-verified", action="store_true", help="Mark the single-stock position limit as user-confirmed.")
+    parser.add_argument("--profile", default="config/investment-profile.yaml", help="Confirmed investment profile YAML.")
     parser.add_argument("--latest-json", default="data/metadata/intraday-monitor.latest.json")
     parser.add_argument("--latest-markdown", default="reports/intraday-monitor.latest.md")
     parser.add_argument("--event-log", default="data/metadata/intraday-monitor.events.jsonl")
@@ -644,12 +651,19 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
     paths = expand_position_paths(args.positions)
+    profile_path = Path(args.profile)
+    profile = load_yaml(profile_path) if profile_path.exists() else {}
+    max_position_pct = as_float(value_at(profile, "risk.max_position_pct_per_stock"), args.max_position_pct) or args.max_position_pct
+    warning_position_pct = as_float(value_at(profile, "risk.warning_position_pct_per_stock"), args.warning_position_pct)
+    position_limit_verified = bool(value_at(profile, "risk.position_limits_confirmed")) or args.position_limit_verified
+    minimum_net_profit = as_float(value_at(profile, "t_trading.minimum_net_profit_cny"), args.minimum_net_profit) or args.minimum_net_profit
+    max_reverse_t_position_ratio = as_float(value_at(profile, "t_trading.max_position_ratio_pct_per_trade"), args.max_reverse_t_position_ratio) or args.max_reverse_t_position_ratio
     costs = {
         "commission_rate": args.commission_rate,
         "minimum_commission": args.minimum_commission,
         "stamp_duty_rate": args.stamp_duty_rate,
         "transfer_fee_rate": args.transfer_fee_rate,
-        "minimum_net_profit": args.minimum_net_profit,
+        "minimum_net_profit": minimum_net_profit,
         "verified": args.cost_model_verified,
     }
     latest_json = Path(args.latest_json)
@@ -669,9 +683,10 @@ def main() -> int:
                     total_assets=args.total_assets,
                     max_stale_seconds=args.max_stale_seconds,
                     costs=costs,
-                    max_reverse_t_position_ratio_pct=args.max_reverse_t_position_ratio,
-                    max_position_pct=args.max_position_pct,
-                    position_limit_verified=args.position_limit_verified,
+                    max_reverse_t_position_ratio_pct=max_reverse_t_position_ratio,
+                    max_position_pct=max_position_pct,
+                    warning_position_pct=warning_position_pct,
+                    position_limit_verified=position_limit_verified,
                 )
                 write_json(latest_json, snapshot)
                 atomic_write(latest_markdown, render_markdown(snapshot))

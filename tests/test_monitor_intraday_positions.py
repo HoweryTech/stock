@@ -134,6 +134,22 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertEqual(decision["headline"], "现在不做反T")
         self.assertIn("不因轻微超限", decision["reduction_decision"])
 
+    def test_position_warning_does_not_trigger_hard_limit(self) -> None:
+        position = {
+            "stock": {"code": "000723", "name": "美锦能源"},
+            "entry": {"shares": 1000, "entry_price": 3.843, "position_pct_of_total_assets": 13.2},
+        }
+        quote = {"code": "000723", "latest_price": 3.36, "open": 3.24, "high": 3.37, "low": 3.23, "change_pct": 3.7, "quote_timestamp": 1000}
+        item = analyze_quote(
+            position, quote, self.history(), total_assets=25480, max_stale_seconds=60,
+            costs=self.costs, max_reverse_t_position_ratio_pct=50, now_timestamp=1001,
+            max_position_pct=15, warning_position_pct=12, position_limit_verified=True,
+        )
+        codes = {signal["code"] for signal in item["signals"]}
+        self.assertIn("position_near_limit", codes)
+        self.assertNotIn("position_limit_exceeded", codes)
+        self.assertEqual(item["reduction_plan"]["status"], "within_limit")
+
     def test_trade_costs_include_minimum_commissions_and_sell_tax(self) -> None:
         costs = trade_costs(3.29, 3.25, 100, self.costs)
         self.assertEqual(costs["sell_commission"], 5.0)

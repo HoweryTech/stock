@@ -92,8 +92,8 @@ function automaticDecisionFor(item) {
   }
   if (severeFundamentals && Number(item.position.shares) >= 200) {
     return {
-      level: "待触发计划", headline: "禁止补仓，等待反弹减仓100股",
-      action: `价格进入${zone}后转弱时卖出100股，不回补；未到区间则保持。`,
+      level: "当前结论", headline: "持有，禁止补仓",
+      action: "基本面风险指标未通过，但尚无已确认的卖出规则；本轮不买、不卖，持续跟踪后续财报和趋势。",
       reasons: flags.map(flag => flag.message),
     };
   }

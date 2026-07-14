@@ -251,17 +251,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transfer-fee-rate", type=float, default=0.00001)
     parser.add_argument("--minimum-net-profit", type=float, default=5.0)
     parser.add_argument("--max-trade-ratio", type=float, default=50.0)
+    parser.add_argument("--profile", default="config/investment-profile.yaml")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    profile_path = Path(args.profile)
+    profile = load_yaml(profile_path) if profile_path.exists() else {}
+    minimum_net_profit = as_float(value_at(profile, "t_trading.minimum_net_profit_cny"), args.minimum_net_profit) or args.minimum_net_profit
+    max_trade_ratio = as_float(value_at(profile, "t_trading.max_position_ratio_pct_per_trade"), args.max_trade_ratio) or args.max_trade_ratio
     costs = {
         "commission_rate": args.commission_rate, "minimum_commission": args.minimum_commission,
         "stamp_duty_rate": args.stamp_duty_rate, "transfer_fee_rate": args.transfer_fee_rate,
-        "minimum_net_profit": args.minimum_net_profit, "verified": False,
+        "minimum_net_profit": minimum_net_profit, "verified": False,
     }
-    report = build_report(expand_position_paths(args.positions), args.begin, args.end, costs, args.max_trade_ratio)
+    report = build_report(expand_position_paths(args.positions), args.begin, args.end, costs, max_trade_ratio)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     target = output if not report["errors"] else output.with_suffix(".failed.json")
