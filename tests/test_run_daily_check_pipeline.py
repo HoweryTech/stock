@@ -12,6 +12,7 @@ def args(base: Path) -> Namespace:
     return Namespace(
         watchlist_metadata=str(base / "watchlist.json"),
         portfolio_check=str(base / "portfolio.json"),
+        holding_action_draft=str(base / "holding-action-draft.json"),
         exit_plans=[str(base / "exit-plans/*.yaml")],
         trade_executions=[str(base / "executions/*.yaml")],
         exit_executions=[str(base / "exit-executions/*.yaml")],

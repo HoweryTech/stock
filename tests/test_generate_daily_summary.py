@@ -18,6 +18,7 @@ def args(tmp_dir: str) -> Namespace:
     return Namespace(
         watchlist_metadata=str(base / "watchlist.json"),
         portfolio_check=str(base / "portfolio.json"),
+        holding_action_draft=str(base / "holding-action-draft.json"),
         exit_plans=[str(base / "exit-plans/*.yaml")],
         trade_executions=[str(base / "executions/*.yaml")],
         exit_executions=[str(base / "exit-executions/*.yaml")],
@@ -155,6 +156,61 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("## 今日必须人工确认事项", content)
         self.assertIn("今日无必须人工确认事项", content)
         self.assertIn("元数据状态：缺失", content)
+
+    def test_daily_summary_shows_holding_action_draft_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "portfolio.json",
+                {
+                    "conclusion": "normal",
+                    "position_count": 1,
+                    "total_position_pct": 5.0,
+                    "needs_action_count": 0,
+                    "warning_count": 0,
+                    "positions": [],
+                },
+            )
+            write_json(
+                base / "holding-action-draft.json",
+                {
+                    "conclusion": "manual_rules_required",
+                    "items": [
+                        {
+                            "stock_code": "600000",
+                            "stock_name": "测试股票",
+                            "priority": 1,
+                            "action": "exit_risk_review",
+                            "action_label": "优先核验退出风险",
+                            "trend_state": {"state": "stop_loss_risk", "label": "止损风险"},
+                            "action_matrix": [
+                                {
+                                    "trigger": "price_lte_stop_loss",
+                                    "price": 8.5,
+                                    "action_label": "生成退出计划，禁止补仓和做T",
+                                    "severity": "critical",
+                                },
+                                {
+                                    "trigger": "price_within_3pct_above_stop_loss",
+                                    "price": 8.76,
+                                    "action_label": "止损风险复核，不做T",
+                                    "severity": "high",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 9, 5, 0))
+            content = render_summary(summary)
+
+        self.assertEqual(summary["holding_action_draft"]["item_count"], 1)
+        self.assertEqual(summary["holding_action_draft"]["critical_rule_count"], 1)
+        self.assertIn("复核 1 条持仓关键价格触发动作。", summary["operating_actions"])
+        self.assertIn("## 持仓处置草案", content)
+        self.assertIn("趋势状态分布：{'stop_loss_risk': 1}", content)
+        self.assertIn("critical price_lte_stop_loss price=8.5", content)
 
     def test_daily_summary_shows_trade_execution_missing_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

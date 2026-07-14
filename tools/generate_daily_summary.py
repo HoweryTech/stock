@@ -540,10 +540,61 @@ def summarize_strategy_config_snapshot(snapshot_doc: dict[str, Any] | None) -> d
     }
 
 
+def summarize_holding_action_draft(draft_doc: dict[str, Any] | None) -> dict[str, Any]:
+    if not draft_doc:
+        return {
+            "available": False,
+            "conclusion": "missing",
+            "item_count": 0,
+            "critical_rule_count": 0,
+            "high_rule_count": 0,
+            "trend_states": {},
+            "items": [],
+        }
+    rows: list[dict[str, Any]] = []
+    trend_states: dict[str, int] = {}
+    critical_rule_count = 0
+    high_rule_count = 0
+    for item in draft_doc.get("items", []) or []:
+        trend = item.get("trend_state") or {}
+        state = trend.get("state") or "unknown"
+        trend_states[state] = trend_states.get(state, 0) + 1
+        matrix = item.get("action_matrix") or []
+        critical_rules = [rule for rule in matrix if rule.get("severity") == "critical"]
+        high_rules = [rule for rule in matrix if rule.get("severity") == "high"]
+        critical_rule_count += len(critical_rules)
+        high_rule_count += len(high_rules)
+        rows.append(
+            {
+                "stock_code": item.get("stock_code"),
+                "stock_name": item.get("stock_name"),
+                "priority": item.get("priority"),
+                "action": item.get("action"),
+                "action_label": item.get("action_label"),
+                "trend_state": state,
+                "trend_label": trend.get("label") or state,
+                "matrix_count": len(matrix),
+                "critical_rules": critical_rules,
+                "high_rules": high_rules,
+            }
+        )
+    rows.sort(key=lambda row: (row["priority"] or 99, row["stock_code"] or ""))
+    return {
+        "available": True,
+        "conclusion": draft_doc.get("conclusion") or "unknown",
+        "item_count": len(rows),
+        "critical_rule_count": critical_rule_count,
+        "high_rule_count": high_rule_count,
+        "trend_states": trend_states,
+        "items": rows,
+    }
+
+
 def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
     actions: list[str] = []
     watchlist = summary["watchlist"]
     portfolio = summary["portfolio"]
+    holding_action_draft = summary["holding_action_draft"]
     exits = summary["exit_plans"]
     trade_executions = summary["trade_executions"]
     exit_executions = summary["exit_executions"]
@@ -569,6 +620,12 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
         actions.append("优先处理组合或持仓日检中的 needs_action。")
     elif portfolio["conclusion"] == "warning":
         actions.append("复核组合或持仓提醒项。")
+    if portfolio["available"] and not holding_action_draft["available"]:
+        actions.append("生成或刷新持仓处置草案，补齐趋势状态和价格动作矩阵。")
+    elif holding_action_draft["critical_rule_count"]:
+        actions.append(f"复核 {holding_action_draft['critical_rule_count']} 条持仓关键价格触发动作。")
+    elif holding_action_draft["high_rule_count"]:
+        actions.append(f"复核 {holding_action_draft['high_rule_count']} 条持仓高优先级动作条件。")
 
     urgent_exits = [row for row in exits["rows"] if row["must_exit"] or row["urgency"] == "immediate"]
     if urgent_exits:
@@ -802,6 +859,7 @@ def build_summary(args: argparse.Namespace, generated_at: datetime | None = None
         "generated_at": generated_at.isoformat(timespec="seconds"),
         "watchlist": summarize_watchlist(load_json_if_exists(Path(args.watchlist_metadata))),
         "portfolio": summarize_portfolio(load_json_if_exists(Path(args.portfolio_check))),
+        "holding_action_draft": summarize_holding_action_draft(load_json_if_exists(Path(args.holding_action_draft))),
         "exit_plans": summarize_exit_plans(load_yaml_files(args.exit_plans)),
         "trade_executions": summarize_trade_executions(load_yaml_files(args.trade_executions)),
         "exit_executions": summarize_exit_executions(load_yaml_files(args.exit_executions)),
@@ -834,6 +892,7 @@ def render_section_list(items: list[str]) -> list[str]:
 def render_summary(summary: dict[str, Any]) -> str:
     watchlist = summary["watchlist"]
     portfolio = summary["portfolio"]
+    holding_action_draft = summary["holding_action_draft"]
     exits = summary["exit_plans"]
     trade_executions = summary["trade_executions"]
     executions = summary["exit_executions"]
@@ -882,6 +941,15 @@ def render_summary(summary: dict[str, Any]) -> str:
         "组合/持仓提示：",
         *render_section_list(portfolio["items"]),
         "",
+        "## 持仓处置草案",
+        "",
+        f"- 草案状态：{'已读取' if holding_action_draft['available'] else '缺失'}",
+        f"- 草案结论：{holding_action_draft['conclusion']}",
+        f"- 覆盖持仓数：{holding_action_draft['item_count']}",
+        f"- 关键触发动作数：{holding_action_draft['critical_rule_count']}",
+        f"- 高优先级动作数：{holding_action_draft['high_rule_count']}",
+        f"- 趋势状态分布：{holding_action_draft['trend_states'] if holding_action_draft['trend_states'] else '-'}",
+        "",
         "## 退出与卖出",
         "",
         f"- 退出计划数量：{exits['count']}",
@@ -895,6 +963,20 @@ def render_summary(summary: dict[str, Any]) -> str:
         f"- 缺少确认快照卖出执行：{executions['missing_confirmation_count']}",
         "",
     ]
+
+    if holding_action_draft["items"]:
+        lines.append("持仓趋势与动作矩阵：")
+        for row in holding_action_draft["items"]:
+            lines.append(
+                f"- {row['stock_code']} {row['stock_name']} priority={row['priority']} trend={row['trend_label']} action={row['action_label']} matrix={row['matrix_count']}"
+            )
+            for rule in row["critical_rules"][:2]:
+                price_text = "" if rule.get("price") is None else f" price={rule['price']}"
+                lines.append(f"  - critical {rule.get('trigger')}{price_text}: {rule.get('action_label')}")
+            for rule in row["high_rules"][:2]:
+                price_text = "" if rule.get("price") is None else f" price={rule['price']}"
+                lines.append(f"  - high {rule.get('trigger')}{price_text}: {rule.get('action_label')}")
+        lines.append("")
 
     if exits["rows"]:
         lines.append("退出计划：")
@@ -1056,6 +1138,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a daily operating summary from workflow artifacts.")
     parser.add_argument("--watchlist-metadata", default="data/metadata/watchlist_pipeline.json", help="Watchlist pipeline metadata JSON.")
     parser.add_argument("--portfolio-check", default="data/metadata/portfolio_positions.check.json", help="Portfolio position check JSON.")
+    parser.add_argument("--holding-action-draft", default="data/metadata/holding-action-draft.json", help="Holding action draft JSON generated by build_holding_action_draft.py.")
     parser.add_argument("--exit-plans", nargs="+", default=["exit-plans/*.yaml"], help="Exit plan YAML paths or glob patterns.")
     parser.add_argument("--trade-executions", nargs="+", default=["executions/*.yaml"], help="Trade execution YAML paths or glob patterns.")
     parser.add_argument("--exit-executions", nargs="+", default=["exit-executions/*.yaml"], help="Sell execution YAML paths or glob patterns.")
