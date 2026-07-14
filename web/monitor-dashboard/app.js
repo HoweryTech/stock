@@ -2,6 +2,7 @@ const state = {
   snapshot: null,
   research: new Map(),
   backtests: new Map(),
+  forecasts: new Map(),
   events: [],
   filter: "all",
   search: "",
@@ -110,12 +111,13 @@ function renderSummary() {
   const noAdd = items.filter(item => item.state === "no_add_watch").length;
   const maxLag = Math.max(0, ...items.map(item => Number(item.quote.quote_lag_seconds || 0)));
   const reverseT = items.filter(isReverseTWatch).length;
+  const forecastAlerts = items.filter(item => state.forecasts.get(item.code)?.status === "early_warning").length;
   const blocks = [
     ["账户总资产", money(state.snapshot?.total_assets), "持仓基准"],
     ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
     ["浮动盈亏", money(pnl), "按最新快照估算"],
     ["风险处置", `${risk} 只`, `${noAdd} 只禁止补仓`],
-    ["反T可观察", `${reverseT} 只`, "其中形态触发后才是候选"],
+    ["反T预测预警", `${forecastAlerts} 只`, `${reverseT} 只通过回测门禁`],
     ["最大行情延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
   ];
   document.querySelector("#summaryBand").innerHTML = blocks.map(([label, value, sub]) => `
@@ -182,6 +184,7 @@ function openDetail(code) {
   state.selectedCode = code;
   const research = state.research.get(code);
   const backtest = state.backtests.get(code);
+  const forecast = state.forecasts.get(code);
   const automaticDecision = automaticDecisionFor(item);
   document.querySelector("#detailCode").textContent = code;
   document.querySelector("#detailName").textContent = item.name;
@@ -197,6 +200,17 @@ function openDetail(code) {
     ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`
     : `<h4>重新开放反T的条件</h4><ol class="reason-list"><li>扩充分钟样本并重新回测。</li><li>当天回补成功率达到60%以上，且已完成交易净收益合计为正。</li><li>再经过模拟盘验证后，才恢复反T候选。</li></ol>`;
   html += detailSection("自动操作结论", `<p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
+  if (forecast) {
+    const forecastZone = forecast.predicted_sell_zone ? `${num(forecast.predicted_sell_zone[0])}–${num(forecast.predicted_sell_zone[1])}元` : "--";
+    const forecastMetrics = [
+      ["预测周期", forecast.horizon_minutes ? `未来${forecast.horizon_minutes}分钟` : "--"],
+      ["预测高点区间", forecastZone], ["到达概率", pct(forecast.reach_probability_pct)],
+      ["到达后可回补概率", pct(forecast.roundtrip_probability_pct)],
+      ["预测回补上限", money(forecast.predicted_buyback_max_price)],
+      ["相似样本", forecast.neighbor_count || forecast.sample_count || 0],
+    ];
+    html += detailSection("下一次反T概率预测", `<p><strong>${escapeHtml(forecast.status_label)}</strong></p><div class="metric-grid">${forecastMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">${escapeHtml(forecast.note || "预测仅用于提前预警，不代表价格必然到达。")}</p>`);
+  }
   const multi = item.technicals?.multi_timeframe || {};
   const multiMetrics = [
     ["周线方向", multi.alignment === "bullish" ? "周月共振向上" : multi.alignment === "bearish" ? "周月共同偏弱" : multi.alignment === "mixed" ? "周期分歧" : "历史不足"],
@@ -315,16 +329,18 @@ function updateHeader(status) {
 
 async function loadData() {
   try {
-    const [snapshot, research, backtests, status, events] = await Promise.all([
+    const [snapshot, research, backtests, forecasts, status, events] = await Promise.all([
       fetch("/api/snapshot", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/research", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/reverse-t-backtest", { cache: "no-store" }).then(response => response.json()),
+      fetch("/api/reverse-t-forecast", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/status", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/events?limit=20", { cache: "no-store" }).then(response => response.json()),
     ]);
     state.snapshot = snapshot;
     state.research = new Map((research.items || []).map(item => [item.code, item]));
     state.backtests = new Map((backtests.items || []).map(item => [item.code, item]));
+    state.forecasts = new Map((forecasts.items || []).map(item => [item.code, item]));
     state.events = events.events || [];
     updateHeader(status);
     renderSummary();
