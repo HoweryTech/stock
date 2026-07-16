@@ -585,6 +585,22 @@ python3 tools/build_data_quality_snapshot.py \
 
 该快照会检查行情延迟、日线样本和分钟线缓存，先判断当前数据是否足够支撑盘中决策。状态为 `stale`、`insufficient` 或 `missing` 时，实时建议只能用于观察或补数据排查。
 
+生成并执行数据质量修复计划：
+
+```bash
+python3 tools/repair_data_quality.py \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --quality-snapshot data/metadata/data-quality-snapshot.json
+
+python3 tools/repair_data_quality.py \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --quality-snapshot data/metadata/data-quality-snapshot.json \
+  --total-assets 25480 \
+  --execute
+```
+
+默认只生成修复计划；`--execute` 会按需刷新准实时行情、日线和5分钟线，并重建数据质量快照。开盘前或收盘后行情时间戳可能仍停在上一交易日，此时状态继续显示 `stale` 是正常保护。
+
 生成统一实时持仓决策卡：
 
 ```bash
