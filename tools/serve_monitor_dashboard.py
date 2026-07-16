@@ -147,8 +147,11 @@ def handle_manual_trade(payload: dict[str, object]) -> dict[str, object]:
     total_assets = float(total_assets_raw) if isinstance(total_assets_raw, (int, float)) else 25480.0
     args = manual_trade_args(payload, total_assets)
     update, _ = apply_manual_trade(args)
-    refresh = run_refresh_commands(float(args.total_assets))
-    return {"ok": True, "update": update, "refresh": refresh}
+    try:
+        refresh = run_refresh_commands(float(args.total_assets))
+        return {"ok": True, "update": update, "refresh": refresh}
+    except Exception as exc:
+        return {"ok": True, "update": update, "refresh": [], "refresh_error": str(exc)}
 
 
 class DashboardHandler(BaseHTTPRequestHandler):

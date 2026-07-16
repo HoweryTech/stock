@@ -673,7 +673,7 @@ async function submitManualTrade(payload, form) {
     });
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    status.textContent = "已更新，正在重新加载页面数据。";
+    status.textContent = result.refresh_error ? `已保存成交，但刷新建议失败：${result.refresh_error}` : "已更新，正在重新加载页面数据。";
     closeManualTradeConfirm();
     await loadData();
   } catch (error) {
@@ -690,9 +690,11 @@ function reverseTradePresetControls(item) {
   if (["buyback_ready", "buyback_wait"].includes(plan.status)) {
     const buybackPrice = plan.buyback_max_price == null ? null : Number(plan.buyback_max_price);
     if (buybackPrice == null) return "";
+    const currentPrice = item.quote?.latest_price == null ? null : Number(item.quote.latest_price);
+    const fillPrice = currentPrice != null && Number.isFinite(currentPrice) ? Math.min(currentPrice, buybackPrice) : buybackPrice;
     const openLegId = plan.open_reverse_t_leg?.id || "";
     return `<div class="manual-preset"><div class="manual-preset-title">开放反T回补单</div><div class="manual-preset-actions">
-      <button class="secondary-action" type="button" data-manual-preset data-side="buy" data-price="${escapeHtml(buybackPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="reverse_t_close" data-linked-trade-id="${escapeHtml(openLegId)}" data-note="反T回补：关闭开放反T卖出腿">填入反T回补</button>
+      <button class="secondary-action" type="button" data-manual-preset data-side="buy" data-price="${escapeHtml(fillPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="reverse_t_close" data-linked-trade-id="${escapeHtml(openLegId)}" data-note="反T回补：关闭开放反T卖出腿">填入反T回补</button>
     </div></div>`;
   }
   if (plan.status !== "candidate" || sellZone.length < 2) return "";

@@ -73,6 +73,18 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         apply_trade.assert_called_once()
         refresh.assert_called_once_with(25480.0)
 
+    def test_handle_manual_trade_reports_refresh_error_after_saved(self) -> None:
+        with (
+            patch("tools.serve_monitor_dashboard.load_json", return_value={"total_assets": 25480.0}),
+            patch("tools.serve_monitor_dashboard.apply_manual_trade", return_value=({"trade": {"code": "000725", "side": "buy"}}, None)),
+            patch("tools.serve_monitor_dashboard.run_refresh_commands", side_effect=RuntimeError("refresh failed")),
+        ):
+            result = handle_manual_trade({"code": "000725", "side": "buy", "shares": 100, "price": 6.01})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["update"]["trade"]["side"], "buy")
+        self.assertIn("refresh failed", result["refresh_error"])
+
 
 if __name__ == "__main__":
     unittest.main()
