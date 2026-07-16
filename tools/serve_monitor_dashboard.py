@@ -7,17 +7,21 @@ import argparse
 import json
 import mimetypes
 import os
+import subprocess
 import sys
 import time
+from argparse import Namespace
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 try:
+    from tools.apply_manual_trade import apply_manual_trade
     from tools.check_market_wait_refresh import build_refresh_check
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.apply_manual_trade import apply_manual_trade
     from tools.check_market_wait_refresh import build_refresh_check
 
 
@@ -87,6 +91,64 @@ def market_wait_refresh_status() -> dict[str, object]:
     )
 
 
+def manual_trade_args(payload: dict[str, object], total_assets: float | None) -> Namespace:
+    return Namespace(
+        positions=["positions/POS-EASTMONEY-*.yaml"],
+        code=str(payload.get("code") or ""),
+        side=str(payload.get("side") or ""),
+        shares=float(payload.get("shares") or 0),
+        price=float(payload.get("price") or 0),
+        total_assets=float(payload.get("total_assets") or total_assets or 25480.0),
+        occurred_at=payload.get("occurred_at") or None,
+        note=str(payload.get("note") or ""),
+        source="dashboard",
+        commission_rate=0.0003,
+        minimum_commission=5.0,
+        stamp_duty_rate=0.0005,
+        transfer_fee_rate=0.00001,
+    )
+
+
+def run_refresh_commands(total_assets: float) -> list[dict[str, object]]:
+    commands = [
+        [".venv/bin/python", "tools/forecast_reverse_t.py", "--positions", "positions/POS-EASTMONEY-*.yaml", "--output", "data/metadata/reverse-t-forecast.json"],
+        [
+            ".venv/bin/python",
+            "tools/run_intraday_decision_pipeline.py",
+            "--positions",
+            "positions/POS-EASTMONEY-*.yaml",
+            "--daily-bars",
+            "data/processed/daily_bars.csv",
+            "--total-assets",
+            str(total_assets),
+        ],
+    ]
+    results: list[dict[str, object]] = []
+    for command in commands:
+        completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=90)
+        results.append(
+            {
+                "command": " ".join(command),
+                "returncode": completed.returncode,
+                "stdout": completed.stdout.strip(),
+                "stderr": completed.stderr.strip(),
+            }
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or f"command failed: {' '.join(command)}")
+    return results
+
+
+def handle_manual_trade(payload: dict[str, object]) -> dict[str, object]:
+    snapshot = load_json(API_FILES["/api/snapshot"]) or {}
+    total_assets_raw = snapshot.get("total_assets")
+    total_assets = float(total_assets_raw) if isinstance(total_assets_raw, (int, float)) else 25480.0
+    args = manual_trade_args(payload, total_assets)
+    update, _ = apply_manual_trade(args)
+    refresh = run_refresh_commands(float(args.total_assets))
+    return {"ok": True, "update": update, "refresh": refresh}
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def send_json(self, data: object, status: int = 200) -> None:
         payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -143,6 +205,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/manual-trade":
+            self.send_error(404)
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or "0")
+            if length <= 0 or length > 8192:
+                raise ValueError("invalid request body")
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("request body must be a JSON object")
+            self.send_json(handle_manual_trade(payload))
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, 400)
 
     def log_message(self, format: str, *args: object) -> None:
         return

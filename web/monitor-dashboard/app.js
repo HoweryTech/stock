@@ -447,6 +447,25 @@ function renderTechnicalAssessment(assessment) {
   );
 }
 
+function manualTradeSection(item) {
+  const currentPrice = item.quote?.latest_price == null ? "" : Number(item.quote.latest_price).toFixed(2);
+  const maxSellShares = Number(item.position?.shares || 0);
+  const defaultShares = maxSellShares >= 100 ? 100 : maxSellShares || 100;
+  return detailSection(
+    "手工成交更新",
+    `<form class="manual-trade-form" data-code="${escapeHtml(item.code)}">
+      <div class="manual-trade-grid">
+        <label><span>方向</span><select name="side"><option value="sell">卖出</option><option value="buy">买入</option></select></label>
+        <label><span>价格</span><input name="price" type="number" step="0.01" min="0.01" value="${escapeHtml(currentPrice)}" required></label>
+        <label><span>数量</span><input name="shares" type="number" step="100" min="1" value="${escapeHtml(defaultShares)}" required></label>
+        <label><span>备注</span><input name="note" type="text" placeholder="可选"></label>
+      </div>
+      <button class="primary-action" type="submit">记录成交并刷新建议</button>
+      <p class="manual-trade-status secondary" aria-live="polite"></p>
+    </form>`
+  );
+}
+
 function openDetail(code) {
   const item = state.snapshot?.items.find(entry => entry.code === code);
   if (!item) return;
@@ -465,6 +484,7 @@ function openDetail(code) {
     ["5日均线", money(item.technicals.ma5)], ["20日均线", money(item.technicals.ma20)],
   ];
   let html = detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
+  html += manualTradeSection(item);
   if (decisionCard) {
     const levels = decisionCard.price_levels || {};
     const decision = decisionCard.decision || {};
@@ -745,6 +765,37 @@ document.querySelector("#refreshAlert").addEventListener("click", event => {
   navigator.clipboard?.writeText(button.dataset.command || "");
   button.textContent = "已复制";
   setTimeout(() => { button.textContent = "复制"; }, 1200);
+});
+document.querySelector("#detailContent").addEventListener("submit", async event => {
+  const form = event.target.closest(".manual-trade-form");
+  if (!form) return;
+  event.preventDefault();
+  const status = form.querySelector(".manual-trade-status");
+  const button = form.querySelector("button[type='submit']");
+  const payload = {
+    code: form.dataset.code,
+    side: form.elements.side.value,
+    price: Number(form.elements.price.value),
+    shares: Number(form.elements.shares.value),
+    note: form.elements.note.value,
+  };
+  status.textContent = "正在更新持仓并刷新建议...";
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/manual-trade", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    status.textContent = "已更新，正在重新加载页面数据。";
+    await loadData();
+  } catch (error) {
+    status.textContent = `更新失败：${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
 });
 document.addEventListener("keydown", event => { if (event.key === "Escape") closeDetail(); });
 

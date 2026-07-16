@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from tools.serve_monitor_dashboard import API_FILES, load_json, market_wait_refresh_status, monitor_status, recent_events
+from tools.serve_monitor_dashboard import API_FILES, handle_manual_trade, load_json, market_wait_refresh_status, monitor_status, recent_events
 
 
 class ServeMonitorDashboardTest(unittest.TestCase):
@@ -59,6 +59,19 @@ class ServeMonitorDashboardTest(unittest.TestCase):
 
         self.assertEqual(report["conclusion"], "refresh_due")
         self.assertIn("--total-assets 25480.0", report["refresh_command"]["shell"])
+
+    def test_handle_manual_trade_updates_position_and_refreshes_outputs(self) -> None:
+        with (
+            patch("tools.serve_monitor_dashboard.load_json", return_value={"total_assets": 25480.0}),
+            patch("tools.serve_monitor_dashboard.apply_manual_trade", return_value=({"trade": {"code": "000725", "side": "sell"}}, None)) as apply_trade,
+            patch("tools.serve_monitor_dashboard.run_refresh_commands", return_value=[{"returncode": 0}]) as refresh,
+        ):
+            result = handle_manual_trade({"code": "000725", "side": "sell", "shares": 100, "price": 6.32})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["update"]["trade"]["code"], "000725")
+        apply_trade.assert_called_once()
+        refresh.assert_called_once_with(25480.0)
 
 
 if __name__ == "__main__":
