@@ -7,9 +7,17 @@ import argparse
 import json
 import mimetypes
 import os
+import sys
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+try:
+    from tools.check_market_wait_refresh import build_refresh_check
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.check_market_wait_refresh import build_refresh_check
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +32,15 @@ API_FILES = {
 }
 PID_FILE = ROOT / "data" / "metadata" / "intraday-monitor.pid"
 EVENT_FILE = ROOT / "data" / "metadata" / "intraday-monitor.events.jsonl"
+
+
+def load_json(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def monitor_status() -> dict[str, object]:
@@ -50,6 +67,19 @@ def recent_events(limit: int) -> list[dict[str, object]]:
     return list(reversed(events))
 
 
+def market_wait_refresh_status() -> dict[str, object]:
+    snapshot = load_json(API_FILES["/api/snapshot"]) or {}
+    total_assets = snapshot.get("total_assets")
+    return build_refresh_check(
+        load_json(API_FILES["/api/decision-cards"]),
+        as_of=datetime.now().astimezone(),
+        positions=["positions/POS-EASTMONEY-*.yaml"],
+        daily_bars="data/processed/daily_bars.csv",
+        total_assets=float(total_assets) if isinstance(total_assets, (int, float)) else None,
+        python_bin=".venv/bin/python",
+    )
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def send_json(self, data: object, status: int = 200) -> None:
         payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -74,6 +104,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/status":
             self.send_json(monitor_status())
+            return
+        if parsed.path == "/api/market-wait-refresh":
+            self.send_json(market_wait_refresh_status())
             return
         if parsed.path == "/api/events":
             query = parse_qs(parsed.query)

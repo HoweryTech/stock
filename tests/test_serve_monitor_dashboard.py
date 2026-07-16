@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from tools.serve_monitor_dashboard import API_FILES, monitor_status, recent_events
+from tools.serve_monitor_dashboard import API_FILES, market_wait_refresh_status, monitor_status, recent_events
 
 
 class ServeMonitorDashboardTest(unittest.TestCase):
@@ -28,6 +28,22 @@ class ServeMonitorDashboardTest(unittest.TestCase):
     def test_exposes_decision_cards_api(self) -> None:
         self.assertIn("/api/decision-cards", API_FILES)
         self.assertEqual(API_FILES["/api/decision-cards"].name, "realtime-decision-cards.json")
+
+    def test_market_wait_refresh_status_uses_snapshot_assets(self) -> None:
+        def fake_load_json(path):
+            if path == API_FILES["/api/snapshot"]:
+                return {"total_assets": 25480.0}
+            if path == API_FILES["/api/decision-cards"]:
+                return {"cards": [{"code": "600000", "state": "market_wait"}]}
+            return None
+
+        with patch("tools.serve_monitor_dashboard.load_json", side_effect=fake_load_json):
+            with patch("tools.serve_monitor_dashboard.datetime") as fake_datetime:
+                fake_datetime.now.return_value.astimezone.return_value = __import__("datetime").datetime(2026, 7, 16, 9, 35, 0)
+                report = market_wait_refresh_status()
+
+        self.assertEqual(report["conclusion"], "refresh_due")
+        self.assertIn("--total-assets 25480.0", report["refresh_command"]["shell"])
 
 
 if __name__ == "__main__":

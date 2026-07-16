@@ -5,6 +5,7 @@ const state = {
   forecasts: new Map(),
   decisionCards: new Map(),
   decisionReport: null,
+  refreshCheck: null,
   events: [],
   filter: "all",
   search: "",
@@ -255,6 +256,29 @@ function renderSummary() {
       <div class="summary-value ${label === "浮动盈亏" ? tone(pnl) : ""}">${value}</div>
       <div class="summary-sub">${sub}</div>
     </div>`).join("");
+}
+
+function renderRefreshAlert() {
+  const alert = document.querySelector("#refreshAlert");
+  const check = state.refreshCheck;
+  if (!check || check.conclusion === "no_market_wait") {
+    alert.hidden = true;
+    alert.innerHTML = "";
+    return;
+  }
+  const command = check.refresh_command?.shell || "";
+  const actionClass = check.action_required ? "refresh-action" : "refresh-wait";
+  const commandHtml = command
+    ? `<div class="refresh-command"><code>${escapeHtml(command)}</code><button class="copy-refresh" type="button" data-command="${escapeHtml(command)}">复制</button></div>`
+    : "";
+  alert.hidden = false;
+  alert.className = `refresh-alert ${actionClass}`;
+  alert.innerHTML = `
+    <div>
+      <strong>${escapeHtml(check.message || "等待行情刷新。")}</strong>
+      <span>${escapeHtml(check.market_session?.label || "--")} · ${escapeHtml(check.market_wait_count ?? 0)} 只等待</span>
+    </div>
+    ${check.action_required ? commandHtml : ""}`;
 }
 
 function tableRow(item) {
@@ -566,12 +590,13 @@ function updateHeader(status) {
 
 async function loadData() {
   try {
-    const [snapshot, research, backtests, forecasts, decisionCards, status, events] = await Promise.all([
+    const [snapshot, research, backtests, forecasts, decisionCards, refreshCheck, status, events] = await Promise.all([
       fetch("/api/snapshot", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/research", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/reverse-t-backtest", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/reverse-t-forecast", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/decision-cards", { cache: "no-store" }).then(response => response.ok ? response.json() : { cards: [] }),
+      fetch("/api/market-wait-refresh", { cache: "no-store" }).then(response => response.ok ? response.json() : null),
       fetch("/api/status", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/events?limit=20", { cache: "no-store" }).then(response => response.json()),
     ]);
@@ -581,8 +606,10 @@ async function loadData() {
     state.forecasts = new Map((forecasts.items || []).map(item => [item.code, item]));
     state.decisionReport = decisionCards;
     state.decisionCards = new Map((decisionCards.cards || []).map(card => [card.code, card]));
+    state.refreshCheck = refreshCheck;
     state.events = events.events || [];
     updateHeader(status);
+    renderRefreshAlert();
     renderSummary();
     renderPositions();
     renderEvents();
@@ -612,6 +639,13 @@ document.querySelector("#searchInput").addEventListener("input", event => {
 });
 document.querySelector("#closeDetail").addEventListener("click", closeDetail);
 document.querySelector("#scrim").addEventListener("click", closeDetail);
+document.querySelector("#refreshAlert").addEventListener("click", event => {
+  const button = event.target.closest(".copy-refresh");
+  if (!button) return;
+  navigator.clipboard?.writeText(button.dataset.command || "");
+  button.textContent = "已复制";
+  setTimeout(() => { button.textContent = "复制"; }, 1200);
+});
 document.addEventListener("keydown", event => { if (event.key === "Escape") closeDetail(); });
 
 loadData();
