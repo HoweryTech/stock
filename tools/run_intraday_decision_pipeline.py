@@ -14,6 +14,7 @@ try:
     from tools.build_data_quality_snapshot import build_report as build_data_quality_report
     from tools.build_data_quality_snapshot import render_markdown as render_data_quality_markdown
     from tools.build_realtime_decision_cards import build_report as build_decision_cards_report
+    from tools.build_realtime_decision_cards import load_minute_bars
     from tools.build_realtime_decision_cards import render_markdown as render_decision_cards_markdown
     from tools.check_portfolio_positions import expand_position_paths, summarize_positions
     from tools.check_portfolio_t_opportunities import check_portfolio_t_opportunities
@@ -24,6 +25,7 @@ except ModuleNotFoundError:
     from build_data_quality_snapshot import build_report as build_data_quality_report
     from build_data_quality_snapshot import render_markdown as render_data_quality_markdown
     from build_realtime_decision_cards import build_report as build_decision_cards_report
+    from build_realtime_decision_cards import load_minute_bars
     from build_realtime_decision_cards import render_markdown as render_decision_cards_markdown
     from check_portfolio_positions import expand_position_paths, summarize_positions
     from check_portfolio_t_opportunities import check_portfolio_t_opportunities
@@ -147,6 +149,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         reverse_t_forecast,
         data_quality,
         technical_indicators,
+        load_minute_bars(Path(args.minute_cache_dir)),
     )
     write_json(Path(args.decision_cards_output), decision_cards)
     write_text(Path(args.decision_cards_markdown_output), render_decision_cards_markdown(decision_cards))
@@ -202,6 +205,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "reverse_t_backtest": args.reverse_t_backtest,
             "reverse_t_forecast": args.reverse_t_forecast,
             "technical_indicators": args.technical_indicators,
+            "minute_bars_for_positive_timing": args.minute_cache_dir,
         },
     }
     write_json(Path(args.metadata_output), metadata)

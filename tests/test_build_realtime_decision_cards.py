@@ -97,6 +97,24 @@ def bullish_technical_doc(code: str = "600000") -> dict:
     return {"items": [{"code": code, "periods": {"daily": strong_period, "weekly": strong_period, "monthly": strong_period}}]}
 
 
+def positive_minute_bars(code: str = "600000") -> dict[str, list[dict]]:
+    closes = [9.70, 9.74, 9.78, 9.82, 9.86, 9.90, 9.94, 9.98, 10.02, 10.06, 10.10, 10.08, 10.04, 10.02, 10.00, 9.98, 9.96, 9.98, 10.00, 10.00]
+    bars = []
+    for index, close in enumerate(closes):
+        bars.append(
+            {
+                "timestamp": f"2026-07-16 10:{index:02d}",
+                "code": code,
+                "open": close - 0.01,
+                "high": close + 0.02,
+                "low": close - 0.02,
+                "close": close,
+                "volume": 1000 + index * 20,
+            }
+        )
+    return {code: bars}
+
+
 class RealtimeDecisionCardsTest(unittest.TestCase):
     def test_hard_t_blocker_takes_exit_risk_priority(self) -> None:
         portfolio = portfolio_result()
@@ -140,6 +158,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
             {"items": [{"path": "positions/POS-600000.yaml", "stock": {"code": "600000"}, "weak_rule_count": 0}]},
             None,
             None,
+            None,
+            None,
+            positive_minute_bars(),
             generated_at=datetime(2026, 7, 16, 9, 31, 0),
         )
 
@@ -150,6 +171,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertFalse(card["decision"]["execution_allowed"])
         self.assertEqual(card["price_levels"]["near_stop_block_price"], 9.596)
         self.assertEqual(card["capital_plan"]["status"], "watch")
+        self.assertEqual(card["positive_timing"]["status"], "confirmed")
+        self.assertGreaterEqual(card["positive_timing"]["score"], 65.0)
         self.assertFalse(card["capital_plan"]["account_cash_required"])
         self.assertEqual(card["capital_plan"]["single_add_tier"], "base")
         self.assertEqual(card["capital_plan"]["effective_single_add_pct_total_assets"], 3.0)
@@ -172,6 +195,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
             None,
             None,
             bullish_technical_doc(),
+            positive_minute_bars(),
             generated_at=datetime(2026, 7, 16, 9, 35, 0),
         )
 
@@ -184,6 +208,31 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["capital_plan"]["max_additional_capital"], 2500.0)
         self.assertTrue(any("放宽到5%" in reason for reason in card["capital_plan"]["reasons"]))
         self.assertTrue(any("总资产 5.0%" in step for step in card["decision"]["action_steps"]))
+
+    def test_positive_t_candidate_without_intraday_confirmation_waits(self) -> None:
+        item = intraday_item()
+        item["position"]["shares"] = 100
+        item["position"]["market_value"] = 1000.0
+        item["position"]["live_position_pct"] = 2.0
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(conclusion="positive_t_candidate"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            {},
+            generated_at=datetime(2026, 7, 16, 9, 36, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "positive_t_watch")
+        self.assertEqual(card["positive_timing"]["status"], "insufficient")
+        self.assertEqual(card["capital_plan"]["status"], "waiting_intraday_confirmation")
+        self.assertIn("分时评分未确认", card["capital_plan"]["status_label"])
 
     def test_reverse_t_price_levels_prefer_indicator_forecast_zone(self) -> None:
         report = build_report(

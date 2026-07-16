@@ -477,6 +477,31 @@ function renderCapitalPlan(plan) {
   );
 }
 
+function renderPositiveTiming(timing) {
+  if (!timing || timing.status === "not_applicable") return "";
+  const buyZone = timing.buy_zone ? `${num(timing.buy_zone[0])}–${num(timing.buy_zone[1])}元` : "--";
+  const targetZone = timing.target_sell_zone ? `${num(timing.target_sell_zone[0])}–${num(timing.target_sell_zone[1])}元` : "--";
+  const metrics = [
+    ["状态", timing.status === "confirmed" ? "分时确认" : "继续等待"],
+    ["评分", timing.score == null ? "--" : `${Number(timing.score).toFixed(1)} / ${timing.threshold}`],
+    ["最新分钟", timing.latest_timestamp || "--"],
+    ["买入观察区", buyZone],
+    ["目标卖出区", targetZone],
+    ["5分钟MA5", money(timing.metrics?.ma5)],
+    ["5分钟MA20", money(timing.metrics?.ma20)],
+    ["回踩幅度", pct(timing.metrics?.pullback_pct)],
+    ["RSI14", timing.metrics?.rsi14 == null ? "--" : Number(timing.metrics.rsi14).toFixed(1)],
+    ["5分钟量比", timing.metrics?.volume_ratio == null ? "--" : Number(timing.metrics.volume_ratio).toFixed(2)],
+    ["主力净流入占比", pct(timing.metrics?.main_flow_ratio_pct)],
+  ];
+  const signals = timing.signals || [];
+  return detailSection(
+    "正T分时评分",
+    `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    ${signals.length ? `<h4>评分依据</h4><ul class="reason-list">${signals.map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}`
+  );
+}
+
 function estimateManualTradeFees(side, price, shares) {
   const amount = price * shares;
   const commission = Math.max(amount * 0.0003, 5);
@@ -640,6 +665,7 @@ function openDetail(code) {
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
     );
+    html += renderPositiveTiming(decisionCard.positive_timing);
     html += renderCapitalPlan(decisionCard.capital_plan);
     html += detailSection(
       "数据质量",

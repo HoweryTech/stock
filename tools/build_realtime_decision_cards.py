@@ -44,6 +44,7 @@ ACTION_LABELS = {
 HARD_T_BLOCKERS = {"stop_loss_triggered", "near_stop_loss", "limit_down", "stock_suspended"}
 DATA_BLOCKERS = {"insufficient_daily_bars", "missing_price_or_stop_loss"}
 QUALITY_BLOCKER_STATUSES = {"missing", "insufficient"}
+POSITIVE_T_SCORE_THRESHOLD = 65.0
 SUPPLEMENTAL_CAPITAL_POLICY = {
     "supplemental_capital_allowed": True,
     "account_cash_required": False,
@@ -66,6 +67,21 @@ def load_json_if_exists(path: Path | None) -> dict[str, Any] | None:
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def load_minute_bars(cache_dir: Path | None) -> dict[str, list[dict[str, Any]]]:
+    if cache_dir is None or not cache_dir.exists():
+        return {}
+    result: dict[str, list[dict[str, Any]]] = {}
+    for path in sorted(cache_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        bars = data.get("bars") if isinstance(data, dict) else data
+        if isinstance(bars, list):
+            result[path.stem] = sorted((bar for bar in bars if isinstance(bar, dict)), key=lambda item: str(item.get("timestamp") or ""))
+    return result
 
 
 def code_from_path(path: str | None) -> str | None:
@@ -292,6 +308,176 @@ def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> d
     }
 
 
+def average(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def ema_latest(values: list[float], period: int) -> float | None:
+    if len(values) < period:
+        return None
+    multiplier = 2 / (period + 1)
+    value = values[0]
+    for item in values[1:]:
+        value = item * multiplier + value * (1 - multiplier)
+    return value
+
+
+def simple_rsi(values: list[float], period: int = 14) -> float | None:
+    if len(values) <= period:
+        return None
+    changes = [values[index] - values[index - 1] for index in range(1, len(values))]
+    gains = [max(change, 0.0) for change in changes[-period:]]
+    losses = [max(-change, 0.0) for change in changes[-period:]]
+    avg_gain = average(gains)
+    avg_loss = average(losses)
+    if avg_gain is None or avg_loss is None:
+        return None
+    if avg_loss == 0:
+        return 100.0
+    relative_strength = avg_gain / avg_loss
+    return 100 - 100 / (1 + relative_strength)
+
+
+def latest_day_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not bars:
+        return []
+    latest_date = str(bars[-1].get("timestamp") or "")[:10]
+    return [bar for bar in bars if str(bar.get("timestamp") or "").startswith(latest_date)]
+
+
+def build_positive_timing(
+    intraday: dict[str, Any],
+    t_check: dict[str, Any] | None,
+    minute_bars: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    if not t_check or t_check.get("conclusion") != "positive_t_candidate":
+        return {"available": False, "status": "not_applicable", "score": None, "signals": [], "buy_zone": None, "target_sell_zone": None}
+    day_bars = latest_day_bars(minute_bars or [])
+    if len(day_bars) < 20:
+        return {
+            "available": False,
+            "status": "insufficient",
+            "score": None,
+            "signals": [f"最新交易日5分钟线数量 {len(day_bars)} 少于20，不能确认正T买点。"],
+            "buy_zone": None,
+            "target_sell_zone": None,
+        }
+    closes = [as_float(bar.get("close")) for bar in day_bars]
+    closes = [value for value in closes if value is not None]
+    highs = [as_float(bar.get("high")) for bar in day_bars[-20:]]
+    highs = [value for value in highs if value is not None]
+    lows = [as_float(bar.get("low")) for bar in day_bars[-20:]]
+    lows = [value for value in lows if value is not None]
+    volumes = [as_float(bar.get("volume")) for bar in day_bars]
+    volumes = [value for value in volumes if value is not None]
+    if len(closes) < 20:
+        return {"available": False, "status": "insufficient", "score": None, "signals": ["5分钟线价格字段不足，不能确认正T买点。"], "buy_zone": None, "target_sell_zone": None}
+    current = as_float(value_at(intraday, "quote.latest_price"), closes[-1]) or closes[-1]
+    ma5 = average(closes[-5:])
+    ma20 = average(closes[-20:])
+    recent_high = max(highs) if highs else None
+    recent_low = min(lows) if lows else None
+    pullback_pct = None if recent_high in (None, 0) else (current / recent_high - 1) * 100
+    rebound_pct = None if len(closes) < 2 or closes[-2] == 0 else (current / closes[-2] - 1) * 100
+    ema12 = ema_latest(closes, 12)
+    ema26 = ema_latest(closes, 26)
+    macd_hist = None if ema12 is None or ema26 is None else ema12 - ema26
+    rsi14 = simple_rsi(closes, 14)
+    avg_volume_20 = average(volumes[-20:]) if len(volumes) >= 20 else None
+    volume_ratio = None if avg_volume_20 in (None, 0) or not volumes else volumes[-1] / avg_volume_20
+    main_flow = as_float(value_at(intraday, "capital_flow.main_net_inflow_ratio_pct"))
+
+    score = 0.0
+    signals: list[str] = []
+    if ma20 is not None and current >= ma20:
+        score += 15
+        signals.append(f"现价仍在5分钟MA20上方，分时趋势未破。")
+    elif ma20 is not None:
+        score -= 15
+        signals.append("现价跌破5分钟MA20，正T买入腿暂缓。")
+    if ma5 is not None and ma20 is not None and ma5 >= ma20:
+        score += 10
+        signals.append("5分钟MA5不低于MA20，短线结构可观察。")
+    if pullback_pct is not None:
+        if -2.5 <= pullback_pct <= -0.3:
+            score += 20
+            signals.append(f"相对近20根5分钟高点回落 {pullback_pct:.2f}%，具备低吸观察空间。")
+        elif pullback_pct > -0.3:
+            score -= 8
+            signals.append("回踩幅度不足，当前不追价做正T。")
+        elif pullback_pct < -4.0:
+            score -= 12
+            signals.append("分时回落过深，可能不是正T低吸而是转弱。")
+    if rebound_pct is not None and rebound_pct > 0:
+        score += 10
+        signals.append(f"最新5分钟价格较上一根回升 {rebound_pct:.2f}%。")
+    if macd_hist is not None:
+        if macd_hist > 0:
+            score += 12
+            signals.append("5分钟MACD短长均线差为正，动能有修复。")
+        else:
+            score -= 8
+            signals.append("5分钟MACD仍偏弱，等待动能修复。")
+    if rsi14 is not None:
+        if 40 <= rsi14 <= 65:
+            score += 12
+            signals.append(f"5分钟RSI14为 {rsi14:.1f}，处于可观察区。")
+        elif rsi14 < 35:
+            score -= 10
+            signals.append(f"5分钟RSI14为 {rsi14:.1f}，短线过弱。")
+        elif rsi14 > 75:
+            score -= 8
+            signals.append(f"5分钟RSI14为 {rsi14:.1f}，不适合追买。")
+    if volume_ratio is not None:
+        if 0.9 <= volume_ratio <= 2.5:
+            score += 8
+            signals.append(f"5分钟量比 {volume_ratio:.2f}，成交确认适中。")
+        elif volume_ratio < 0.7:
+            score -= 5
+            signals.append(f"5分钟量比 {volume_ratio:.2f}，承接不足。")
+        elif volume_ratio > 3.0:
+            score -= 5
+            signals.append(f"5分钟量比 {volume_ratio:.2f}，波动过热，不追价。")
+    if main_flow is not None:
+        if main_flow > 0:
+            score += 8
+            signals.append(f"主力净流入占比 {main_flow:.2f}%，资金流未明显拖累。")
+        elif main_flow <= -3:
+            score -= 12
+            signals.append(f"主力净流入占比 {main_flow:.2f}%，资金流偏弱。")
+
+    score = max(0.0, min(100.0, score))
+    buy_high = min(value for value in [current, ma5] if value is not None) if ma5 is not None else current
+    buy_low_candidates = [buy_high * 0.988]
+    if ma20 is not None:
+        buy_low_candidates.append(ma20)
+    if recent_low is not None:
+        buy_low_candidates.append(recent_low)
+    buy_low = min(buy_high, max(buy_low_candidates))
+    target_low = max(current, buy_high * 1.012)
+    status = "confirmed" if score >= POSITIVE_T_SCORE_THRESHOLD else "watch"
+    return {
+        "available": True,
+        "status": status,
+        "score": rounded(score),
+        "threshold": POSITIVE_T_SCORE_THRESHOLD,
+        "latest_timestamp": day_bars[-1].get("timestamp"),
+        "buy_zone": [rounded(buy_low), rounded(buy_high)] if status == "confirmed" else None,
+        "target_sell_zone": [rounded(target_low), rounded(target_low + 0.02)] if status == "confirmed" else None,
+        "signals": signals[:8],
+        "metrics": {
+            "ma5": rounded(ma5),
+            "ma20": rounded(ma20),
+            "pullback_pct": rounded(pullback_pct),
+            "rebound_pct": rounded(rebound_pct),
+            "macd_hist": rounded(macd_hist),
+            "rsi14": rounded(rsi14),
+            "volume_ratio": rounded(volume_ratio),
+            "main_flow_ratio_pct": rounded(main_flow),
+        },
+    }
+
+
 def choose_state(
     intraday: dict[str, Any],
     portfolio: dict[str, Any] | None,
@@ -405,8 +591,15 @@ def build_evidence(
     reverse_forecast: dict[str, Any] | None,
     data_quality: dict[str, Any] | None,
     technical_assessment: dict[str, Any] | None = None,
+    positive_timing: dict[str, Any] | None = None,
 ) -> list[str]:
     evidence: list[str] = []
+    if positive_timing and positive_timing.get("available"):
+        evidence.append(
+            f"[正T分时评分] {positive_timing.get('status')} · score={positive_timing.get('score')} / {positive_timing.get('threshold')}"
+        )
+        for signal in positive_timing.get("signals", [])[:3]:
+            evidence.append(f"[正T分时] {signal}")
     if technical_assessment and technical_assessment.get("available"):
         evidence.append(
             f"[技术指标] {technical_assessment.get('label')} · score={technical_assessment.get('score')}"
@@ -545,6 +738,7 @@ def build_capital_plan(
     *,
     total_assets: float | None = None,
     technical_assessment: dict[str, Any] | None = None,
+    positive_timing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     policy = dict(SUPPLEMENTAL_CAPITAL_POLICY)
     technical_label = str((technical_assessment or {}).get("label") or "")
@@ -585,6 +779,15 @@ def build_capital_plan(
     }
     if state != "positive_t_watch":
         return plan
+    if positive_timing and positive_timing.get("status") != "confirmed":
+        plan.update(
+            {
+                "status": "waiting_intraday_confirmation",
+                "status_label": "日线正T候选已出现，但分时评分未确认买点",
+                "reasons": positive_timing.get("signals", [])[:4] or ["等待5分钟线、量能和资金流进一步确认。"],
+            }
+        )
+        return plan
     if total_assets in (None, 0) or current in (None, 0):
         plan.update(
             {
@@ -601,12 +804,17 @@ def build_capital_plan(
     max_cash = max(0.0, min(max_single_cash, position_capacity_cash))
     buy_zone_high = min(value for value in [current, ma5] if value is not None) if ma5 is not None else current
     stop_buffer_price = stop_loss * (1 + policy["min_stop_buffer_pct"] / 100) if stop_loss is not None else None
+    timing_buy_zone = positive_timing.get("buy_zone") if isinstance(positive_timing, dict) else None
+    timing_target_zone = positive_timing.get("target_sell_zone") if isinstance(positive_timing, dict) else None
     buy_zone_low = buy_zone_high * (1 - policy["min_target_gap_pct"] / 100)
     if recent_low is not None:
         buy_zone_low = max(buy_zone_low, recent_low)
     if stop_buffer_price is not None:
         buy_zone_low = max(buy_zone_low, stop_buffer_price)
     buy_zone_low = min(buy_zone_low, buy_zone_high)
+    if isinstance(timing_buy_zone, list) and len(timing_buy_zone) == 2:
+        buy_zone_low = as_float(timing_buy_zone[0], buy_zone_low) or buy_zone_low
+        buy_zone_high = as_float(timing_buy_zone[1], buy_zone_high) or buy_zone_high
     suggested_shares = floor_lot_from_cash(max_cash, buy_zone_high)
     estimated_buy_amount = suggested_shares * buy_zone_high if suggested_shares else None
     added_risk = None
@@ -624,6 +832,9 @@ def build_capital_plan(
     post_add_pct = current_position_pct + ((estimated_buy_amount or 0.0) / float(total_assets) * 100)
     target_low = max(current, buy_zone_high * (1 + policy["min_target_gap_pct"] / 100))
     target_high = target_low + 0.02
+    if isinstance(timing_target_zone, list) and len(timing_target_zone) == 2:
+        target_low = as_float(timing_target_zone[0], target_low) or target_low
+        target_high = as_float(timing_target_zone[1], target_high) or target_high
     plan.update(
         {
             "max_additional_capital": rounded(max_cash),
@@ -801,8 +1012,10 @@ def build_card(
     data_quality: dict[str, Any] | None,
     technical_indicators: dict[str, Any] | None = None,
     total_assets: float | None = None,
+    minute_bars: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     technical_assessment = build_technical_assessment(technical_indicators)
+    positive_timing = build_positive_timing(intraday, t_check, minute_bars)
     state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment)
     evidence = build_evidence(
         intraday,
@@ -813,6 +1026,7 @@ def build_card(
         reverse_forecast,
         data_quality,
         technical_assessment,
+        positive_timing,
     )
     blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment)
     levels = price_levels(portfolio, t_check, intraday, reverse_forecast)
@@ -822,6 +1036,7 @@ def build_card(
         intraday.get("position", {}),
         total_assets=total_assets,
         technical_assessment=technical_assessment,
+        positive_timing=positive_timing,
     )
     action_code = {
         "market_wait": "wait_for_market_session",
@@ -862,6 +1077,7 @@ def build_card(
         },
         "price_levels": levels,
         "capital_plan": capital_plan,
+        "positive_timing": positive_timing,
         "position": intraday.get("position", {}),
         "market_context": {
             "quote_lag_seconds": value_at(intraday, "quote.quote_lag_seconds"),
@@ -881,6 +1097,8 @@ def build_card(
             "live_quote_required": market_session(data_quality).get("live_quote_required"),
             "technical_score": technical_assessment.get("score"),
             "technical_label": technical_assessment.get("label"),
+            "positive_timing_score": positive_timing.get("score"),
+            "positive_timing_status": positive_timing.get("status"),
         },
         "technical_assessment": technical_assessment,
         "data_quality": data_quality or {},
@@ -903,6 +1121,7 @@ def build_report(
     reverse_t_forecast: dict[str, Any] | None,
     data_quality: dict[str, Any] | None = None,
     technical_indicators: dict[str, Any] | None = None,
+    minute_bars: dict[str, list[dict[str, Any]]] | None = None,
     *,
     generated_at: datetime | None = None,
 ) -> dict[str, Any]:
@@ -913,6 +1132,7 @@ def build_report(
     reverse_forecast_by_code = index_simple_items(reverse_t_forecast)
     data_quality_by_code = index_simple_items(data_quality)
     technical_by_code = index_technical_indicators(technical_indicators)
+    minute_by_code = minute_bars or {}
     total_assets = as_float(intraday_snapshot.get("total_assets"))
     cards = [
         build_card(
@@ -925,6 +1145,7 @@ def build_report(
             data_quality_by_code.get(str(item.get("code"))),
             technical_by_code.get(str(item.get("code"))),
             total_assets,
+            minute_by_code.get(str(item.get("code"))),
         )
         for item in intraday_snapshot.get("items", [])
     ]
@@ -942,6 +1163,7 @@ def build_report(
             "reverse_t_forecast_available": reverse_t_forecast is not None,
             "data_quality_available": data_quality is not None,
             "technical_indicators_available": technical_indicators is not None,
+            "minute_bars_available": bool(minute_by_code),
         },
         "card_count": len(cards),
         "state_counts": dict(sorted(state_counts.items())),
@@ -1001,6 +1223,11 @@ def render_markdown(report: dict[str, Any]) -> str:
         if decision.get("action_steps"):
             lines.append("- 操作步骤：")
             lines.extend(f"  - {item}" for item in decision["action_steps"][:6])
+        positive_timing = card.get("positive_timing") or {}
+        if positive_timing.get("available"):
+            lines.append(
+                f"- 正T分时评分：{positive_timing.get('score')} / {positive_timing.get('threshold')}，状态 {positive_timing.get('status')}"
+            )
         note = technical_decision_note(card.get("technical_assessment") or {})
         if note:
             lines.append(f"- 技术判断：{note}")
@@ -1023,6 +1250,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reverse-t-forecast", default="data/metadata/reverse-t-forecast.json")
     parser.add_argument("--data-quality", default="data/metadata/data-quality-snapshot.json")
     parser.add_argument("--technical-indicators", default="data/metadata/technical-indicators.json")
+    parser.add_argument("--minute-cache-dir", default="data/processed/minute-bars")
     parser.add_argument("--output", default="data/metadata/realtime-decision-cards.json")
     parser.add_argument("--markdown-output", default="reports/realtime-decision-cards.md")
     parser.add_argument("--json", action="store_true")
@@ -1044,6 +1272,7 @@ def main() -> int:
             load_json_if_exists(Path(args.reverse_t_forecast)),
             load_json_if_exists(Path(args.data_quality)),
             load_json_if_exists(Path(args.technical_indicators)),
+            load_minute_bars(Path(args.minute_cache_dir)),
         )
         write_json(Path(args.output), report)
         Path(args.markdown_output).parent.mkdir(parents=True, exist_ok=True)
