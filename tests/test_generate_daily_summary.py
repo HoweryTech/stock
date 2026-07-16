@@ -20,6 +20,7 @@ def args(tmp_dir: str) -> Namespace:
         portfolio_check=str(base / "portfolio.json"),
         holding_action_draft=str(base / "holding-action-draft.json"),
         portfolio_action_backtests=str(base / "portfolio-action-backtests.json"),
+        realtime_decision_cards=str(base / "realtime-decision-cards.json"),
         exit_plans=[str(base / "exit-plans/*.yaml")],
         trade_executions=[str(base / "executions/*.yaml")],
         exit_executions=[str(base / "exit-executions/*.yaml")],
@@ -259,6 +260,81 @@ class GenerateDailySummaryTest(unittest.TestCase):
         self.assertIn("## 动作矩阵回测", content)
         self.assertIn("000723 美锦能源 weak_rules=9", content)
         self.assertIn("not enough bars for 001248", content)
+
+    def test_daily_summary_shows_realtime_decision_cards(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            write_json(
+                base / "portfolio.json",
+                {
+                    "conclusion": "warning",
+                    "position_count": 2,
+                    "total_position_pct": 20.0,
+                    "needs_action_count": 0,
+                    "warning_count": 2,
+                    "positions": [],
+                },
+            )
+            write_json(
+                base / "realtime-decision-cards.json",
+                {
+                    "card_count": 3,
+                    "state_counts": {"exit_risk_review": 1, "data_insufficient": 1, "positive_t_watch": 1},
+                    "cards": [
+                        {
+                            "code": "000932",
+                            "name": "华菱钢铁",
+                            "state": "exit_risk_review",
+                            "state_label": "退出风险优先",
+                            "reason": "触发或逼近硬风控。",
+                            "decision": {
+                                "action_label": "生成退出或风险复核计划",
+                                "confidence": "high",
+                                "next_step": "优先生成退出或风险复核计划。",
+                            },
+                            "price_levels": {"current_price": 3.57, "stop_loss_price": 3.51},
+                        },
+                        {
+                            "code": "001248",
+                            "name": "华润新能",
+                            "state": "data_insufficient",
+                            "state_label": "数据不足，暂不决策",
+                            "decision": {
+                                "action_label": "补齐行情、止损和样本数据",
+                                "confidence": "high",
+                                "next_step": "补齐日线后重新生成决策卡。",
+                            },
+                            "price_levels": {"current_price": 13.38, "stop_loss_price": 12.41},
+                        },
+                        {
+                            "code": "002321",
+                            "name": "华英农业",
+                            "state": "positive_t_watch",
+                            "state_label": "正T观察候选",
+                            "decision": {
+                                "action_label": "只进入正T人工观察",
+                                "confidence": "medium",
+                                "next_step": "先定义买入价、卖出价和失败处理。",
+                            },
+                            "price_levels": {"current_price": 1.89, "stop_loss_price": 1.78},
+                        },
+                    ],
+                },
+            )
+
+            summary = build_summary(args(tmp_dir), generated_at=datetime(2026, 7, 8, 9, 7, 0))
+            content = render_summary(summary)
+
+        self.assertTrue(summary["realtime_decision_cards"]["available"])
+        self.assertEqual(summary["realtime_decision_cards"]["exit_risk_count"], 1)
+        self.assertIn("优先处理 1 只实时退出风险持仓。", summary["operating_actions"])
+        self.assertIn("补齐 1 只实时决策数据不足的持仓。", summary["operating_actions"])
+        self.assertIn("复核 1 只实时T观察候选，未生成计划前不执行。", summary["operating_actions"])
+        self.assertIn("## 实时决策卡", content)
+        self.assertIn("实时优先处理持仓", content)
+        self.assertIn("000932 华菱钢铁 state=退出风险优先", content)
+        self.assertIn("实时T观察候选", content)
+        self.assertIn("002321 华英农业 state=正T观察候选", content)
 
     def test_daily_summary_shows_trade_execution_missing_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

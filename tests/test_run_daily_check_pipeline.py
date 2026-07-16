@@ -14,6 +14,7 @@ def args(base: Path) -> Namespace:
         portfolio_check=str(base / "portfolio.json"),
         holding_action_draft=str(base / "holding-action-draft.json"),
         portfolio_action_backtests=str(base / "portfolio-action-backtests.json"),
+        realtime_decision_cards=str(base / "realtime-decision-cards.json"),
         exit_plans=[str(base / "exit-plans/*.yaml")],
         trade_executions=[str(base / "executions/*.yaml")],
         exit_executions=[str(base / "exit-executions/*.yaml")],

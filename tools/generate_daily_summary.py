@@ -619,12 +619,82 @@ def summarize_portfolio_action_backtests(backtest_doc: dict[str, Any] | None) ->
     }
 
 
+def summarize_realtime_decision_cards(cards_doc: dict[str, Any] | None) -> dict[str, Any]:
+    if not cards_doc:
+        return {
+            "available": False,
+            "card_count": 0,
+            "state_counts": {},
+            "exit_risk_count": 0,
+            "data_insufficient_count": 0,
+            "data_stale_count": 0,
+            "positive_t_watch_count": 0,
+            "reverse_t_watch_count": 0,
+            "priority_items": [],
+            "t_watch_items": [],
+        }
+    cards = cards_doc.get("cards", []) or []
+    state_counts = dict(cards_doc.get("state_counts") or {})
+    state_priority = {
+        "exit_risk_review": 1,
+        "data_insufficient": 2,
+        "risk_reduction_review": 3,
+        "positive_t_watch": 4,
+        "reverse_t_watch": 5,
+        "hold_no_add": 6,
+        "data_stale": 7,
+        "observe": 8,
+    }
+
+    def compact(card: dict[str, Any]) -> dict[str, Any]:
+        decision = card.get("decision") or {}
+        levels = card.get("price_levels") or {}
+        return {
+            "code": card.get("code"),
+            "name": card.get("name"),
+            "state": card.get("state"),
+            "state_label": card.get("state_label") or card.get("state"),
+            "action_label": decision.get("action_label"),
+            "confidence": decision.get("confidence"),
+            "next_step": decision.get("next_step"),
+            "current_price": levels.get("current_price"),
+            "stop_loss_price": levels.get("stop_loss_price"),
+            "near_stop_block_price": levels.get("near_stop_block_price"),
+            "reason": card.get("reason"),
+        }
+
+    actionable_states = {"exit_risk_review", "data_insufficient", "risk_reduction_review"}
+    priority_items = [
+        compact(card)
+        for card in sorted(cards, key=lambda item: (state_priority.get(item.get("state"), 99), item.get("code") or ""))
+        if card.get("state") in actionable_states
+    ][:5]
+    t_watch_items = [
+        compact(card)
+        for card in sorted(cards, key=lambda item: (state_priority.get(item.get("state"), 99), item.get("code") or ""))
+        if card.get("state") in {"positive_t_watch", "reverse_t_watch"}
+    ][:5]
+    return {
+        "available": True,
+        "card_count": cards_doc.get("card_count", len(cards)),
+        "state_counts": state_counts,
+        "exit_risk_count": state_counts.get("exit_risk_review", 0),
+        "data_insufficient_count": state_counts.get("data_insufficient", 0),
+        "data_stale_count": state_counts.get("data_stale", 0),
+        "positive_t_watch_count": state_counts.get("positive_t_watch", 0),
+        "reverse_t_watch_count": state_counts.get("reverse_t_watch", 0),
+        "priority_items": priority_items,
+        "t_watch_items": t_watch_items,
+    }
+
+
 def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
     actions: list[str] = []
     watchlist = summary["watchlist"]
     portfolio = summary["portfolio"]
     holding_action_draft = summary["holding_action_draft"]
     portfolio_action_backtests = summary["portfolio_action_backtests"]
+    realtime_decision_cards = summary["realtime_decision_cards"]
     exits = summary["exit_plans"]
     trade_executions = summary["trade_executions"]
     exit_executions = summary["exit_executions"]
@@ -663,6 +733,15 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
     weak_items = [item for item in portfolio_action_backtests["top_weak_items"] if (item.get("weak_rule_count") or 0) > 0]
     if weak_items:
         actions.append(f"复核 {len(weak_items)} 只弱规则较多的持仓。")
+    if portfolio["available"] and not realtime_decision_cards["available"]:
+        actions.append("生成或刷新实时持仓决策卡。")
+    elif realtime_decision_cards["exit_risk_count"]:
+        actions.append(f"优先处理 {realtime_decision_cards['exit_risk_count']} 只实时退出风险持仓。")
+    if realtime_decision_cards["data_insufficient_count"]:
+        actions.append(f"补齐 {realtime_decision_cards['data_insufficient_count']} 只实时决策数据不足的持仓。")
+    t_watch_count = realtime_decision_cards["positive_t_watch_count"] + realtime_decision_cards["reverse_t_watch_count"]
+    if t_watch_count:
+        actions.append(f"复核 {t_watch_count} 只实时T观察候选，未生成计划前不执行。")
 
     urgent_exits = [row for row in exits["rows"] if row["must_exit"] or row["urgency"] == "immediate"]
     if urgent_exits:
@@ -898,6 +977,7 @@ def build_summary(args: argparse.Namespace, generated_at: datetime | None = None
         "portfolio": summarize_portfolio(load_json_if_exists(Path(args.portfolio_check))),
         "holding_action_draft": summarize_holding_action_draft(load_json_if_exists(Path(args.holding_action_draft))),
         "portfolio_action_backtests": summarize_portfolio_action_backtests(load_json_if_exists(Path(args.portfolio_action_backtests))),
+        "realtime_decision_cards": summarize_realtime_decision_cards(load_json_if_exists(Path(args.realtime_decision_cards))),
         "exit_plans": summarize_exit_plans(load_yaml_files(args.exit_plans)),
         "trade_executions": summarize_trade_executions(load_yaml_files(args.trade_executions)),
         "exit_executions": summarize_exit_executions(load_yaml_files(args.exit_executions)),
@@ -932,6 +1012,7 @@ def render_summary(summary: dict[str, Any]) -> str:
     portfolio = summary["portfolio"]
     holding_action_draft = summary["holding_action_draft"]
     portfolio_action_backtests = summary["portfolio_action_backtests"]
+    realtime_decision_cards = summary["realtime_decision_cards"]
     exits = summary["exit_plans"]
     trade_executions = summary["trade_executions"]
     executions = summary["exit_executions"]
@@ -998,6 +1079,17 @@ def render_summary(summary: dict[str, Any]) -> str:
         f"- 主观察窗口：{portfolio_action_backtests['primary_horizon'] if portfolio_action_backtests['primary_horizon'] is not None else '-'}",
         f"- 假设止损：{portfolio_action_backtests['stop_loss_pct_from_entry'] if portfolio_action_backtests['stop_loss_pct_from_entry'] is not None else '持仓文件现有止损价'}",
         "",
+        "## 实时决策卡",
+        "",
+        f"- 卡片状态：{'已读取' if realtime_decision_cards['available'] else '缺失'}",
+        f"- 卡片数：{realtime_decision_cards['card_count']}",
+        f"- 状态分布：{realtime_decision_cards['state_counts'] if realtime_decision_cards['state_counts'] else '-'}",
+        f"- 退出风险：{realtime_decision_cards['exit_risk_count']}",
+        f"- 数据不足：{realtime_decision_cards['data_insufficient_count']}",
+        f"- 行情过期：{realtime_decision_cards['data_stale_count']}",
+        f"- 正T观察：{realtime_decision_cards['positive_t_watch_count']}",
+        f"- 反T观察：{realtime_decision_cards['reverse_t_watch_count']}",
+        "",
         "## 退出与卖出",
         "",
         f"- 退出计划数量：{exits['count']}",
@@ -1042,6 +1134,22 @@ def render_summary(summary: dict[str, Any]) -> str:
         lines.append("动作矩阵回测错误：")
         for item in portfolio_action_backtests["errors"]:
             lines.append(f"- {item.get('path')}: {item.get('message')}")
+        lines.append("")
+
+    if realtime_decision_cards["priority_items"]:
+        lines.append("实时优先处理持仓：")
+        for item in realtime_decision_cards["priority_items"]:
+            lines.append(
+                f"- {item['code']} {item['name']} state={item['state_label']} action={item['action_label']} "
+                f"price={item['current_price'] if item['current_price'] is not None else '-'} stop={item['stop_loss_price'] if item['stop_loss_price'] is not None else '-'} next={item['next_step']}"
+            )
+        lines.append("")
+    if realtime_decision_cards["t_watch_items"]:
+        lines.append("实时T观察候选：")
+        for item in realtime_decision_cards["t_watch_items"]:
+            lines.append(
+                f"- {item['code']} {item['name']} state={item['state_label']} action={item['action_label']} confidence={item['confidence']} next={item['next_step']}"
+            )
         lines.append("")
 
     if exits["rows"]:
@@ -1206,6 +1314,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--portfolio-check", default="data/metadata/portfolio_positions.check.json", help="Portfolio position check JSON.")
     parser.add_argument("--holding-action-draft", default="data/metadata/holding-action-draft.json", help="Holding action draft JSON generated by build_holding_action_draft.py.")
     parser.add_argument("--portfolio-action-backtests", default="data/metadata/portfolio-action-matrix-backtests.json", help="Portfolio action matrix backtest JSON generated by run_portfolio_action_matrix_backtests.py.")
+    parser.add_argument("--realtime-decision-cards", default="data/metadata/realtime-decision-cards.json", help="Realtime decision cards JSON generated by build_realtime_decision_cards.py or run_intraday_decision_pipeline.py.")
     parser.add_argument("--exit-plans", nargs="+", default=["exit-plans/*.yaml"], help="Exit plan YAML paths or glob patterns.")
     parser.add_argument("--trade-executions", nargs="+", default=["executions/*.yaml"], help="Trade execution YAML paths or glob patterns.")
     parser.add_argument("--exit-executions", nargs="+", default=["exit-executions/*.yaml"], help="Sell execution YAML paths or glob patterns.")

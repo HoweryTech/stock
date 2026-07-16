@@ -238,7 +238,7 @@ python3 tools/run_watchlist_pipeline.py \
 python3 tools/run_daily_check_pipeline.py
 ```
 
-该命令会先刷新执行闭环总检查，再生成每日操作摘要，避免日报读取旧的闭环元数据。如果当天已经生成 `data/metadata/holding-action-draft.json`，日报会同时汇总持仓趋势状态和价格动作矩阵；该流水线不自动生成处置草案。
+该命令会先刷新执行闭环总检查，再生成每日操作摘要，避免日报读取旧的闭环元数据。如果当天已经生成 `data/metadata/holding-action-draft.json`、`data/metadata/portfolio-action-matrix-backtests.json` 或 `data/metadata/realtime-decision-cards.json`，日报会同时汇总持仓趋势状态、价格动作矩阵、规则回测和实时决策卡；该流水线不自动生成这些处置草案或日内产物。
 
 ### 生成每日操作摘要（单独补跑）
 
