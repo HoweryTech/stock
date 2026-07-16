@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from tools.serve_monitor_dashboard import monitor_status, recent_events
+from tools.serve_monitor_dashboard import API_FILES, monitor_status, recent_events
 
 
 class ServeMonitorDashboardTest(unittest.TestCase):
@@ -24,6 +24,10 @@ class ServeMonitorDashboardTest(unittest.TestCase):
 
         with patch("tools.serve_monitor_dashboard.PID_FILE", MissingPath()):
             self.assertEqual(monitor_status(), {"running": False, "pid": None})
+
+    def test_exposes_decision_cards_api(self) -> None:
+        self.assertIn("/api/decision-cards", API_FILES)
+        self.assertEqual(API_FILES["/api/decision-cards"].name, "realtime-decision-cards.json")
 
 
 if __name__ == "__main__":

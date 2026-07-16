@@ -20,6 +20,7 @@ API_FILES = {
     "/api/action-draft": ROOT / "data" / "metadata" / "eastmoney-holding-action-draft.json",
     "/api/reverse-t-backtest": ROOT / "data" / "metadata" / "reverse-t-backtest.json",
     "/api/reverse-t-forecast": ROOT / "data" / "metadata" / "reverse-t-forecast.json",
+    "/api/decision-cards": ROOT / "data" / "metadata" / "realtime-decision-cards.json",
 }
 PID_FILE = ROOT / "data" / "metadata" / "intraday-monitor.pid"
 EVENT_FILE = ROOT / "data" / "metadata" / "intraday-monitor.events.jsonl"

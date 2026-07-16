@@ -3,6 +3,8 @@ const state = {
   research: new Map(),
   backtests: new Map(),
   forecasts: new Map(),
+  decisionCards: new Map(),
+  decisionReport: null,
   events: [],
   filter: "all",
   search: "",
@@ -11,6 +13,12 @@ const state = {
 
 const labels = {
   risk_review: "风险处置",
+  exit_risk_review: "退出风险",
+  risk_reduction_review: "仓位复核",
+  data_insufficient: "数据不足",
+  positive_t_watch: "正T观察",
+  reverse_t_watch: "反T观察",
+  hold_no_add: "持有不补仓",
   no_add_watch: "禁止补仓",
   observe: "观察",
   data_stale: "数据失效",
@@ -30,7 +38,21 @@ const tone = value => Number(value) > 0 ? "positive" : Number(value) < 0 ? "nega
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 
 function adviceFor(item) {
-  return automaticDecisionFor(item).headline;
+  const card = state.decisionCards.get(item.code);
+  return card?.decision?.action_label || automaticDecisionFor(item).headline;
+}
+
+function decisionCardFor(item) {
+  return state.decisionCards.get(item.code);
+}
+
+function displayStateFor(item) {
+  return decisionCardFor(item)?.state || item.state;
+}
+
+function displayStateLabelFor(item) {
+  const card = decisionCardFor(item);
+  return card?.state_label || labels[item.state] || item.state;
 }
 
 function automaticDecisionFor(item) {
@@ -127,7 +149,10 @@ function isReverseTPriceAlert(item) {
 function filteredItems() {
   const items = state.snapshot?.items || [];
   return items.filter(item => {
-    const matchesFilter = state.filter === "all" || (state.filter === "reverse_t" ? isReverseTWatch(item) : item.state === state.filter);
+    const card = decisionCardFor(item);
+    const decisionState = card?.state;
+    const matchesFilter = state.filter === "all"
+      || (state.filter === "reverse_t" ? (decisionState === "reverse_t_watch" || isReverseTWatch(item)) : decisionState === state.filter || item.state === state.filter);
     const query = state.search.trim().toLowerCase();
     const matchesSearch = !query || item.code.includes(query) || String(item.name).toLowerCase().includes(query);
     return matchesFilter && matchesSearch;
@@ -140,6 +165,11 @@ function renderSummary() {
   const pnl = items.reduce((sum, item) => sum + Number(item.position.unrealized_pnl || 0), 0);
   const risk = items.filter(item => item.state === "risk_review").length;
   const noAdd = items.filter(item => item.state === "no_add_watch").length;
+  const decisionCards = [...state.decisionCards.values()];
+  const exitRisk = decisionCards.filter(card => card.state === "exit_risk_review").length;
+  const dataPaused = decisionCards.filter(card => ["data_stale", "data_insufficient"].includes(card.state)).length;
+  const positiveT = decisionCards.filter(card => card.state === "positive_t_watch").length;
+  const reverseTByCard = decisionCards.filter(card => card.state === "reverse_t_watch").length;
   const maxLag = Math.max(0, ...items.map(item => Number(item.quote.quote_lag_seconds || 0)));
   const reverseT = items.filter(isReverseTWatch).length;
   const forecastAlerts = items.filter(item => state.forecasts.get(item.code)?.status === "early_warning").length;
@@ -148,8 +178,8 @@ function renderSummary() {
     ["账户总资产", money(state.snapshot?.total_assets), "持仓基准"],
     ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
     ["浮动盈亏", money(pnl), "按最新快照估算"],
-    ["风险处置", `${risk} 只`, `${noAdd} 只禁止补仓`],
-    ["反T价格提醒", `${priceAlerts} 只`, `${forecastAlerts} 只概率预警 · ${reverseT} 只通过回测门禁`],
+    ["退出风险", `${exitRisk || risk} 只`, `${dataPaused} 只暂停决策`],
+    ["T观察", `${positiveT} 正T / ${reverseTByCard || reverseT} 反T`, `${priceAlerts} 只价格提醒 · ${forecastAlerts} 只概率预警`],
     ["最大行情延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
   ];
   document.querySelector("#summaryBand").innerHTML = blocks.map(([label, value, sub]) => `
@@ -162,34 +192,40 @@ function renderSummary() {
 
 function tableRow(item) {
   const lag = item.quote.quote_lag_seconds;
+  const card = decisionCardFor(item);
+  const displayState = displayStateFor(item);
   const reverseTag = isReverseTPriceAlert(item)
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
+  const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
   return `<tr data-code="${item.code}" tabindex="0">
     <td><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></td>
     <td class="number"><div>${num(item.quote.latest_price)}</div><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></td>
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
-    <td><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></td>
-    <td class="advice">${escapeHtml(adviceFor(item))}${reverseTag}</td>
+    <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span></td>
+    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${reverseTag}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
 }
 
 function mobileCard(item) {
+  const card = decisionCardFor(item);
+  const displayState = displayStateFor(item);
   const reverseTag = isReverseTPriceAlert(item)
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
+  const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
     <div class="card-top">
       <div><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></div>
       <div class="number"><strong>${num(item.quote.latest_price)}</strong><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></div>
     </div>
     <div class="card-row"><span>持仓盈亏</span><span class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)} · ${pct(item.position.return_pct)}</span></div>
-    <div class="card-row"><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
+    <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
-    <div class="card-advice">${escapeHtml(adviceFor(item))}${reverseTag}</div>
+    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${reverseTag}</div>
   </article>`;
 }
 
@@ -221,6 +257,7 @@ function openDetail(code) {
   const research = state.research.get(code);
   const backtest = state.backtests.get(code);
   const forecast = state.forecasts.get(code);
+  const decisionCard = state.decisionCards.get(code);
   const automaticDecision = automaticDecisionFor(item);
   document.querySelector("#detailCode").textContent = code;
   document.querySelector("#detailName").textContent = item.name;
@@ -231,6 +268,29 @@ function openDetail(code) {
     ["5日均线", money(item.technicals.ma5)], ["20日均线", money(item.technicals.ma20)],
   ];
   let html = detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
+  if (decisionCard) {
+    const levels = decisionCard.price_levels || {};
+    const decision = decisionCard.decision || {};
+    const cardMetrics = [
+      ["状态", decisionCard.state_label],
+      ["建议动作", decision.action_label],
+      ["置信度", decision.confidence],
+      ["执行许可", decision.execution_allowed ? "允许进入人工确认" : "禁止直接执行"],
+      ["当前价", money(levels.current_price)],
+      ["止损价", money(levels.stop_loss_price)],
+      ["做T阻断价", money(levels.near_stop_block_price)],
+      ["20日均线", money(levels.ma20)],
+    ];
+    const blockers = decisionCard.blockers || [];
+    const evidence = decisionCard.evidence || [];
+    html += detailSection(
+      "实时决策卡",
+      `<div class="metric-grid">${cardMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+      <p><strong>${escapeHtml(decision.next_step || "")}</strong></p>
+      ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
+      <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
+    );
+  }
   const decision = item.action_decision;
   const decisionDetails = item.reduction_plan?.status === "actionable" ? "" : backtest?.verdict === "rule_observation_only" && decision
     ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`
@@ -274,7 +334,7 @@ function openDetail(code) {
     ["6月均价", money(multi.monthly_ma6)], ["3月收益", pct(multi.monthly_return_3_pct)],
   ];
   html += detailSection("日线 / 周线 / 月线", `<div class="metric-grid">${multiMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
-  html += detailSection("当前状态", `<p><span class="state-badge state-${item.state}">${labels[item.state] || item.state}</span></p>`);
+  html += detailSection("当前状态", `<p><span class="state-badge state-${displayStateFor(item)}">${escapeHtml(displayStateLabelFor(item))}</span></p>`);
   if (backtest) {
     const backtestMetrics = [
       ["回测交易日", `${backtest.trading_days}日`], ["触发次数", backtest.triggered_count],
@@ -385,11 +445,12 @@ function updateHeader(status) {
 
 async function loadData() {
   try {
-    const [snapshot, research, backtests, forecasts, status, events] = await Promise.all([
+    const [snapshot, research, backtests, forecasts, decisionCards, status, events] = await Promise.all([
       fetch("/api/snapshot", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/research", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/reverse-t-backtest", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/reverse-t-forecast", { cache: "no-store" }).then(response => response.json()),
+      fetch("/api/decision-cards", { cache: "no-store" }).then(response => response.ok ? response.json() : { cards: [] }),
       fetch("/api/status", { cache: "no-store" }).then(response => response.json()),
       fetch("/api/events?limit=20", { cache: "no-store" }).then(response => response.json()),
     ]);
@@ -397,6 +458,8 @@ async function loadData() {
     state.research = new Map((research.items || []).map(item => [item.code, item]));
     state.backtests = new Map((backtests.items || []).map(item => [item.code, item]));
     state.forecasts = new Map((forecasts.items || []).map(item => [item.code, item]));
+    state.decisionReport = decisionCards;
+    state.decisionCards = new Map((decisionCards.cards || []).map(card => [card.code, card]));
     state.events = events.events || [];
     updateHeader(status);
     renderSummary();
