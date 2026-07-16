@@ -339,6 +339,7 @@ def price_levels(
     portfolio: dict[str, Any] | None,
     t_check: dict[str, Any] | None,
     intraday: dict[str, Any],
+    reverse_forecast: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     calculations = (portfolio or {}).get("calculations", {})
     t_calculations = (t_check or {}).get("calculations", {})
@@ -350,6 +351,21 @@ def price_levels(
     if stop_loss is not None:
         near_warning_price = stop_loss / (1 - warning_pct / 100)
         near_block_price = stop_loss / (1 - block_pct / 100)
+    forecast_sell_zone = value_at(reverse_forecast or {}, "predicted_sell_zone")
+    forecast_buyback = as_float(value_at(reverse_forecast or {}, "predicted_buyback_max_price"))
+    intraday_sell_zone = value_at(intraday, "reverse_t_plan.sell_zone")
+    intraday_buyback = as_float(value_at(intraday, "reverse_t_plan.buyback_max_price"))
+    has_forecast = reverse_forecast is not None
+    sell_zone = forecast_sell_zone if has_forecast else intraday_sell_zone
+    buyback = forecast_buyback if has_forecast else intraday_buyback
+    if forecast_sell_zone:
+        zone_source = "forecast"
+    elif has_forecast:
+        zone_source = "forecast_unavailable"
+    elif intraday_sell_zone:
+        zone_source = "intraday_high_fallback"
+    else:
+        zone_source = None
     return {
         "current_price": rounded(as_float(value_at(intraday, "quote.latest_price"))),
         "stop_loss_price": rounded(stop_loss),
@@ -359,8 +375,13 @@ def price_levels(
         "ma20": rounded(as_float(value_at(intraday, "technicals.ma20") or t_calculations.get("ma_mid"))),
         "recent_high": rounded(as_float(t_calculations.get("recent_high"))),
         "recent_low": rounded(as_float(t_calculations.get("recent_low"))),
-        "reverse_t_sell_zone": value_at(intraday, "reverse_t_plan.sell_zone"),
-        "reverse_t_buyback_max_price": rounded(as_float(value_at(intraday, "reverse_t_plan.buyback_max_price"))),
+        "reverse_t_sell_zone": sell_zone,
+        "reverse_t_buyback_max_price": rounded(buyback),
+        "reverse_t_zone_source": zone_source,
+        "reverse_t_forecast_as_of": value_at(reverse_forecast or {}, "as_of"),
+        "reverse_t_reach_probability_pct": rounded(as_float(value_at(reverse_forecast or {}, "reach_probability_pct"))),
+        "reverse_t_roundtrip_probability_pct": rounded(as_float(value_at(reverse_forecast or {}, "roundtrip_probability_pct"))),
+        "reverse_t_joint_probability_pct": rounded(as_float(value_at(reverse_forecast or {}, "joint_roundtrip_probability_pct"))),
     }
 
 
@@ -418,6 +439,19 @@ def build_evidence(
         evidence.append(f"[反T回测] {reverse_backtest.get('verdict_label') or reverse_backtest.get('verdict')}")
     if reverse_forecast:
         evidence.append(f"[反T预测] {reverse_forecast.get('status_label') or reverse_forecast.get('status')}")
+        sell_zone = reverse_forecast.get("predicted_sell_zone")
+        buyback = reverse_forecast.get("predicted_buyback_max_price")
+        if sell_zone and buyback is not None:
+            evidence.append(
+                f"[反T预测区间] 卖出观察 {sell_zone[0]:.2f}-{sell_zone[1]:.2f}，"
+                f"回补上限 {buyback:.2f}；到达概率 {reverse_forecast.get('reach_probability_pct', '-')}%，"
+                f"回补概率 {reverse_forecast.get('roundtrip_probability_pct', '-')}%。"
+            )
+        elif sell_zone:
+            evidence.append(
+                f"[反T预测区间] 卖出观察 {sell_zone[0]:.2f}-{sell_zone[1]:.2f}；"
+                "当前费用模型未给出可执行回补上限。"
+            )
     return evidence or ["暂无足够证据，按只观察处理。"]
 
 
@@ -628,7 +662,7 @@ def build_card(
         technical_assessment,
     )
     blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment)
-    levels = price_levels(portfolio, t_check, intraday)
+    levels = price_levels(portfolio, t_check, intraday, reverse_forecast)
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",

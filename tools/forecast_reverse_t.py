@@ -90,12 +90,14 @@ def build_samples(bars: list[dict[str, Any]], horizon_bars: int = 6) -> list[dic
             continue
         peak_index = max(range(len(future)), key=lambda pos: future[pos]["high"])
         future_high = future[peak_index]["high"]
+        future_low = min(bar["low"] for bar in future)
         later_low = min(bar["low"] for bar in future[peak_index:])
         close = bars[index]["close"]
         samples.append(
             {
                 "timestamp": bars[index]["timestamp"], "features": features,
                 "max_up_pct": (future_high / close - 1) * 100,
+                "max_down_pct": (close / future_low - 1) * 100 if future_low else 0,
                 "pullback_pct": (future_high / later_low - 1) * 100 if later_low else 0,
             }
         )
@@ -117,24 +119,36 @@ def forecast(code: str, name: str, bars: list[dict[str, Any]], shares: int, cost
     nearest = sorted(samples, key=lambda sample: distance(current_features, sample["features"]))[:neighbors]
     up_moves = [sample["max_up_pct"] for sample in nearest]
     current_price = bars[-1]["close"]
-    low_up_pct = max(0.3, quantile(up_moves, 0.5))
+    low_up_pct = max(0.0, quantile(up_moves, 0.5))
     high_up_pct = max(low_up_pct, quantile(up_moves, 0.75))
     zone_low = round(current_price * (1 + low_up_pct / 100), 2)
     zone_high = round(current_price * (1 + high_up_pct / 100), 2)
     viable = fee_viable_trade(zone_low, max_shares, costs, min_gap_pct=1.2)
     if not viable:
-        return {"code": code, "name": name, "status": "fee_blocked", "status_label": "预测价差不足以覆盖费用", "sample_count": len(samples)}
+        return {
+            "code": code, "name": name, "status": "fee_blocked", "status_label": "预测价差不足以覆盖费用",
+            "as_of": bars[-1]["timestamp"], "horizon_minutes": 30,
+            "current_price": current_price, "predicted_sell_zone": [zone_low, zone_high],
+            "predicted_buyback_max_price": None,
+            "sample_count": len(samples), "neighbor_count": len(nearest),
+            "indicators": {"model": "nearest_5minute_patterns", "features": ["returns", "range_position", "MACD", "BOLL", "RSI", "volume_ratio", "ATR", "time_of_day"]},
+            "execution_allowed": False,
+            "note": "预测区间仅用于观察；当前费用模型下没有可接受的回补上限。",
+        }
     required_up = (zone_low / current_price - 1) * 100
     required_pullback = viable["required_gap_pct"]
     reached = [sample for sample in nearest if sample["max_up_pct"] >= required_up]
-    roundtrips = [sample for sample in reached if sample["pullback_pct"] >= required_pullback]
+    if required_up <= 0:
+        roundtrips = [sample for sample in nearest if sample.get("max_down_pct", 0) >= required_pullback]
+    else:
+        roundtrips = [sample for sample in reached if sample["pullback_pct"] >= required_pullback]
     reach_probability = len(reached) / len(nearest) * 100
     roundtrip_probability = len(roundtrips) / len(reached) * 100 if reached else 0
     joint_probability = len(roundtrips) / len(nearest) * 100
     if reach_probability >= 60 and roundtrip_probability >= 60:
-        status, label = "early_warning", "下一次反T机会预警"
+        status, label = "early_warning", "指标预测反T区间预警"
     elif reach_probability >= 50:
-        status, label = "watch", "可能接近高点区间，继续观察"
+        status, label = "watch", "指标预测区间仍需观察"
     else:
         status, label = "low_probability", "未来30分钟到达概率偏低"
     return {

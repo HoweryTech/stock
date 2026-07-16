@@ -26,6 +26,7 @@ class ForecastReverseTTest(unittest.TestCase):
         samples = build_samples(self.bars(), horizon_bars=6)
         self.assertGreater(len(samples), 0)
         self.assertIn("max_up_pct", samples[0])
+        self.assertIn("max_down_pct", samples[0])
         self.assertIn("pullback_pct", samples[0])
 
     def test_roundtrip_probability_is_conditional_on_reaching_zone(self):
@@ -34,6 +35,14 @@ class ForecastReverseTTest(unittest.TestCase):
         result = forecast("000725", "京东方A", bars, 200, costs, neighbors=20)
         if result["status"] not in {"fee_blocked", "insufficient"}:
             self.assertGreaterEqual(result["roundtrip_probability_pct"], result["joint_roundtrip_probability_pct"])
+
+    def test_fee_blocked_forecast_still_returns_observation_zone(self):
+        bars = self.bars(180)
+        costs = {"commission_rate": 0.0003, "minimum_commission": 5.0, "stamp_duty_rate": 0.0005, "transfer_fee_rate": 0.00001, "minimum_net_profit": 999.0}
+        result = forecast("000725", "京东方A", bars, 200, costs, neighbors=20)
+        self.assertEqual(result["status"], "fee_blocked")
+        self.assertIn("predicted_sell_zone", result)
+        self.assertIsNone(result["predicted_buyback_max_price"])
 
 
 if __name__ == "__main__":

@@ -131,6 +131,70 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertFalse(card["decision"]["execution_allowed"])
         self.assertEqual(card["price_levels"]["near_stop_block_price"], 9.596)
 
+    def test_reverse_t_price_levels_prefer_indicator_forecast_zone(self) -> None:
+        report = build_report(
+            {"items": [intraday_item(reverse_status="watch")]},
+            portfolio_result(),
+            t_result(),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            {
+                "items": [
+                    {
+                        "code": "600000",
+                        "status": "watch",
+                        "status_label": "指标预测区间仍需观察",
+                        "as_of": "2026-07-16 10:40",
+                        "predicted_sell_zone": [10.01, 10.08],
+                        "predicted_buyback_max_price": 9.82,
+                        "reach_probability_pct": 55.0,
+                        "roundtrip_probability_pct": 62.0,
+                        "joint_roundtrip_probability_pct": 34.1,
+                    }
+                ]
+            },
+            generated_at=datetime(2026, 7, 16, 10, 40, 0),
+        )
+
+        card = report["cards"][0]
+        levels = card["price_levels"]
+
+        self.assertEqual(levels["reverse_t_sell_zone"], [10.01, 10.08])
+        self.assertEqual(levels["reverse_t_buyback_max_price"], 9.82)
+        self.assertEqual(levels["reverse_t_zone_source"], "forecast")
+        self.assertEqual(levels["reverse_t_forecast_as_of"], "2026-07-16 10:40")
+        self.assertTrue(any("[反T预测区间]" in evidence for evidence in card["evidence"]))
+
+    def test_reverse_t_forecast_without_buyback_does_not_fallback_to_intraday_high_zone(self) -> None:
+        report = build_report(
+            {"items": [intraday_item(reverse_status="watch")]},
+            portfolio_result(),
+            t_result(),
+            None,
+            None,
+            {
+                "items": [
+                    {
+                        "code": "600000",
+                        "status": "fee_blocked",
+                        "status_label": "预测价差不足以覆盖费用",
+                        "as_of": "2026-07-16 10:45",
+                        "predicted_sell_zone": [10.0, 10.04],
+                        "predicted_buyback_max_price": None,
+                    }
+                ]
+            },
+            generated_at=datetime(2026, 7, 16, 10, 45, 0),
+        )
+
+        card = report["cards"][0]
+        levels = card["price_levels"]
+
+        self.assertEqual(levels["reverse_t_sell_zone"], [10.0, 10.04])
+        self.assertIsNone(levels["reverse_t_buyback_max_price"])
+        self.assertEqual(levels["reverse_t_zone_source"], "forecast")
+        self.assertTrue(any("未给出可执行回补上限" in evidence for evidence in card["evidence"]))
+
     def test_stale_quote_pauses_intraday_decision(self) -> None:
         report = build_report(
             {"items": [intraday_item(signals=[{"code": "stale_quote", "severity": "block", "message": "行情过期。"}])]},
