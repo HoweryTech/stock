@@ -84,6 +84,9 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertTrue(plan["failure_as_reduction_acceptable"])
         self.assertEqual(plan["blocker_details"], [])
         self.assertIn("可以进入反T人工候选", plan["next_action"])
+        self.assertTrue(any("第1步" in step and "3.29-3.31" in step for step in plan["execution_steps"]))
+        self.assertTrue(any("3.21" in step and "买回同等" in step for step in plan["execution_steps"]))
+        self.assertTrue(any("当天最多执行一轮" in step for step in plan["execution_steps"]))
 
     def test_small_position_is_not_suitable_for_reverse_t(self) -> None:
         quote = {"latest_price": 6.8, "open": 6.7, "high": 6.9, "low": 6.6, "change_pct": 1.0}
@@ -99,6 +102,7 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertTrue(any("无法保留底仓" in blocker for blocker in plan["blockers"]))
         self.assertTrue(any(blocker["code"] == "base_position_insufficient" for blocker in plan["blocker_details"]))
         self.assertIn("当前不执行反T", plan["next_action"])
+        self.assertTrue(any("当前不要卖出" in step for step in plan["execution_steps"]))
 
     def test_blocked_reverse_t_still_exposes_fee_aware_reference_range(self) -> None:
         quote = {"latest_price": 13.66, "open": 12.96, "high": 13.68, "low": 12.7, "change_pct": 4.59}
@@ -126,6 +130,7 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertIsNone(plan["buyback_max_price"])
         self.assertTrue(any(blocker["code"] == "fee_not_viable" for blocker in plan["blocker_details"]))
         self.assertIn("费用模型", plan["next_action"])
+        self.assertTrue(any("不要提前挂反T回补单" in step for step in plan["execution_steps"]))
 
     def test_reduction_plan_rounds_to_board_lots(self) -> None:
         position = {"entry": {"shares": 1000}}

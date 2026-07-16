@@ -150,6 +150,35 @@ def reverse_t_blocker(code: str, label: str, current: str, reason: str, next_ste
     }
 
 
+def build_reverse_t_execution_steps(
+    *,
+    status: str,
+    trade_shares: int,
+    sell_zone_low: float | None,
+    sell_zone_high: float | None,
+    buyback_max: float | None,
+    required_gap_pct: float | None,
+    cost_estimate: dict[str, Any] | None,
+    failure_as_reduction_acceptable: bool,
+) -> list[str]:
+    if status != "candidate" or sell_zone_low is None or sell_zone_high is None or buyback_max is None:
+        return [
+            "当前不要卖出，也不要提前挂反T回补单。",
+            "只保留卖出观察区和回补上限作为参考；等状态变为反T候选后再按步骤执行。",
+            "如果已手动卖出但未到回补上限，不追价买回；先按实际成交重新生成决策卡。",
+        ]
+    net_profit = as_float((cost_estimate or {}).get("net_profit"))
+    net_text = f"，扣费后最低净收益约{net_profit:.2f}元" if net_profit is not None else ""
+    failure_text = "未回补时把这笔卖出计入计划降仓，不追买。" if failure_as_reduction_acceptable else "未回补会形成计划外减仓；如果不能接受这个后果，不执行第1步。"
+    return [
+        f"第1步：只在价格进入 {sell_zone_low:.2f}-{sell_zone_high:.2f} 元且从区间高位转弱时，限价卖出 {trade_shares} 股；不要在快速拉升中抢跑。",
+        f"第2步：卖出成交后，只在价格回落到 {buyback_max:.2f} 元及以下时，买回同等 {trade_shares} 股；高于该价不回补。",
+        f"第3步：本轮所需价差约 {required_gap_pct:.2f}%{net_text}；如果卖出后没有触发回补价，按计划停止，不追价买回。",
+        f"第4步：{failure_text}",
+        "第5步：同一股票当天最多执行一轮；成交后记录实际卖出价、买回价和费用，再刷新系统建议。",
+    ]
+
+
 def build_reverse_t_plan(
     position: dict[str, Any],
     quote: dict[str, Any],
@@ -255,6 +284,16 @@ def build_reverse_t_plan(
     else:
         first = blocker_details[0] if blocker_details else None
         next_action = f"当前不执行反T。先处理阻断项：{first['label']}，{first['next_step']}" if first else "当前不执行反T，只观察。"
+    execution_steps = build_reverse_t_execution_steps(
+        status=status,
+        trade_shares=trade_shares,
+        sell_zone_low=sell_zone_low,
+        sell_zone_high=sell_zone_high,
+        buyback_max=buyback_max,
+        required_gap_pct=required_gap_pct,
+        cost_estimate=cost_estimate,
+        failure_as_reduction_acceptable=failure_as_reduction_acceptable,
+    )
 
     return {
         "status": status,
@@ -281,6 +320,7 @@ def build_reverse_t_plan(
         "blockers": blockers,
         "blocker_details": blocker_details,
         "next_action": next_action,
+        "execution_steps": execution_steps,
         "instructions": [
             f"只在价格进入卖出观察区后转弱时卖出{trade_shares}股，不在快速拉升中抢跑。",
             "卖出后仅在价格降至费用模型给出的回补上限且行情未失效时买回同等股数。",

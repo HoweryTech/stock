@@ -791,10 +791,12 @@ function openDetail(code) {
           <p class="secondary">${escapeHtml(blocker.next_step || "")}</p>
         </div>`).join("")}</div>`
       : blockers.length ? `<ul class="reason-list">${blockers.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : "";
+    const executionSteps = reversePlan.execution_steps || reversePlan.instructions || [];
     html += detailSection("反T降低成本", `<div class="metric-grid">${planMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>
       ${reversePlan.next_action ? `<div class="action-panel action-${reversePlan.status === "candidate" ? "reverse_t_watch" : "hold_no_add"}"><div class="action-panel-title">下一步动作</div><p>${escapeHtml(reversePlan.next_action)}</p></div>` : ""}
       <p>${escapeHtml(reversePlan.failure_result || "")}</p>
-      ${blockerHtml || `<ol class="reason-list">${reversePlan.instructions.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`}`);
+      ${blockerHtml || ""}
+      ${executionSteps.length ? `<h4>操作步骤</h4><ol class="reason-list">${executionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}`);
   }
   const reductionPlan = item.reduction_plan;
   if (reductionPlan && !["within_limit", "unavailable"].includes(reductionPlan.status)) {
