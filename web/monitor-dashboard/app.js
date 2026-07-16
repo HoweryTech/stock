@@ -945,6 +945,7 @@ function openDetail(code) {
   if (decisionCard) {
     const levels = decisionCard.price_levels || {};
     const decision = decisionCard.decision || {};
+    const technicalOperation = decision.technical_operation || {};
     const quality = decisionCard.data_quality || {};
     const qualityMetrics = [
       ["总状态", qualityLabel(quality)],
@@ -967,6 +968,8 @@ function openDetail(code) {
     ];
     const cardMetrics = [
       ["动作等级", actionTierFor(item).label],
+      ["技术操作档位", technicalOperation.tier_label || "--"],
+      ["技术允许观察", technicalOperation.allow_buy_watch || technicalOperation.allow_t_watch ? "允许进入观察" : "不支持买入/做T"],
       ["状态", decisionCard.state_label],
       ["建议动作", decision.action_label],
       ["置信度", decision.confidence],
@@ -986,6 +989,8 @@ function openDetail(code) {
       <div class="action-panel action-${escapeHtml(decisionCard.state || "observe")}">
         <div class="action-panel-title">当前可执行步骤</div>
         <p><strong>${escapeHtml(decision.next_step || "")}</strong></p>
+        ${technicalOperation.reason ? `<p class="secondary"><strong>技术理由：</strong>${escapeHtml(technicalOperation.reason)}</p>` : ""}
+        ${technicalOperation.next_step ? `<p class="secondary"><strong>技术下一步：</strong>${escapeHtml(technicalOperation.next_step)}</p>` : ""}
         ${actionSteps.length ? `<ol class="reason-list">${actionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
       </div>
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}

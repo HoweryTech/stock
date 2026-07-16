@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 
-from tools.build_realtime_decision_cards import build_report, render_markdown, technical_dimension_summary
+from tools.build_realtime_decision_cards import build_report, build_technical_operation, render_markdown, technical_dimension_summary
 
 
 def intraday_item(code: str = "600000", *, signals=None, reverse_status: str = "watch") -> dict:
@@ -235,6 +235,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertGreater(card["technical_assessment"]["dimension_scores"]["volume_confirmation"], 0)
         self.assertIn("multi_timeframe", card["technical_assessment"]["dimension_scores"])
         self.assertIn("趋势和量能", card["technical_assessment"]["summary"])
+        self.assertEqual(card["decision"]["technical_operation"]["tier"], "watch_candidate")
+        self.assertTrue(card["decision"]["technical_operation"]["allow_buy_watch"])
         self.assertEqual(card["capital_plan"]["single_add_tier"], "strong")
         self.assertEqual(card["capital_plan"]["effective_single_add_pct_total_assets"], 5.0)
         self.assertEqual(card["capital_plan"]["max_additional_capital"], 2500.0)
@@ -293,6 +295,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["state"], "hold_no_add")
         self.assertIn(card["technical_assessment"]["label"], {"bearish", "slightly_bearish"})
         self.assertTrue(card["technical_assessment"]["summary"])
+        self.assertFalse(card["decision"]["technical_operation"]["allow_buy_watch"])
         self.assertFalse(card["positive_timing"]["metrics"]["technical_supported"])
         self.assertTrue(any(blocker["code"] == "higher_timeframe_weak" for blocker in card["positive_timing"]["blockers"]))
         self.assertFalse(card["capital_plan"]["applicable"])
@@ -539,6 +542,28 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
             ),
             "有一点反转迹象，但风险分明显拖累，趋势和量能还没确认，所以不支持继续追买或继续做T。",
         )
+
+    def test_technical_operation_blocks_reversal_when_risk_and_volume_disagree(self) -> None:
+        operation = build_technical_operation(
+            {
+                "available": True,
+                "label": "slightly_bearish",
+                "summary": "有一点反转迹象，但风险分明显拖累，趋势和量能还没确认，所以不支持继续追买或继续做T。",
+                "dimension_scores": {
+                    "trend": -2.8,
+                    "risk": -25.3,
+                    "reversal": 4.4,
+                    "volume_confirmation": -2.8,
+                    "multi_timeframe": 0.0,
+                },
+            }
+        )
+
+        self.assertEqual(operation["tier"], "risk_control_first")
+        self.assertEqual(operation["tier_label"], "风险优先")
+        self.assertFalse(operation["allow_buy_watch"])
+        self.assertFalse(operation["allow_t_watch"])
+        self.assertIn("不追买、不补仓、不做T", operation["next_step"])
 
 
 if __name__ == "__main__":

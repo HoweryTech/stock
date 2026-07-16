@@ -384,6 +384,80 @@ def technical_dimension_summary(scores: dict[str, float]) -> str:
     return "技术维度没有形成明确共振，维持观察，不因单一指标触发交易。"
 
 
+def build_technical_operation(technical_assessment: dict[str, Any] | None) -> dict[str, Any]:
+    assessment = technical_assessment or {}
+    if not assessment.get("available"):
+        return {
+            "tier": "not_available",
+            "tier_label": "技术未确认",
+            "allow_buy_watch": False,
+            "allow_t_watch": False,
+            "reason": "日线、周线、月线技术指标不可用，不能用技术面放开买入或做T。",
+            "next_step": "先补齐技术指标数据；补齐前只按止损、仓位和实时行情做风险控制。",
+        }
+    scores = assessment.get("dimension_scores") or {}
+    trend = as_float(scores.get("trend"), 0.0) or 0.0
+    risk = as_float(scores.get("risk"), 0.0) or 0.0
+    reversal = as_float(scores.get("reversal"), 0.0) or 0.0
+    volume = as_float(scores.get("volume_confirmation"), 0.0) or 0.0
+    multi = as_float(scores.get("multi_timeframe"), 0.0) or 0.0
+    label = str(assessment.get("label") or "")
+    summary = str(assessment.get("summary") or technical_dimension_summary(scores))
+    if risk <= -18 and reversal > 0 and trend <= 0 and volume <= 0:
+        return {
+            "tier": "risk_control_first",
+            "tier_label": "风险优先",
+            "allow_buy_watch": False,
+            "allow_t_watch": False,
+            "reason": summary,
+            "next_step": "不追买、不补仓、不做T；等风险分回到 -18 以上，且趋势分和量能确认至少转正后，再重新开放买入/做T观察。",
+        }
+    if risk <= -18 or label == "bearish":
+        return {
+            "tier": "risk_control_first",
+            "tier_label": "风险优先",
+            "allow_buy_watch": False,
+            "allow_t_watch": False,
+            "reason": summary,
+            "next_step": "技术风险仍明显，先控制下行风险；只有风险分修复后，才允许讨论低吸或做T。",
+        }
+    if trend > 10 and volume > 5 and multi >= 0 and label in {"bullish", "slightly_bullish"}:
+        return {
+            "tier": "watch_candidate",
+            "tier_label": "可进观察",
+            "allow_buy_watch": True,
+            "allow_t_watch": True,
+            "reason": summary,
+            "next_step": "允许进入人工观察候选，但仍要同时满足实时价格区间、数据质量、止损距离和成交确认。",
+        }
+    if reversal > 6 and trend <= 0:
+        return {
+            "tier": "observe_only",
+            "tier_label": "只观察",
+            "allow_buy_watch": False,
+            "allow_t_watch": False,
+            "reason": summary,
+            "next_step": "反转还没有被趋势确认，先观察；不要提前买入，也不要把反弹当成可执行做T信号。",
+        }
+    if trend <= -10 and volume <= 0:
+        return {
+            "tier": "forbid_chase",
+            "tier_label": "禁止追买",
+            "allow_buy_watch": False,
+            "allow_t_watch": False,
+            "reason": summary,
+            "next_step": "趋势和量能没有配合，继续持有观察；等趋势或量能至少有一项明显修复后再复核。",
+        }
+    return {
+        "tier": "observe_only",
+        "tier_label": "只观察",
+        "allow_buy_watch": False,
+        "allow_t_watch": False,
+        "reason": summary,
+        "next_step": "技术面没有形成可执行共振，本轮不因单一指标触发交易。",
+    }
+
+
 def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> dict[str, Any]:
     if not technical_indicators:
         return {"available": False, "score": None, "label": "missing", "signals": [], "periods": {}, "dimension_scores": {}, "dimension_signals": [], "summary": ""}
@@ -1124,6 +1198,7 @@ def build_action_steps(
     name: str | None = None,
     position: dict[str, Any] | None = None,
     capital_plan: dict[str, Any] | None = None,
+    technical_operation: dict[str, Any] | None = None,
 ) -> list[str]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
@@ -1195,6 +1270,8 @@ def build_action_steps(
             "只允许加入人工观察，不直接买入。",
             "可追加资金不等于可以无上限补仓；必须先满足买入区间、止损距离、数据质量和技术面条件。",
         ]
+        if technical_operation and not technical_operation.get("allow_buy_watch"):
+            steps.append(f"技术操作档位为“{technical_operation.get('tier_label')}”：{technical_operation.get('next_step')}")
         if capital_plan and capital_plan.get("status") == "watch":
             steps.extend(capital_plan.get("steps", []))
         else:
@@ -1202,13 +1279,18 @@ def build_action_steps(
         steps.append("价格、数据质量和止损距离同时满足后，才生成做T计划并人工确认。")
         return steps
     if state == "reverse_t_watch":
-        return [
+        steps = [
             "只允许加入人工观察，不直接卖出。",
             "必须确认5分钟回测、费用模型、分时转弱和回补上限。",
             "未到回补价不追买；可能形成实际减仓，必须提前接受这个结果。",
         ]
+        if technical_operation and not technical_operation.get("allow_t_watch"):
+            steps.append(f"技术操作档位为“{technical_operation.get('tier_label')}”：{technical_operation.get('next_step')}")
+        return steps
     if state == "hold_no_add":
         steps = ["持有观察，不补仓，不做T。", "等待技术面、数据质量或风险信号改善后再重新评估。"]
+        if technical_operation and technical_operation.get("tier") in {"risk_control_first", "forbid_chase", "observe_only"}:
+            steps.append(f"技术操作档位为“{technical_operation.get('tier_label')}”：{technical_operation.get('next_step')}")
         if action_backtest and (action_backtest.get("weak_rule_count") or 0) > 0:
             steps.append("动作矩阵存在弱规则，先复核规则表现，不新增交易。")
         return steps
@@ -1251,6 +1333,7 @@ def build_card(
     minute_bars: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     technical_assessment = build_technical_assessment(technical_indicators)
+    technical_operation = build_technical_operation(technical_assessment)
     positive_timing = build_positive_timing(intraday, t_check, minute_bars, technical_assessment)
     state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment)
     evidence = build_evidence(
@@ -1309,7 +1392,9 @@ def build_card(
                 name=str(intraday.get("name") or ""),
                 position=intraday.get("position", {}),
                 capital_plan=capital_plan,
+                technical_operation=technical_operation,
             ),
+            "technical_operation": technical_operation,
         },
         "price_levels": levels,
         "capital_plan": capital_plan,
