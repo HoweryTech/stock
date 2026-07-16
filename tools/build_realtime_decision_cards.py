@@ -483,6 +483,10 @@ def whole_lot_shares(value: Any) -> int | None:
     return int(shares // 100 * 100)
 
 
+def money_text(value: float | None) -> str:
+    return "-" if value is None else f"{value:.2f} 元"
+
+
 def build_action_steps(
     state: str,
     levels: dict[str, Any],
@@ -497,19 +501,25 @@ def build_action_steps(
     stop_loss = as_float(levels.get("stop_loss_price"))
     near_block = as_float(levels.get("near_stop_block_price"))
     shares = whole_lot_shares((position or {}).get("shares"))
-    stock_text = f"{code or '-'} {name or ''}".strip()
+    entry_price = as_float((position or {}).get("entry_price"))
+    unrealized_pnl = as_float((position or {}).get("unrealized_pnl"))
+    estimated_cash = current * shares if current is not None and shares is not None else None
+    estimated_pnl = (current - entry_price) * shares if current is not None and entry_price is not None and shares is not None else unrealized_pnl
+    loss_word = "亏损" if estimated_pnl is not None and estimated_pnl < 0 else "盈亏"
     if state == "exit_risk_review":
-        steps = [f"先确认对象：{stock_text}。本轮禁止买入、补仓、做T；只允许处理卖出风险。"]
+        steps = ["本轮禁止买入、补仓、做T；只允许处理卖出风险。"]
         if current is not None and stop_loss is not None:
             if current <= stop_loss:
                 steps.extend(
                     [
+                        f"操作后果：按现价附近卖出 {shares or '全部可卖'} 股，预计回收现金约 {money_text(estimated_cash)}，预计确认{loss_word}约 {money_text(estimated_pnl)}。",
+                        "仓位后果：全仓卖出后该股持仓变为0股；如果后面反弹，这部分仓位不再参与反弹。",
                         "打开券商交易软件，进入“交易/卖出”。",
-                        f"证券代码输入：{code or '该股票代码'}；核对名称是{name or '当前持仓股票'}。",
                         f"卖出数量输入：{shares} 股；如果券商显示可卖数量少于该数，输入券商显示的全部可卖数量。" if shares else "卖出数量输入：券商显示的全部可卖数量；数量不足100股时按券商允许的零股/全部卖出规则处理。",
                         f"卖出价格输入：先参考现价 {current:.2f}；如果盘口买一价低于现价，用买一价或可成交价，不要高挂等反弹。",
-                        "点击卖出前最后核对：代码、名称、卖出数量、卖出价格、方向是“卖出”。",
+                        "点击卖出前最后核对：卖出数量、卖出价格、方向是“卖出”。",
                         "提交后只检查是否成交；未成交时不要改成买入或补仓，只允许按更接近可成交的卖出价重新挂单。",
+                        "成交后的下一步计划：记录卖出成交价和数量，更新持仓为已退出，再做复盘：这次亏损是策略问题、执行问题还是止损设置问题。",
                     ]
                 )
             else:
@@ -517,8 +527,9 @@ def build_action_steps(
                     [
                         f"当前还没有跌破止损价：现价 {current:.2f}，止损价 {stop_loss:.2f}。",
                         "现在不要下卖单，也不要补仓或做T。",
-                        f"在交易软件或行情软件设置价格提醒：{stock_text} 低于/等于 {stop_loss:.2f} 立即提醒。",
+                        f"设置价格提醒：低于/等于 {stop_loss:.2f} 立即提醒。",
                         "如果提醒触发，按“交易/卖出 -> 输入代码 -> 输入全部可卖数量 -> 用可成交卖出价提交”的止损流程处理。",
+                        "未触发前的计划：只观察，不做T；下一次刷新决策卡后再判断是否继续持有或转为止损卖出。",
                     ]
                 )
         elif stop_loss is None:
@@ -537,7 +548,7 @@ def build_action_steps(
             "确认正式仓位上限、可卖数量和预估费用后，再生成降仓卖出计划。",
         ]
     if state == "data_insufficient":
-        steps = [f"先确认对象：{stock_text}。本轮不买、不卖、不做T，因为系统不能验证行情、样本、止损或数据一致性。"]
+        steps = ["本轮不买、不卖、不做T，因为系统不能验证行情、样本、止损或数据一致性。"]
         blocker_text = "\n".join(blockers)
         if "日线数量" in blocker_text:
             steps.append(f"补齐日线历史数据：刷新 {code or '该股票'} 的日线，至少达到20根日线后再判断趋势和做T环境。")

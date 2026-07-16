@@ -104,10 +104,12 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertFalse(card["decision"]["execution_allowed"])
         self.assertIn("禁止做T", card["decision"]["next_step"])
         self.assertIn("禁止买入、补仓、做T", card["decision"]["action_steps"][0])
+        self.assertTrue(any("操作后果" in step for step in card["decision"]["action_steps"]))
+        self.assertTrue(any("仓位后果" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("交易/卖出" in step for step in card["decision"]["action_steps"]))
-        self.assertTrue(any("证券代码输入" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("卖出数量输入" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("卖出价格输入" in step for step in card["decision"]["action_steps"]))
+        self.assertTrue(any("成交后的下一步计划" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("做T阻断价" in step for step in card["decision"]["action_steps"]))
         self.assertIn("距离止损不足1%。", card["blockers"])
 

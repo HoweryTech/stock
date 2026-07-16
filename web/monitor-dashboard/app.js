@@ -508,7 +508,7 @@ function openDetail(code) {
       <div class="action-panel action-${escapeHtml(decisionCard.state || "observe")}">
         <div class="action-panel-title">当前可执行步骤</div>
         <p><strong>${escapeHtml(decision.next_step || "")}</strong></p>
-        ${actionSteps.length ? `<ol class="reason-list">${actionSteps.slice(0, 7).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
+        ${actionSteps.length ? `<ol class="reason-list">${actionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
       </div>
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
