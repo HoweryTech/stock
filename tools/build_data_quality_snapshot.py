@@ -300,6 +300,10 @@ def source_consistency(quote: dict[str, Any], daily: dict[str, Any], minute: dic
     if quote_price is None or daily_close is None:
         checks.append({"source": "daily", "status": "skipped", "message": "缺少行情现价或日线最新收盘价。"})
     elif minute_date and daily_date != minute_date:
+        if daily_date and daily_date < minute_date:
+            daily_reference_message = f"日线为上一交易日 {daily_date}，盘中仅作趋势背景参考；实时判断以现价和分钟线为准。"
+        else:
+            daily_reference_message = f"日线日期 {daily_date} 与分钟线日期 {minute_date} 不一致，仅作参考。"
         checks.append(
             {
                 "source": "daily",
@@ -309,7 +313,7 @@ def source_consistency(quote: dict[str, Any], daily: dict[str, Any], minute: dic
                 "reference_date": daily_date,
                 "minute_date": minute_date,
                 "diff_pct": None if daily_diff is None else round(daily_diff, 4),
-                "message": f"日线日期 {daily_date} 与分钟线日期 {minute_date} 不一致，仅作参考。",
+                "message": daily_reference_message,
             }
         )
     else:

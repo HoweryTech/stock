@@ -179,6 +179,30 @@ class DataQualitySnapshotTest(unittest.TestCase):
         self.assertEqual(item["overall_status"], "missing")
         self.assertEqual(item["data_trust"]["level"], "low")
 
+    def test_previous_trading_day_daily_bar_is_labeled_as_trend_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            position = base / "positions/POS-600000.yaml"
+            write_position(position, "600000")
+            write_daily(base / "daily.csv", {"600000": [f"2026-07-{day:02d}" for day in range(1, 16)]})
+            write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-16 10:00")
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0, "latest_price": 10.0}}]}
+
+            report = build_report(
+                [position],
+                snapshot,
+                base / "daily.csv",
+                base / "minutes",
+                as_of=datetime(2026, 7, 16, 10, 5, 0),
+                min_daily_bars=10,
+            )
+
+        daily_check = report["items"][0]["source_consistency"]["checks"][1]
+        self.assertEqual(daily_check["status"], "reference_only")
+        self.assertIn("日线为上一交易日 2026-07-15", daily_check["message"])
+        self.assertIn("实时判断以现价和分钟线为准", daily_check["message"])
+        self.assertNotIn("不一致", daily_check["message"])
+
     def test_stale_daily_with_fresh_quote_is_medium_trust(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
