@@ -562,6 +562,17 @@ python3 tools/serve_monitor_dashboard.py --host 127.0.0.1 --port 8765
 
 个股详情同时显示动态反T观察计划、费用估算、多周期趋势和仓位超限降仓步骤。反T根据最低佣金和税费反推交易股数与回补价，扣费后预计净收益不足时直接阻断；未达到回补价时不追价买回。所有计划均需人工确认，系统不提交订单。
 
+一键刷新完整日内决策链：
+
+```bash
+python3 tools/run_intraday_decision_pipeline.py \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --daily-bars data/processed/daily_bars.csv \
+  --total-assets 25480
+```
+
+该命令会顺序刷新准实时快照、组合日检、做T检查和实时持仓决策卡，避免页面同时读取不同时间点的产物。
+
 生成统一实时持仓决策卡：
 
 ```bash
