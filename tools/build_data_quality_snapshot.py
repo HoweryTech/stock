@@ -199,7 +199,14 @@ def classify_daily(stats: dict[str, Any] | None, as_of: datetime, min_bars: int,
     return {"status": "usable", "row_count": row_count, "latest_trade_date": latest, "latest_close": latest_close, "age_days": days, "message": "日线样本和新鲜度可用。"}
 
 
-def classify_minute(stats: dict[str, Any] | None, as_of: datetime, min_bars: int, max_age_hours: float) -> dict[str, Any]:
+def classify_minute(
+    stats: dict[str, Any] | None,
+    as_of: datetime,
+    min_bars: int,
+    max_age_hours: float,
+    *,
+    require_current_date: bool = False,
+) -> dict[str, Any]:
     if not stats:
         return {"status": "missing", "bar_count": 0, "latest_timestamp": None, "latest_close": None, "age_hours": None, "message": "缺少分钟线缓存。"}
     bar_count = int(stats.get("bar_count") or 0)
@@ -210,6 +217,16 @@ def classify_minute(stats: dict[str, Any] | None, as_of: datetime, min_bars: int
         return {"status": "insufficient", "bar_count": bar_count, "latest_timestamp": latest, "latest_close": latest_close, "age_hours": None if hours is None else round(hours, 3), "message": f"分钟线数量 {bar_count} 少于 {min_bars}。"}
     if hours is None:
         return {"status": "missing", "bar_count": bar_count, "latest_timestamp": latest, "latest_close": latest_close, "age_hours": None, "message": "分钟线最新时间无法解析。"}
+    latest_dt = parse_datetime(latest)
+    if require_current_date and latest_dt and latest_dt.date() != as_of.date():
+        return {
+            "status": "stale",
+            "bar_count": bar_count,
+            "latest_timestamp": latest,
+            "latest_close": latest_close,
+            "age_hours": round(hours, 3),
+            "message": f"盘中执行窗口要求当天分钟线，当前最新分钟线为 {latest_dt.date().isoformat()}。",
+        }
     if hours > max_age_hours:
         return {"status": "stale", "bar_count": bar_count, "latest_timestamp": latest, "latest_close": latest_close, "age_hours": round(hours, 3), "message": f"分钟线距当前 {hours:.1f} 小时，超过 {max_age_hours:.1f} 小时阈值。"}
     return {"status": "usable", "bar_count": bar_count, "latest_timestamp": latest, "latest_close": latest_close, "age_hours": round(hours, 3), "message": "分钟线样本和新鲜度可用。"}
@@ -247,6 +264,18 @@ def source_consistency(quote: dict[str, Any], daily: dict[str, Any], minute: dic
     minute_diff = price_diff_pct(minute_close, quote_price)
     if quote_price is None or minute_close is None:
         checks.append({"source": "minute", "status": "skipped", "message": "缺少行情现价或分钟线最新收盘价。"})
+    elif minute.get("status") == "stale":
+        checks.append(
+            {
+                "source": "minute",
+                "status": "reference_only",
+                "quote_price": quote_price,
+                "reference_price": minute_close,
+                "reference_timestamp": minute.get("latest_timestamp"),
+                "diff_pct": round(minute_diff or 0.0, 4),
+                "message": f"分钟线已过期，仅作参考，不参与实时一致性阻断；价差 {minute_diff:.2f}%。",
+            }
+        )
     else:
         minute_status = "pass" if abs(minute_diff or 0.0) <= max_diff_pct else "conflict"
         message = f"东方财富现价与分钟线最新收盘价差 {minute_diff:.2f}%。"
@@ -347,7 +376,13 @@ def build_item(
     name = value_at(position, "stock.name") or code
     quote = classify_quote(intraday_by_code.get(code), max_quote_lag_seconds)
     daily = classify_daily(daily_stats.get(code), as_of, min_daily_bars, max_daily_age_days)
-    minute = classify_minute(minute_stats.get(code), as_of, min_minute_bars, max_minute_age_hours)
+    minute = classify_minute(
+        minute_stats.get(code),
+        as_of,
+        min_minute_bars,
+        max_minute_age_hours,
+        require_current_date=bool(market_session.get("intraday_execution_window")),
+    )
     status = overall_status(quote, daily, minute)
     consistency = source_consistency(quote, daily, minute, max_consistency_diff_pct)
     trust = data_trust(quote, daily, minute, consistency)

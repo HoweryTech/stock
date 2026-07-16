@@ -111,6 +111,34 @@ class DataQualitySnapshotTest(unittest.TestCase):
         self.assertEqual(item["minute"]["status"], "stale")
         self.assertTrue(item["warnings"])
 
+    def test_marks_previous_day_minutes_stale_during_execution_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            position = base / "positions/POS-600000.yaml"
+            write_position(position, "600000")
+            write_daily(base / "daily.csv", {"600000": [f"2026-07-{day:02d}" for day in range(1, 16)] + ["2026-07-16"]})
+            write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-15 15:00")
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0, "latest_price": 9.7}}]}
+
+            report = build_report(
+                [position],
+                snapshot,
+                base / "daily.csv",
+                base / "minutes",
+                as_of=datetime(2026, 7, 16, 10, 0, 0),
+                min_daily_bars=10,
+                max_minute_age_hours=30.0,
+            )
+
+        item = report["items"][0]
+        self.assertEqual(item["overall_status"], "stale")
+        self.assertEqual(item["minute"]["status"], "stale")
+        self.assertIn("盘中执行窗口要求当天分钟线", item["minute"]["message"])
+        minute_check = item["source_consistency"]["checks"][0]
+        self.assertEqual(minute_check["source"], "minute")
+        self.assertEqual(minute_check["status"], "reference_only")
+        self.assertEqual(item["source_consistency"]["status"], "skipped")
+
     def test_detects_insufficient_daily_bars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
