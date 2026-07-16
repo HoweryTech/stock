@@ -151,6 +151,13 @@ th:nth-child(8) { width: 100px; }
 .positive { color: var(--red); }
 .negative { color: var(--green); }
 .state-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.state-tier { margin-top: 5px; }
+.action-tier { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+.action-tier-reverse_buyback_first, .action-tier-immediate_executable { color: var(--green); background: var(--green-bg); }
+.action-tier-place_wait_order { color: var(--blue); background: var(--blue-bg); }
+.action-tier-observe_only { color: var(--blue); background: var(--blue-bg); }
+.action-tier-forbid_chase, .action-tier-risk_reduction_first { color: var(--amber); background: var(--amber-bg); }
+.action-tier-stop_loss_first, .action-tier-data_blocked { color: var(--red); background: var(--red-bg); }
 .state-risk_review { color: var(--red); background: var(--red-bg); }
 .state-exit_risk_review { color: var(--red); background: var(--red-bg); }
 .state-market_wait { color: var(--blue); background: var(--blue-bg); }

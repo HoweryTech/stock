@@ -492,17 +492,31 @@ def build_action_decision(reverse_t_plan: dict[str, Any], reduction_plan: dict[s
     status = reverse_t_plan.get("status")
     shares = reverse_t_plan.get("trade_shares") or 100
     if status == "buyback_ready":
+        tier = "reverse_buyback_first"
+        tier_label = "反T回补优先"
         headline = f"反T回补触发：买回{shares}股"
         now = f"只在回补上限{reverse_t_plan.get('buyback_max_price'):.2f}元及以下买回{shares}股；高于该价不追。"
     elif status == "buyback_wait":
+        tier = "place_wait_order"
+        tier_label = "可挂单等待"
         headline = f"等待反T回补{shares}股"
         now = "已有开放中的反T卖出腿，当前只等待回补价，不再新增卖出。"
     elif status == "candidate":
+        tier = "place_wait_order"
+        tier_label = "可挂单等待"
         headline = f"可进入{shares}股反T人工执行候选"
         now = f"只在卖出观察区出现转弱且主力净流入不再偏强时，卖出{shares}股。"
     else:
+        tier = "observe_only"
+        tier_label = "只观察"
         headline = "现在不做反T"
         now = "保持现有持仓，不卖出、不回补。"
+    if reduction_plan.get("status") == "actionable":
+        tier = "risk_reduction_first"
+        tier_label = "减仓优先"
+    elif reduction_plan.get("status") == "granularity_review" and tier == "observe_only":
+        tier = "observe_only"
+        tier_label = "只观察"
 
     conditions: list[str] = []
     blockers = reverse_t_plan.get("blockers") or []
@@ -528,6 +542,8 @@ def build_action_decision(reverse_t_plan: dict[str, Any], reduction_plan: dict[s
     verdict = "buyback_ready" if status == "buyback_ready" else "manual_candidate" if status == "candidate" else "do_not_execute_now"
     return {
         "verdict": verdict,
+        "action_tier": tier,
+        "action_tier_label": tier_label,
         "headline": headline,
         "what_to_do_now": now,
         "reduction_decision": reduction_now,
@@ -535,6 +551,26 @@ def build_action_decision(reverse_t_plan: dict[str, Any], reduction_plan: dict[s
         "expected_effects": effects,
         "prediction_note": "这是条件决策，不是对未来价格的保证性预测。",
     }
+
+
+def apply_state_action_tier(decision: dict[str, Any], state: str, reverse_t_plan: dict[str, Any], reduction_plan: dict[str, Any]) -> dict[str, Any]:
+    tier = decision.get("action_tier") or "observe_only"
+    label = decision.get("action_tier_label") or "只观察"
+    if state == "data_stale":
+        tier, label = "data_blocked", "数据不足禁止决策"
+    elif reverse_t_plan.get("status") == "buyback_ready":
+        tier, label = "reverse_buyback_first", "反T回补优先"
+    elif state == "risk_review":
+        tier, label = "stop_loss_first", "止损优先"
+    elif reduction_plan.get("status") == "actionable":
+        tier, label = "risk_reduction_first", "减仓优先"
+    elif state in {"no_add_watch", "hold_no_add"}:
+        tier, label = "forbid_chase", "禁止追买"
+    elif tier == "place_wait_order":
+        label = "可挂单等待"
+    elif tier == "observe_only":
+        label = "只观察"
+    return {**decision, "action_tier": tier, "action_tier_label": label}
 
 
 def analyze_quote(
@@ -618,7 +654,7 @@ def analyze_quote(
         preferred_reduction_shares=reduction_plan.get("minimum_reduction_shares") if reduction_plan.get("status") == "actionable" else None,
         max_trade_ratio_pct=max_reverse_t_position_ratio_pct,
     )
-    action_decision = build_action_decision(reverse_t_plan, reduction_plan)
+    action_decision = apply_state_action_tier(build_action_decision(reverse_t_plan, reduction_plan), state, reverse_t_plan, reduction_plan)
 
     return {
         "code": code,

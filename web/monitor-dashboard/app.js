@@ -120,6 +120,34 @@ function adviceFor(item) {
   return card?.decision?.action_label || automaticDecisionFor(item).headline;
 }
 
+const actionTierLabels = {
+  reverse_buyback_first: "反T回补优先",
+  immediate_executable: "立即可执行",
+  place_wait_order: "可挂单等待",
+  observe_only: "只观察",
+  forbid_chase: "禁止追买",
+  stop_loss_first: "止损优先",
+  risk_reduction_first: "减仓优先",
+  data_blocked: "数据不足禁止决策",
+};
+
+function actionTierFor(item) {
+  const tier = item.action_decision?.action_tier;
+  if (tier) return {tier, label: item.action_decision.action_tier_label || actionTierLabels[tier] || tier};
+  const state = decisionCardFor(item)?.state || item.state;
+  if (state === "data_stale" || state === "data_insufficient" || state === "market_wait") return {tier: "data_blocked", label: "数据不足禁止决策"};
+  if (state === "exit_risk_review" || state === "risk_review") return {tier: "stop_loss_first", label: "止损优先"};
+  if (state === "risk_reduction_review") return {tier: "risk_reduction_first", label: "减仓优先"};
+  if (state === "hold_no_add" || state === "no_add_watch") return {tier: "forbid_chase", label: "禁止追买"};
+  if (state === "positive_t_watch" || state === "reverse_t_watch") return {tier: "place_wait_order", label: "可挂单等待"};
+  return {tier: "observe_only", label: "只观察"};
+}
+
+function actionTierBadge(item) {
+  const actionTier = actionTierFor(item);
+  return `<span class="action-tier action-tier-${escapeHtml(actionTier.tier)}">${escapeHtml(actionTier.label)}</span>`;
+}
+
 function decisionCardFor(item) {
   return state.decisionCards.get(item.code);
 }
@@ -345,7 +373,7 @@ function tableRow(item) {
     <td class="number"><div>${num(item.quote.latest_price)}</div><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></td>
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
-    <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span></td>
+    <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><div class="state-tier">${actionTierBadge(item)}</div></td>
     <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${techTag}${dataTag}${reverseTag}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
@@ -367,7 +395,8 @@ function mobileCard(item) {
       <div class="number"><strong>${num(item.quote.latest_price)}</strong><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></div>
     </div>
     <div class="card-row"><span>持仓盈亏</span><span class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)} · ${pct(item.position.return_pct)}</span></div>
-    <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
+    <div class="card-row"><span>${actionTierBadge(item)}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
+    <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>${escapeHtml(displayState)}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
     <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${techTag}${dataTag}${reverseTag}</div>
   </article>`;
@@ -925,6 +954,7 @@ function openDetail(code) {
       ["冲突数量", String((consistency.issues || []).length)],
     ];
     const cardMetrics = [
+      ["动作等级", actionTierFor(item).label],
       ["状态", decisionCard.state_label],
       ["建议动作", decision.action_label],
       ["置信度", decision.confidence],
@@ -965,7 +995,7 @@ function openDetail(code) {
   const decisionDetails = item.reduction_plan?.status === "actionable" ? "" : backtest?.verdict === "rule_observation_only" && decision
     ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`
     : `<h4>重新开放反T的条件</h4><ol class="reason-list"><li>至少积累30次历史触发。</li><li>回补成功率达到65%以上，且95%成功率下限不低于50%。</li><li>再经过模拟盘验证后，才恢复反T候选。</li></ol>`;
-  html += detailSection("自动操作结论", `<p><span class="state-badge state-${item.state}">${escapeHtml(automaticDecision.level)}</span></p><p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
+  html += detailSection("自动操作结论", `<p>${actionTierBadge(item)} <span class="state-badge state-${item.state}">${escapeHtml(automaticDecision.level)}</span></p><p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
   if (isReverseTPriceAlert(item)) {
     html += detailSection("反T价格提醒", `<p><strong>实时价格已进入卖出观察区</strong></p><p>这是价格到位提醒，不等待回补价出现，也不代表保证能够低价买回。</p><div class="metric-grid"><dl class="metric"><dt>卖出观察区</dt><dd>${num(item.reverse_t_plan.sell_zone[0])}–${num(item.reverse_t_plan.sell_zone[1])}元</dd></dl><dl class="metric"><dt>回补参考上限</dt><dd>${money(item.reverse_t_plan.buyback_max_price)}</dd></dl></div>`);
   }

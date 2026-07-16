@@ -217,7 +217,22 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         decision = build_action_decision(reverse, reduction)
         self.assertEqual(decision["verdict"], "do_not_execute_now")
         self.assertEqual(decision["headline"], "现在不做反T")
+        self.assertEqual(decision["action_tier"], "observe_only")
+        self.assertEqual(decision["action_tier_label"], "只观察")
         self.assertIn("不因轻微超限", decision["reduction_decision"])
+
+    def test_action_decision_marks_reverse_t_buyback_priority(self) -> None:
+        reverse = {
+            "status": "buyback_ready", "trade_shares": 100, "sell_zone": [6.32, 6.32],
+            "buyback_max_price": 6.16, "cost_estimate": {"net_profit": 5.67},
+            "failure_result": "开放反T腿等待回补。",
+        }
+        reduction = {"status": "within_limit"}
+        decision = build_action_decision(reverse, reduction)
+
+        self.assertEqual(decision["verdict"], "buyback_ready")
+        self.assertEqual(decision["action_tier"], "reverse_buyback_first")
+        self.assertEqual(decision["action_tier_label"], "反T回补优先")
 
     def test_position_warning_does_not_trigger_hard_limit(self) -> None:
         position = {
