@@ -562,6 +562,19 @@ python3 tools/serve_monitor_dashboard.py --host 127.0.0.1 --port 8765
 
 个股详情同时显示动态反T观察计划、费用估算、多周期趋势和仓位超限降仓步骤。反T根据最低佣金和税费反推交易股数与回补价，扣费后预计净收益不足时直接阻断；未达到回补价时不追价买回。所有计划均需人工确认，系统不提交订单。
 
+生成统一实时持仓决策卡：
+
+```bash
+python3 tools/build_realtime_decision_cards.py \
+  --intraday-snapshot data/metadata/intraday-monitor.latest.json \
+  --portfolio-check data/metadata/eastmoney-portfolio-check.after-threshold.json \
+  --t-opportunities data/metadata/eastmoney-portfolio-t-opportunities.near-config.json \
+  --output data/metadata/realtime-decision-cards.json \
+  --markdown-output reports/realtime-decision-cards.md
+```
+
+决策卡会把准实时行情、组合日检、做T检查、动作矩阵回测、反T回测和反T预测合并成每只持仓的状态、关键价格、阻断原因、证据链和下一步动作。它只生成辅助建议，不自动下单。
+
 准实时快照还包含主力、超大单、大单、中单和小单净流入。资金流按成交单大小统计，用于识别价格与资金分歧，不代表识别了具体机构身份。
 
 ### 新建退出计划
