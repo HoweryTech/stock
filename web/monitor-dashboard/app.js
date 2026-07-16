@@ -419,8 +419,9 @@ function renderPositions() {
   bindPositionOpeners();
 }
 
-function detailSection(title, body) {
-  return `<section class="detail-section"><h3>${title}</h3>${body}</section>`;
+function detailSection(title, body, key = "") {
+  const sectionAttr = key ? ` data-detail-section="${escapeHtml(key)}"` : "";
+  return `<section class="detail-section"${sectionAttr}><h3>${title}</h3>${body}</section>`;
 }
 
 function renderConsistencyChecks(quality) {
@@ -531,7 +532,7 @@ function renderTechnicalOperationBlock(operation, mode) {
       <strong>${escapeHtml(condition.label || condition.code || "条件")}</strong>
       <p>当前：${escapeHtml(condition.current == null ? "--" : String(condition.current))}；目标：${escapeHtml(condition.target || "--")}</p>
     </div>`).join("")}</div>` : "";
-  return `<div class="blocker-item">
+  return `<div class="blocker-item" data-detail-section="technical-gate">
     <div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(operation.tier_label || "--")}</span></div>
     <p>${escapeHtml(operation.reason || "技术操作档位不支持本轮交易。")}</p>
     <p class="secondary">${escapeHtml(operation.next_step || "等待技术面修复后再重新评估。")}</p>
@@ -948,7 +949,19 @@ function updateManualTradeImpact(form) {
   );
 }
 
-function openDetail(code) {
+function focusDetailTarget(target) {
+  if (!target) return;
+  requestAnimationFrame(() => {
+    const panel = document.querySelector("#detailPanel");
+    const targetElement = document.querySelector(`#detailContent [data-detail-section="${CSS.escape(target)}"]`);
+    if (!panel || !targetElement) return;
+    targetElement.scrollIntoView({ block: "center", behavior: "smooth" });
+    targetElement.classList.add("detail-focus");
+    setTimeout(() => targetElement.classList.remove("detail-focus"), 2200);
+  });
+}
+
+function openDetail(code, options = {}) {
   const item = state.snapshot?.items.find(entry => entry.code === code);
   if (!item) return;
   state.selectedCode = code;
@@ -1171,6 +1184,7 @@ function openDetail(code) {
   document.querySelector("#detailPanel").classList.add("open");
   document.querySelector("#detailPanel").setAttribute("aria-hidden", "false");
   document.querySelector("#scrim").hidden = false;
+  focusDetailTarget(options.target);
 }
 
 function closeDetail() {
@@ -1190,7 +1204,7 @@ function renderEvents() {
   const alertHtml = technicalAlerts.map(alert => {
     const conditions = alert.matched_conditions || [];
     const conditionText = conditions.map(condition => `${condition.label || condition.code}: ${condition.current ?? "--"} / ${condition.target || "--"}`).join("；");
-    return `<article class="event-item event-technical">
+    return `<article class="event-item event-technical event-clickable" tabindex="0" data-event-code="${escapeHtml(alert.code || "")}" data-event-target="technical-gate">
       <div class="event-time">${escapeHtml(state.decisionReport?.generated_at || "")}</div>
       <div class="event-title">${escapeHtml(alert.code || "")} ${escapeHtml(alert.name || "")} · ${escapeHtml(alert.title || "技术解锁提醒")}</div>
       <p>${escapeHtml(alert.message || "")}</p>
@@ -1291,6 +1305,18 @@ document.querySelector("#refreshAlert").addEventListener("click", event => {
   navigator.clipboard?.writeText(button.dataset.command || "");
   button.textContent = "已复制";
   setTimeout(() => { button.textContent = "复制"; }, 1200);
+});
+document.querySelector("#eventList").addEventListener("click", event => {
+  const item = event.target.closest("[data-event-code]");
+  if (!item) return;
+  openDetail(item.dataset.eventCode, { target: item.dataset.eventTarget });
+});
+document.querySelector("#eventList").addEventListener("keydown", event => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const item = event.target.closest("[data-event-code]");
+  if (!item) return;
+  event.preventDefault();
+  openDetail(item.dataset.eventCode, { target: item.dataset.eventTarget });
 });
 document.querySelector("#detailContent").addEventListener("submit", async event => {
   const form = event.target.closest(".manual-trade-form");
