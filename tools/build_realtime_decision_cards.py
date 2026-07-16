@@ -433,6 +433,8 @@ def build_blockers(
         blockers.extend(data_quality.get("blockers") or [])
     if data_trust_level(data_quality) == "low":
         blockers.extend((data_quality.get("data_trust") or {}).get("reasons") or [])
+    if source_consistency_status(data_quality) == "conflict":
+        blockers.extend((data_quality or {}).get("source_consistency", {}).get("issues") or [])
     blockers.extend(signal.get("message") for signal in intraday.get("signals", []) if signal.get("severity") in {"block", "risk"})
     blockers.extend(item.get("message") for item in (t_check or {}).get("blockers", []))
     if (technical_assessment or {}).get("label") == "bearish":
@@ -458,7 +460,7 @@ def build_next_step(state: str, action_backtest: dict[str, Any] | None, levels: 
             return f"现价 {current:.2f} 已进入做T阻断区 {near_block:.2f} 附近：先做退出/减仓复核，不做T；若跌破止损价立即转止损退出。"
         return "退出风险优先：本轮不买、不做T；先核对止损价、持仓数量和可卖数量，再决定是否生成止损退出或降风险卖出计划。"
     if state == "data_insufficient":
-        return "补齐日线、实时价、止损价或样本后重新生成决策卡。"
+        return "本轮不交易；先修复数据阻断，再重新生成实时决策卡。"
     if state == "risk_reduction_review":
         return "仓位风险优先：先计算卖出100股后的仓位和盈亏影响；若仍超限，再按100股整数倍生成降仓计划。"
     if state == "positive_t_watch":
@@ -500,11 +502,20 @@ def build_action_steps(state: str, levels: dict[str, Any], blockers: list[str], 
             "确认正式仓位上限、可卖数量和预估费用后，再生成降仓卖出计划。",
         ]
     if state == "data_insufficient":
-        return [
-            "本轮不下单，因为系统不能验证行情、样本、止损或数据一致性。",
-            "先处理阻断原因：补日线、刷新分钟线缓存、补止损价或复核行情源偏差。",
-            "重新生成实时决策卡后，再判断是否进入观察、止损或做T流程。",
-        ]
+        steps = ["本轮不买、不卖、不做T，因为系统不能验证行情、样本、止损或数据一致性。"]
+        blocker_text = "\n".join(blockers)
+        if "日线数量" in blocker_text:
+            steps.append("补齐日线历史数据：刷新该股日线，至少达到20根日线后再判断趋势和做T环境。")
+        if "分钟线" in blocker_text or "一致性" in blocker_text or "现价与分钟线" in blocker_text:
+            steps.append("刷新5分钟线缓存并复核东方财富现价与分钟线最新收盘价；偏差回到阈值内后再决策。")
+        if "止损价" in blocker_text:
+            steps.append("补齐或确认止损价；没有止损价时不允许生成做T或退出执行建议。")
+        if "样本不足" in blocker_text or "回测" in blocker_text:
+            steps.append("样本不足时只允许观察；不要把正T/反T候选当成可执行交易。")
+        if len(steps) == 1:
+            steps.append("先逐条处理阻断原因，再重新生成实时决策卡。")
+        steps.append("修复后重新运行完整日内决策链，只有状态离开数据不足后才继续判断交易动作。")
+        return steps
     if state == "positive_t_watch":
         return [
             "只允许加入人工观察，不直接买入。",

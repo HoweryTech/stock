@@ -223,6 +223,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
 
         self.assertEqual(card["state"], "data_insufficient")
         self.assertEqual(card["decision"]["action"], "complete_data_before_decision")
+        self.assertEqual(card["decision"]["next_step"], "本轮不交易；先修复数据阻断，再重新生成实时决策卡。")
+        self.assertTrue(any("补齐日线历史数据" in step for step in card["decision"]["action_steps"]))
+        self.assertTrue(any("刷新5分钟线缓存" in step for step in card["decision"]["action_steps"]))
         self.assertIn("日线数量 8 少于 20。", card["blockers"])
         self.assertEqual(card["market_context"]["data_quality_status"], "insufficient")
         self.assertEqual(card["market_context"]["data_trust_level"], "low")
