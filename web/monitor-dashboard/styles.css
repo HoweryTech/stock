@@ -242,6 +242,17 @@ th:nth-child(8) { width: 100px; }
 }
 .primary-action:disabled { opacity: 0.62; cursor: wait; }
 .manual-trade-status { min-height: 18px; margin: 0; }
+.manual-trade-impact {
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.manual-trade-impact p { margin: 0; }
+.manual-impact-grid { display: grid; gap: 8px; }
+.manual-impact-grid dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; margin: 0; }
+.manual-impact-grid dt { color: var(--muted); font-size: 12px; }
+.manual-impact-grid dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .action-exit_risk_review { border-color: #f0aaa3; background: var(--red-bg); }
 .action-data_insufficient { border-color: #e5c46d; background: var(--amber-bg); }
 .action-risk_reduction_review, .action-hold_no_add { border-color: #e5c46d; background: var(--amber-bg); }

@@ -447,10 +447,73 @@ function renderTechnicalAssessment(assessment) {
   );
 }
 
+function estimateManualTradeFees(side, price, shares) {
+  const amount = price * shares;
+  const commission = Math.max(amount * 0.0003, 5);
+  const stampDuty = side === "sell" ? amount * 0.0005 : 0;
+  const transferFee = amount * 0.00001;
+  const total = commission + stampDuty + transferFee;
+  return {commission, stampDuty, transferFee, total};
+}
+
+function manualTradeImpact(item, side, price, shares) {
+  const currentShares = Number(item.position?.shares || 0);
+  const entryPrice = Number(item.position?.entry_price || 0);
+  if (!price || !shares || price <= 0 || shares <= 0) return null;
+  const fees = estimateManualTradeFees(side, price, shares);
+  if (side === "sell") {
+    const remaining = currentShares - shares;
+    const realizedPnl = (price - entryPrice) * shares - fees.total;
+    return {
+      valid: remaining >= 0,
+      side,
+      remainingShares: remaining,
+      fees,
+      realizedPnl,
+      reverseTSupported: remaining >= 200,
+      message: remaining < 0 ? `卖出数量超过当前持仓 ${currentShares.toFixed(0)} 股。` : "",
+    };
+  }
+  const newShares = currentShares + shares;
+  const weightedCost = ((entryPrice * currentShares) + price * shares + fees.total) / newShares;
+  return {
+    valid: true,
+    side,
+    remainingShares: newShares,
+    fees,
+    weightedCost,
+    reverseTSupported: newShares >= 200,
+    message: "",
+  };
+}
+
+function renderManualTradeImpact(item, side, price, shares) {
+  const impact = manualTradeImpact(item, side, price, shares);
+  if (!impact) return '<p class="secondary">输入成交价格和数量后显示影响摘要。</p>';
+  if (!impact.valid) return `<p class="negative"><strong>${escapeHtml(impact.message)}</strong></p>`;
+  const feeText = `预估费用 ${money(impact.fees.total)}（佣金 ${money(impact.fees.commission)}，印花税 ${money(impact.fees.stampDuty)}，过户费 ${money(impact.fees.transferFee)}）`;
+  const reverseText = impact.reverseTSupported ? "成交后仍可能支持反T观察。" : "成交后持仓少于200股，不支持反T保留底仓。";
+  if (impact.side === "sell") {
+    return `<div class="manual-impact-grid">
+      <dl><dt>成交后剩余</dt><dd>${impact.remainingShares.toFixed(0)}股</dd></dl>
+      <dl><dt>预计实现盈亏</dt><dd class="${tone(impact.realizedPnl)}">${money(impact.realizedPnl)}</dd></dl>
+      <dl><dt>费用估算</dt><dd>${feeText}</dd></dl>
+      <dl><dt>做T影响</dt><dd>${reverseText}</dd></dl>
+    </div>`;
+  }
+  return `<div class="manual-impact-grid">
+    <dl><dt>成交后持仓</dt><dd>${impact.remainingShares.toFixed(0)}股</dd></dl>
+    <dl><dt>预计新成本</dt><dd>${money(impact.weightedCost)}</dd></dl>
+    <dl><dt>费用估算</dt><dd>${feeText}</dd></dl>
+    <dl><dt>做T影响</dt><dd>${reverseText}</dd></dl>
+  </div>`;
+}
+
 function manualTradeSection(item) {
   const currentPrice = item.quote?.latest_price == null ? "" : Number(item.quote.latest_price).toFixed(2);
   const maxSellShares = Number(item.position?.shares || 0);
   const defaultShares = maxSellShares >= 100 ? 100 : maxSellShares || 100;
+  const defaultImpact = renderManualTradeImpact(item, "sell", Number(currentPrice), Number(defaultShares));
   return detailSection(
     "手工成交更新",
     `<form class="manual-trade-form" data-code="${escapeHtml(item.code)}">
@@ -460,9 +523,23 @@ function manualTradeSection(item) {
         <label><span>数量</span><input name="shares" type="number" step="100" min="1" value="${escapeHtml(defaultShares)}" required></label>
         <label><span>备注</span><input name="note" type="text" placeholder="可选"></label>
       </div>
+      <div class="manual-trade-impact">${defaultImpact}</div>
       <button class="primary-action" type="submit">记录成交并刷新建议</button>
       <p class="manual-trade-status secondary" aria-live="polite"></p>
     </form>`
+  );
+}
+
+function updateManualTradeImpact(form) {
+  const code = form.dataset.code;
+  const item = state.snapshot?.items.find(entry => entry.code === code);
+  if (!item) return;
+  const target = form.querySelector(".manual-trade-impact");
+  target.innerHTML = renderManualTradeImpact(
+    item,
+    form.elements.side.value,
+    Number(form.elements.price.value),
+    Number(form.elements.shares.value),
   );
 }
 
@@ -779,6 +856,13 @@ document.querySelector("#detailContent").addEventListener("submit", async event 
     shares: Number(form.elements.shares.value),
     note: form.elements.note.value,
   };
+  updateManualTradeImpact(form);
+  const item = state.snapshot?.items.find(entry => entry.code === payload.code);
+  const impact = item ? manualTradeImpact(item, payload.side, payload.price, payload.shares) : null;
+  if (!impact || !impact.valid) {
+    status.textContent = impact?.message || "请先输入有效成交信息。";
+    return;
+  }
   status.textContent = "正在更新持仓并刷新建议...";
   button.disabled = true;
   try {
@@ -796,6 +880,14 @@ document.querySelector("#detailContent").addEventListener("submit", async event 
   } finally {
     button.disabled = false;
   }
+});
+document.querySelector("#detailContent").addEventListener("input", event => {
+  const form = event.target.closest(".manual-trade-form");
+  if (form) updateManualTradeImpact(form);
+});
+document.querySelector("#detailContent").addEventListener("change", event => {
+  const form = event.target.closest(".manual-trade-form");
+  if (form) updateManualTradeImpact(form);
 });
 document.addEventListener("keydown", event => { if (event.key === "Escape") closeDetail(); });
 
