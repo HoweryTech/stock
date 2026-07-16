@@ -672,15 +672,28 @@ function updateHeader(status) {
 
 async function loadData() {
   try {
+    const fetchJson = async (url, fallback = null, required = false) => {
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) {
+          if (required) throw new Error(`${url} ${response.status}`);
+          return fallback;
+        }
+        return await response.json();
+      } catch (error) {
+        if (required) throw error;
+        return fallback;
+      }
+    };
     const [snapshot, research, backtests, forecasts, decisionCards, refreshCheck, status, events] = await Promise.all([
-      fetch("/api/snapshot", { cache: "no-store" }).then(response => response.json()),
-      fetch("/api/research", { cache: "no-store" }).then(response => response.json()),
-      fetch("/api/reverse-t-backtest", { cache: "no-store" }).then(response => response.json()),
-      fetch("/api/reverse-t-forecast", { cache: "no-store" }).then(response => response.json()),
-      fetch("/api/decision-cards", { cache: "no-store" }).then(response => response.ok ? response.json() : { cards: [] }),
-      fetch("/api/market-wait-refresh", { cache: "no-store" }).then(response => response.ok ? response.json() : null),
-      fetch("/api/status", { cache: "no-store" }).then(response => response.json()),
-      fetch("/api/events?limit=20", { cache: "no-store" }).then(response => response.json()),
+      fetchJson("/api/snapshot", null, true),
+      fetchJson("/api/research", { items: [] }),
+      fetchJson("/api/reverse-t-backtest", { items: [] }),
+      fetchJson("/api/reverse-t-forecast", { items: [] }),
+      fetchJson("/api/decision-cards", { cards: [] }),
+      fetchJson("/api/market-wait-refresh", null),
+      fetchJson("/api/status", { running: false }),
+      fetchJson("/api/events?limit=20", { events: [] }),
     ]);
     state.snapshot = snapshot;
     state.research = new Map((research.items || []).map(item => [item.code, item]));

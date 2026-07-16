@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import sys
+import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -34,13 +35,19 @@ PID_FILE = ROOT / "data" / "metadata" / "intraday-monitor.pid"
 EVENT_FILE = ROOT / "data" / "metadata" / "intraday-monitor.events.jsonl"
 
 
-def load_json(path: Path) -> dict[str, object] | None:
+def load_json(path: Path, *, retries: int = 3, delay: float = 0.05) -> dict[str, object] | None:
     if not path.exists():
         return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    for attempt in range(retries):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            if attempt < retries - 1:
+                time.sleep(delay)
+                continue
+            return None
+        except OSError:
+            return None
 
 
 def monitor_status() -> dict[str, object]:
@@ -97,10 +104,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not path.exists():
                 self.send_json({"error": f"missing data source: {path.name}"}, 404)
                 return
-            try:
-                self.send_json(json.loads(path.read_text(encoding="utf-8")))
-            except (OSError, json.JSONDecodeError) as exc:
-                self.send_json({"error": str(exc)}, 500)
+            data = load_json(path, retries=5, delay=0.06)
+            if data is None:
+                self.send_json({"error": f"data source is temporarily unreadable: {path.name}"}, 503)
+                return
+            self.send_json(data)
             return
         if parsed.path == "/api/status":
             self.send_json(monitor_status())

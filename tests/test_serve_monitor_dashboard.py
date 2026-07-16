@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from tools.serve_monitor_dashboard import API_FILES, market_wait_refresh_status, monitor_status, recent_events
+from tools.serve_monitor_dashboard import API_FILES, load_json, market_wait_refresh_status, monitor_status, recent_events
 
 
 class ServeMonitorDashboardTest(unittest.TestCase):
@@ -28,6 +28,21 @@ class ServeMonitorDashboardTest(unittest.TestCase):
     def test_exposes_decision_cards_api(self) -> None:
         self.assertIn("/api/decision-cards", API_FILES)
         self.assertEqual(API_FILES["/api/decision-cards"].name, "realtime-decision-cards.json")
+
+    def test_load_json_retries_transient_partial_write(self) -> None:
+        class FlakyPath:
+            def __init__(self):
+                self.calls = 0
+
+            def exists(self):
+                return True
+
+            def read_text(self, encoding):
+                self.calls += 1
+                return '{"ok": true}' if self.calls > 1 else '{"ok":'
+
+        with patch("tools.serve_monitor_dashboard.time.sleep"):
+            self.assertEqual(load_json(FlakyPath(), retries=2), {"ok": True})
 
     def test_market_wait_refresh_status_uses_snapshot_assets(self) -> None:
         def fake_load_json(path):
