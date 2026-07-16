@@ -84,9 +84,11 @@ def bearish_technical_doc(code: str = "600000") -> dict:
 
 class RealtimeDecisionCardsTest(unittest.TestCase):
     def test_hard_t_blocker_takes_exit_risk_priority(self) -> None:
+        portfolio = portfolio_result()
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 10.5
         report = build_report(
             {"items": [intraday_item()]},
-            portfolio_result(),
+            portfolio,
             t_result(blockers=[{"code": "near_stop_loss", "message": "距离止损不足1%。"}]),
             None,
             {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
@@ -100,9 +102,13 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["decision"]["action"], "create_exit_or_risk_review")
         self.assertEqual(card["decision"]["action_label"], "止损风险优先：不补仓、不做T")
         self.assertFalse(card["decision"]["execution_allowed"])
-        self.assertIn("不做T", card["decision"]["next_step"])
-        self.assertIn("立即停止买入、补仓和做T", card["decision"]["action_steps"][0])
-        self.assertTrue(any("做T阻断参考价" in step for step in card["decision"]["action_steps"]))
+        self.assertIn("禁止做T", card["decision"]["next_step"])
+        self.assertIn("禁止买入、补仓、做T", card["decision"]["action_steps"][0])
+        self.assertTrue(any("交易/卖出" in step for step in card["decision"]["action_steps"]))
+        self.assertTrue(any("证券代码输入" in step for step in card["decision"]["action_steps"]))
+        self.assertTrue(any("卖出数量输入" in step for step in card["decision"]["action_steps"]))
+        self.assertTrue(any("卖出价格输入" in step for step in card["decision"]["action_steps"]))
+        self.assertTrue(any("做T阻断价" in step for step in card["decision"]["action_steps"]))
         self.assertIn("距离止损不足1%。", card["blockers"])
 
     def test_positive_t_candidate_is_watch_only(self) -> None:

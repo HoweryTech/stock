@@ -474,25 +474,60 @@ def build_next_step(state: str, action_backtest: dict[str, Any] | None, levels: 
     return "本轮不买不卖，继续监控关键价位。"
 
 
-def build_action_steps(state: str, levels: dict[str, Any], blockers: list[str], action_backtest: dict[str, Any] | None) -> list[str]:
+def whole_lot_shares(value: Any) -> int | None:
+    shares = as_float(value)
+    if shares is None or shares <= 0:
+        return None
+    if shares < 100:
+        return int(shares)
+    return int(shares // 100 * 100)
+
+
+def build_action_steps(
+    state: str,
+    levels: dict[str, Any],
+    blockers: list[str],
+    action_backtest: dict[str, Any] | None,
+    *,
+    code: str | None = None,
+    name: str | None = None,
+    position: dict[str, Any] | None = None,
+) -> list[str]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
     near_block = as_float(levels.get("near_stop_block_price"))
+    shares = whole_lot_shares((position or {}).get("shares"))
+    stock_text = f"{code or '-'} {name or ''}".strip()
     if state == "exit_risk_review":
-        steps = ["立即停止买入、补仓和做T；退出风险优先级高于降低成本。"]
+        steps = [f"先确认对象：{stock_text}。本轮禁止买入、补仓、做T；只允许处理卖出风险。"]
         if current is not None and stop_loss is not None:
             if current <= stop_loss:
-                steps.append(f"现价 {current:.2f} 已触及/跌破止损价 {stop_loss:.2f}，按止损退出方向处理，先准备卖出计划。")
+                steps.extend(
+                    [
+                        "打开券商交易软件，进入“交易/卖出”。",
+                        f"证券代码输入：{code or '该股票代码'}；核对名称是{name or '当前持仓股票'}。",
+                        f"卖出数量输入：{shares} 股；如果券商显示可卖数量少于该数，输入券商显示的全部可卖数量。" if shares else "卖出数量输入：券商显示的全部可卖数量；数量不足100股时按券商允许的零股/全部卖出规则处理。",
+                        f"卖出价格输入：先参考现价 {current:.2f}；如果盘口买一价低于现价，用买一价或可成交价，不要高挂等反弹。",
+                        "点击卖出前最后核对：代码、名称、卖出数量、卖出价格、方向是“卖出”。",
+                        "提交后只检查是否成交；未成交时不要改成买入或补仓，只允许按更接近可成交的卖出价重新挂单。",
+                    ]
+                )
             else:
-                steps.append(f"现价 {current:.2f} 尚未跌破止损价 {stop_loss:.2f}，但已进入风险复核；继续盯住止损触发。")
+                steps.extend(
+                    [
+                        f"当前还没有跌破止损价：现价 {current:.2f}，止损价 {stop_loss:.2f}。",
+                        "现在不要下卖单，也不要补仓或做T。",
+                        f"在交易软件或行情软件设置价格提醒：{stock_text} 低于/等于 {stop_loss:.2f} 立即提醒。",
+                        "如果提醒触发，按“交易/卖出 -> 输入代码 -> 输入全部可卖数量 -> 用可成交卖出价提交”的止损流程处理。",
+                    ]
+                )
         elif stop_loss is None:
-            steps.append("缺少止损价时不能判断卖出触发位，先补齐止损价再决策。")
+            steps.append("缺少止损价时不能判断卖出触发位；先在持仓文件补齐止损价，不下单。")
         if near_block is not None:
-            steps.append(f"做T阻断参考价为 {near_block:.2f}；现价低于或接近该价时，不允许用做T替代止损处理。")
-        steps.append("交易动作只允许二选一：已触发止损则走止损卖出计划；未触发止损则只观察或做减仓复核。")
-        steps.append("下单前必须人工确认卖出数量、限价/市价方式和是否保留底仓；系统不自动下单。")
+            steps.append(f"做T阻断价是 {near_block:.2f}；价格在该价附近或更低时，不允许买入做T。")
+        steps.append("成交后记录卖出价格、卖出数量和原因：止损/退出风险；再进入卖出执行记录和复盘。")
         if blockers:
-            steps.append(f"本轮主要阻断：{blockers[0]}")
+            steps.append(f"本轮主要风险提示：{blockers[0]}")
         return steps
     if state == "risk_reduction_review":
         return [
@@ -502,10 +537,10 @@ def build_action_steps(state: str, levels: dict[str, Any], blockers: list[str], 
             "确认正式仓位上限、可卖数量和预估费用后，再生成降仓卖出计划。",
         ]
     if state == "data_insufficient":
-        steps = ["本轮不买、不卖、不做T，因为系统不能验证行情、样本、止损或数据一致性。"]
+        steps = [f"先确认对象：{stock_text}。本轮不买、不卖、不做T，因为系统不能验证行情、样本、止损或数据一致性。"]
         blocker_text = "\n".join(blockers)
         if "日线数量" in blocker_text:
-            steps.append("补齐日线历史数据：刷新该股日线，至少达到20根日线后再判断趋势和做T环境。")
+            steps.append(f"补齐日线历史数据：刷新 {code or '该股票'} 的日线，至少达到20根日线后再判断趋势和做T环境。")
         if "分钟线" in blocker_text or "一致性" in blocker_text or "现价与分钟线" in blocker_text:
             steps.append("刷新5分钟线缓存并复核东方财富现价与分钟线最新收盘价；偏差回到阈值内后再决策。")
         if "止损价" in blocker_text:
@@ -609,7 +644,15 @@ def build_card(
             "execution_allowed": execution_allowed,
             "confidence": confidence_for(state, evidence, blockers),
             "next_step": build_next_step(state, action_backtest, levels),
-            "action_steps": build_action_steps(state, levels, blockers, action_backtest),
+            "action_steps": build_action_steps(
+                state,
+                levels,
+                blockers,
+                action_backtest,
+                code=str(intraday.get("code") or ""),
+                name=str(intraday.get("name") or ""),
+                position=intraday.get("position", {}),
+            ),
         },
         "price_levels": levels,
         "position": intraday.get("position", {}),
