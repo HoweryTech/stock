@@ -448,6 +448,16 @@ function renderConsistencyChecks(quality) {
 
 function renderTechnicalAssessment(assessment) {
   if (!assessment?.available) return "";
+  const dimensionLabels = {
+    trend: "趋势分",
+    risk: "风险分",
+    reversal: "反转分",
+    volume_confirmation: "量能确认",
+    multi_timeframe: "多周期一致",
+  };
+  const dimensionRows = Object.entries(assessment.dimension_scores || {}).map(([key, value]) => `
+    <dl class="metric"><dt>${escapeHtml(dimensionLabels[key] || key)}</dt><dd class="${tone(value)}">${value == null ? "--" : Number(value).toFixed(1)}</dd></dl>
+  `).join("");
   const periodRows = Object.entries(assessment.periods || {}).map(([period, data]) => `
     <tr>
       <td>${escapeHtml(periodLabels[period] || period)}</td>
@@ -467,6 +477,7 @@ function renderTechnicalAssessment(assessment) {
       <dl class="metric"><dt>综合技术分</dt><dd>${assessment.score == null ? "--" : Number(assessment.score).toFixed(1)}</dd></dl>
       <dl class="metric"><dt>判断标签</dt><dd>${escapeHtml(technicalLabel(assessment))}</dd></dl>
     </div>
+    ${dimensionRows ? `<h4>综合评分拆解</h4><div class="metric-grid">${dimensionRows}</div>` : ""}
     <div class="technical-table-wrap">
       <table class="technical-table">
         <thead><tr><th>周期</th><th>分</th><th>MACD柱</th><th>BOLL%b</th><th>RSI14</th><th>KDJ-J</th><th>ATR%</th><th>量比20</th></tr></thead>

@@ -265,9 +265,107 @@ def score_period_indicators(period: str, period_data: dict[str, Any], weight: fl
     return score, signals
 
 
+def score_dimension(value: float, *, limit: float = 100.0) -> float:
+    return max(-limit, min(limit, value))
+
+
+def build_technical_dimension_scores(periods: dict[str, Any], weights: dict[str, float]) -> tuple[dict[str, float], list[str]]:
+    dimensions = {
+        "trend": 0.0,
+        "risk": 0.0,
+        "reversal": 0.0,
+        "volume_confirmation": 0.0,
+        "multi_timeframe": 0.0,
+    }
+    signals: list[str] = []
+    trend_directions: list[int] = []
+    for period, weight in weights.items():
+        data = periods.get(period) or {}
+        macd_histogram = indicator_value(data, "macd.histogram")
+        macd_dif = indicator_value(data, "macd.dif")
+        macd_dea = indicator_value(data, "macd.dea")
+        period_trend = 0.0
+        if macd_histogram is not None:
+            period_trend += 18 if macd_histogram > 0 else -18 if macd_histogram < 0 else 0
+        if macd_dif is not None and macd_dea is not None:
+            period_trend += 10 if macd_dif > macd_dea else -10 if macd_dif < macd_dea else 0
+        percent_b = indicator_value(data, "boll.percent_b")
+        if percent_b is not None:
+            if 0.45 <= percent_b <= 0.8:
+                period_trend += 8
+            elif percent_b < 0.2:
+                period_trend -= 10
+            elif percent_b > 0.95:
+                period_trend -= 4
+        dimensions["trend"] += period_trend * weight
+        if period_trend > 4:
+            trend_directions.append(1)
+        elif period_trend < -4:
+            trend_directions.append(-1)
+
+        atr_pct = indicator_value(data, "atr.atr_pct")
+        rsi14 = indicator_value(data, "rsi.rsi14")
+        kdj_j = indicator_value(data, "kdj.j")
+        period_risk = 0.0
+        if atr_pct is not None:
+            if atr_pct >= 8:
+                period_risk -= 22
+            elif atr_pct >= 5:
+                period_risk -= 12
+            else:
+                period_risk += 5
+        if rsi14 is not None and (rsi14 > 75 or rsi14 < 25):
+            period_risk -= 10
+        if percent_b is not None and (percent_b > 1 or percent_b < 0):
+            period_risk -= 8
+        if kdj_j is not None and (kdj_j > 100 or kdj_j < 0):
+            period_risk -= 6
+        dimensions["risk"] += period_risk * weight
+
+        period_reversal = 0.0
+        if rsi14 is not None:
+            if 30 <= rsi14 <= 45:
+                period_reversal += 10
+            elif rsi14 < 25:
+                period_reversal -= 8
+            elif rsi14 > 75:
+                period_reversal -= 8
+        if percent_b is not None and 0.15 <= percent_b <= 0.35:
+            period_reversal += 8
+        if kdj_j is not None and 0 <= kdj_j <= 30:
+            period_reversal += 6
+        dimensions["reversal"] += period_reversal * weight
+
+        volume_ratio = indicator_value(data, "volume.volume_ratio_20")
+        period_volume = 0.0
+        if volume_ratio is not None:
+            if volume_ratio >= 1.5:
+                period_volume += 16 if (macd_histogram or 0) >= 0 else -8
+            elif volume_ratio >= 1.0:
+                period_volume += 6
+            elif volume_ratio < 0.7:
+                period_volume -= 8
+        dimensions["volume_confirmation"] += period_volume * weight
+
+    if trend_directions:
+        positive = trend_directions.count(1)
+        negative = trend_directions.count(-1)
+        if positive >= 2:
+            dimensions["multi_timeframe"] = 18.0
+            signals.append("日/周/月至少两个周期趋势偏多，多周期一致性支持。")
+        elif negative >= 2:
+            dimensions["multi_timeframe"] = -18.0
+            signals.append("日/周/月至少两个周期趋势偏弱，多周期一致性偏空。")
+        else:
+            dimensions["multi_timeframe"] = 0.0
+            signals.append("多周期方向不一致，降低单一周期信号权重。")
+    normalized = {key: rounded(score_dimension(value)) for key, value in dimensions.items()}
+    return normalized, signals
+
+
 def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> dict[str, Any]:
     if not technical_indicators:
-        return {"available": False, "score": None, "label": "missing", "signals": [], "periods": {}}
+        return {"available": False, "score": None, "label": "missing", "signals": [], "periods": {}, "dimension_scores": {}, "dimension_signals": []}
     periods = technical_indicators.get("periods") or {}
     weights = {"daily": 0.55, "weekly": 0.35, "monthly": 0.10}
     total = 0.0
@@ -289,6 +387,7 @@ def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> d
             "atr_pct": rounded(indicator_value(period_data, "atr.atr_pct")),
             "volume_ratio_20": rounded(indicator_value(period_data, "volume.volume_ratio_20")),
         }
+    dimension_scores, dimension_signals = build_technical_dimension_scores(periods, weights)
     if total >= 18:
         label = "bullish"
     elif total <= -18:
@@ -303,8 +402,10 @@ def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> d
         "available": True,
         "score": rounded(total),
         "label": label,
-        "signals": signals[:8],
+        "signals": (signals + dimension_signals)[:8],
         "periods": period_summary,
+        "dimension_scores": dimension_scores,
+        "dimension_signals": dimension_signals,
     }
 
 

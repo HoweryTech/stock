@@ -231,6 +231,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
 
         self.assertEqual(card["state"], "positive_t_watch")
         self.assertEqual(card["technical_assessment"]["label"], "bullish")
+        self.assertGreater(card["technical_assessment"]["dimension_scores"]["trend"], 0)
+        self.assertGreater(card["technical_assessment"]["dimension_scores"]["volume_confirmation"], 0)
+        self.assertIn("multi_timeframe", card["technical_assessment"]["dimension_scores"])
         self.assertEqual(card["capital_plan"]["single_add_tier"], "strong")
         self.assertEqual(card["capital_plan"]["effective_single_add_pct_total_assets"], 5.0)
         self.assertEqual(card["capital_plan"]["max_additional_capital"], 2500.0)
@@ -513,6 +516,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["decision"]["action"], "hold_without_adding")
         self.assertEqual(card["technical_assessment"]["label"], "bearish")
         self.assertLess(card["technical_assessment"]["score"], -18)
+        self.assertLess(card["technical_assessment"]["dimension_scores"]["trend"], 0)
+        self.assertTrue(card["technical_assessment"]["dimension_signals"])
         self.assertFalse(card["capital_plan"]["applicable"])
         self.assertEqual(card["market_context"]["technical_label"], "bearish")
         self.assertIn("多周期技术指标偏弱，本轮禁止补仓和做T。", card["blockers"])
