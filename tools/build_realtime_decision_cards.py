@@ -557,6 +557,7 @@ def build_positive_timing(
     t_check: dict[str, Any] | None,
     minute_bars: list[dict[str, Any]] | None,
     technical_assessment: dict[str, Any] | None = None,
+    technical_operation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not t_check or t_check.get("conclusion") != "positive_t_candidate":
         return {"available": False, "status": "not_applicable", "score": None, "signals": [], "blockers": [], "next_action": "当前不是正T候选，不评估正T买入腿。", "buy_zone": None, "target_sell_zone": None}
@@ -626,7 +627,8 @@ def build_positive_timing(
     volume_ratio = None if avg_volume_20 in (None, 0) or not volumes else volumes[-1] / avg_volume_20
     main_flow = as_float(value_at(intraday, "capital_flow.main_net_inflow_ratio_pct"))
     technical_label = str((technical_assessment or {}).get("label") or "")
-    technical_supported = technical_label not in {"bearish", "slightly_bearish"}
+    technical_operation = technical_operation or build_technical_operation(technical_assessment)
+    technical_supported = technical_operation.get("tier") == "not_available" or bool(technical_operation.get("allow_buy_watch"))
     recaptured_ma5 = (
         current is not None
         and ma5 is not None
@@ -711,7 +713,7 @@ def build_positive_timing(
     score = max(0.0, min(100.0, score))
     confirmation_count = sum(bool(item) for item in (recaptured_ma5, bullish_volume_candle, flow_confirmed))
     if not technical_supported:
-        signals.append(f"日/周/月技术背景为 {technical_label}，不允许仅凭分时信号做正T。")
+        signals.append(f"技术操作档位为 {technical_operation.get('tier_label') or technical_label}，不允许仅凭分时信号做正T。")
     if confirmation_count < 2:
         signals.append("确认信号少于2个，需要等待MA5修复、放量阳线或主力净流入进一步共振。")
     buy_high = min(value for value in [current, ma5] if value is not None) if ma5 is not None else current
@@ -747,11 +749,11 @@ def build_positive_timing(
     if not technical_supported:
         blockers.append(
             positive_t_blocker(
-                "higher_timeframe_weak",
-                "日/周/月背景",
-                technical_label,
-                "大周期技术背景偏弱，不能只凭盘中反弹去追加资金做正T。",
-                "等待技术背景恢复到 neutral 或更强；恢复前只允许持有观察、减仓或风险复核，不做正T买入腿。",
+                "technical_operation_blocked",
+                "技术操作档位",
+                technical_operation.get("tier_label") or technical_label,
+                technical_operation.get("reason") or "技术操作档位不支持正T买入腿。",
+                technical_operation.get("next_step") or "等待技术背景恢复后再重新评估正T。",
             )
         )
     next_action = "可进入正T买入观察区；按买入区、目标卖出区和资金上限执行，不长期摊低成本。"
@@ -784,6 +786,8 @@ def build_positive_timing(
             "confirmation_count": confirmation_count,
             "technical_label": technical_label or None,
             "technical_supported": technical_supported,
+            "technical_operation_tier": technical_operation.get("tier"),
+            "technical_operation_label": technical_operation.get("tier_label"),
         },
     }
 
@@ -1334,7 +1338,7 @@ def build_card(
 ) -> dict[str, Any]:
     technical_assessment = build_technical_assessment(technical_indicators)
     technical_operation = build_technical_operation(technical_assessment)
-    positive_timing = build_positive_timing(intraday, t_check, minute_bars, technical_assessment)
+    positive_timing = build_positive_timing(intraday, t_check, minute_bars, technical_assessment, technical_operation)
     state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment)
     evidence = build_evidence(
         intraday,

@@ -519,10 +519,23 @@ function renderCapitalPlan(plan) {
   );
 }
 
-function renderPositiveTiming(timing) {
+function renderTechnicalOperationBlock(operation, mode) {
+  if (!operation?.tier) return "";
+  const allowed = mode === "positive_t" ? operation.allow_buy_watch : operation.allow_t_watch;
+  if (allowed || operation.tier === "not_available") return "";
+  const label = mode === "positive_t" ? "正T被技术面阻断" : "反T被技术面阻断";
+  return `<div class="blocker-item">
+    <div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(operation.tier_label || "--")}</span></div>
+    <p>${escapeHtml(operation.reason || "技术操作档位不支持本轮交易。")}</p>
+    <p class="secondary">${escapeHtml(operation.next_step || "等待技术面修复后再重新评估。")}</p>
+  </div>`;
+}
+
+function renderPositiveTiming(timing, technicalOperation = null) {
   if (!timing || timing.status === "not_applicable") return "";
   const buyZone = timing.buy_zone ? `${num(timing.buy_zone[0])}–${num(timing.buy_zone[1])}元` : "--";
   const targetZone = timing.target_sell_zone ? `${num(timing.target_sell_zone[0])}–${num(timing.target_sell_zone[1])}元` : "--";
+  const technicalBlock = renderTechnicalOperationBlock(technicalOperation, "positive_t");
   const metrics = [
     ["状态", timing.status === "confirmed" ? "分时确认" : "继续等待"],
     ["评分", timing.score == null ? "--" : `${Number(timing.score).toFixed(1)} / ${timing.threshold}`],
@@ -540,6 +553,7 @@ function renderPositiveTiming(timing) {
     ["放量阳线", timing.metrics?.bullish_volume_candle ? "是" : "否"],
     ["资金流确认", timing.metrics?.flow_confirmed ? "是" : "否"],
     ["大周期技术背景", timing.metrics?.technical_label || "--"],
+    ["技术操作档位", timing.metrics?.technical_operation_label || technicalOperation?.tier_label || "--"],
     ["技术背景允许正T", timing.metrics?.technical_supported === false ? "否" : "是"],
   ];
   const signals = timing.signals || [];
@@ -548,6 +562,7 @@ function renderPositiveTiming(timing) {
     "正T分时评分",
     `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     ${timing.next_action ? `<div class="action-panel action-${timing.status === "confirmed" ? "positive_t_watch" : "hold_no_add"}"><div class="action-panel-title">下一步动作</div><p>${escapeHtml(timing.next_action)}</p></div>` : ""}
+    ${technicalBlock ? `<h4>技术面门禁</h4><div class="blocker-list">${technicalBlock}</div>` : ""}
     ${blockers.length ? `<h4>未能执行正T的原因</h4><div class="blocker-list">${blockers.map(blocker => `
       <div class="blocker-item">
         <div><strong>${escapeHtml(blocker.label || blocker.code || "阻断项")}</strong><span>${escapeHtml(blocker.current || "--")}</span></div>
@@ -833,6 +848,7 @@ async function submitManualTrade(payload, form) {
 
 function reverseTradePresetControls(item) {
   const plan = item.reverse_t_plan || {};
+  const technicalOperation = decisionCardFor(item)?.decision?.technical_operation || {};
   const sellZone = plan.sell_zone || [];
   const shares = Number(plan.trade_shares || 0);
   if (!shares) return "";
@@ -847,6 +863,7 @@ function reverseTradePresetControls(item) {
     </div></div>`;
   }
   if (plan.status !== "candidate" || sellZone.length < 2) return "";
+  if (technicalOperation.tier && !technicalOperation.allow_t_watch) return "";
   const sellPrice = Number(sellZone[0]);
   const buybackPrice = plan.buyback_max_price == null ? null : Number(plan.buyback_max_price);
   const buttons = [
@@ -931,6 +948,7 @@ function openDetail(code) {
   const backtest = state.backtests.get(code);
   const forecast = state.forecasts.get(code);
   const decisionCard = state.decisionCards.get(code);
+  const technicalOperation = decisionCard?.decision?.technical_operation || {};
   const automaticDecision = automaticDecisionFor(item);
   document.querySelector("#detailCode").textContent = code;
   document.querySelector("#detailName").textContent = item.name;
@@ -945,7 +963,6 @@ function openDetail(code) {
   if (decisionCard) {
     const levels = decisionCard.price_levels || {};
     const decision = decisionCard.decision || {};
-    const technicalOperation = decision.technical_operation || {};
     const quality = decisionCard.data_quality || {};
     const qualityMetrics = [
       ["总状态", qualityLabel(quality)],
@@ -996,7 +1013,7 @@ function openDetail(code) {
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
     );
-    html += renderPositiveTiming(decisionCard.positive_timing);
+    html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);
     html += renderCapitalPlan(decisionCard.capital_plan);
     html += detailSection(
       "数据质量",
@@ -1079,6 +1096,7 @@ function openDetail(code) {
   const reversePlan = item.reverse_t_plan;
   html += reverseTClosureSection(item);
   if (reversePlan) {
+    const reverseTechnicalBlock = renderTechnicalOperationBlock(technicalOperation, "reverse_t");
     const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "仅供观察，不可执行";
     const zone = reversePlan.sell_zone ? `${num(reversePlan.sell_zone[0])}–${num(reversePlan.sell_zone[1])}元` : "--";
     const planMetrics = [
@@ -1112,6 +1130,7 @@ function openDetail(code) {
     const executionSteps = reversePlan.execution_steps || reversePlan.instructions || [];
     html += detailSection("反T降低成本", `<div class="metric-grid">${planMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>
       ${reversePlan.next_action ? `<div class="action-panel action-${reversePlan.status === "candidate" ? "reverse_t_watch" : "hold_no_add"}"><div class="action-panel-title">下一步动作</div><p>${escapeHtml(reversePlan.next_action)}</p></div>` : ""}
+      ${reverseTechnicalBlock ? `<h4>技术面门禁</h4><div class="blocker-list">${reverseTechnicalBlock}</div>` : ""}
       <p>${escapeHtml(reversePlan.failure_result || "")}</p>
       ${blockerHtml || ""}
       ${executionSteps.length ? `<h4>操作步骤</h4><ol class="reason-list">${executionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}`);

@@ -297,7 +297,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(card["technical_assessment"]["summary"])
         self.assertFalse(card["decision"]["technical_operation"]["allow_buy_watch"])
         self.assertFalse(card["positive_timing"]["metrics"]["technical_supported"])
-        self.assertTrue(any(blocker["code"] == "higher_timeframe_weak" for blocker in card["positive_timing"]["blockers"]))
+        self.assertTrue(any(blocker["code"] == "technical_operation_blocked" for blocker in card["positive_timing"]["blockers"]))
+        self.assertEqual(card["positive_timing"]["metrics"]["technical_operation_tier"], "risk_control_first")
         self.assertFalse(card["capital_plan"]["applicable"])
 
     def test_positive_t_candidate_without_intraday_confirmation_waits(self) -> None:
