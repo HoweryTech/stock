@@ -300,6 +300,15 @@ th:nth-child(8) { width: 100px; }
 .confirm-body { padding: 15px 16px; }
 .confirm-body p { margin: 0 0 10px; }
 .confirm-body h4 { margin: 14px 0 8px; font-size: 12px; color: var(--muted); }
+.confirm-error {
+  margin: 0 16px 12px;
+  padding: 9px 10px;
+  border: 1px solid #f0aaa3;
+  border-radius: 6px;
+  color: var(--red);
+  background: var(--red-bg);
+  overflow-wrap: anywhere;
+}
 .confirm-actions { padding: 13px 16px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 10px; }
 .action-exit_risk_review { border-color: #f0aaa3; background: var(--red-bg); }
 .action-data_insufficient { border-color: #e5c46d; background: var(--amber-bg); }

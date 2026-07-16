@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>持仓监控台</title>
-  <link rel="stylesheet" href="/styles.css?v=20260716-manual-confirm-modal">
+  <link rel="stylesheet" href="/styles.css?v=20260716-manual-trade-errors">
 </head>
 <body>
   <header class="app-header">
@@ -92,6 +92,7 @@
         <button class="close-button" id="manualTradeCancelTop" type="button" aria-label="关闭确认" title="关闭">×</button>
       </div>
       <div class="confirm-body" id="manualTradeConfirmBody"></div>
+      <p class="confirm-error" id="manualTradeConfirmError" hidden></p>
       <div class="confirm-actions">
         <button class="secondary-action" id="manualTradeCancel" type="button">取消</button>
         <button class="primary-action danger-action" id="manualTradeConfirmButton" type="button">确认写入并刷新</button>
@@ -100,6 +101,6 @@
   </section>
   <div class="scrim" id="scrim" hidden></div>
 
-  <script src="/app.js?v=20260716-manual-confirm-modal" defer></script>
+  <script src="/app.js?v=20260716-manual-trade-errors" defer></script>
 </body>
 </html>

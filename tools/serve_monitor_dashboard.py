@@ -225,6 +225,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 raise ValueError("request body must be a JSON object")
             self.send_json(handle_manual_trade(payload))
         except Exception as exc:
+            print(f"manual trade request failed: {exc}", file=sys.stderr, flush=True)
             self.send_json({"ok": False, "error": str(exc)}, 400)
 
     def log_message(self, format: str, *args: object) -> None:

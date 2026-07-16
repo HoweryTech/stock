@@ -633,10 +633,33 @@ function renderManualTradeConfirmation(item, payload, impact) {
     <p class="secondary">确认后会立即写入本地持仓文件，并刷新实时建议。</p>`;
 }
 
+function setManualTradeConfirmError(message) {
+  const target = document.querySelector("#manualTradeConfirmError");
+  target.textContent = message || "";
+  target.hidden = !message;
+}
+
+function manualTradePreflightError(item, payload, impact) {
+  if (!Number.isFinite(payload.price) || payload.price <= 0) return "成交价格无效，请重新填入真实成交价。";
+  if (!Number.isFinite(payload.shares) || payload.shares <= 0) return "成交数量无效，请重新填入真实成交股数。";
+  if (payload.shares % 100 !== 0) return "A股手工成交数量应按100股整数手填写。";
+  if (payload.trade_intent !== "reverse_t_close") return "";
+  const plan = item.reverse_t_plan || {};
+  const openLegId = plan.open_reverse_t_leg?.id || "";
+  if (!openLegId) return "当前没有开放中的反T卖出腿，不能按反T回补写入。";
+  if (!payload.linked_trade_id) return "反T回补缺少关联卖出记录，请点击系统的“填入反T回补”按钮重新填入。";
+  if (payload.linked_trade_id !== openLegId) return `关联卖出记录不匹配：当前开放腿是 ${openLegId}。`;
+  const buybackMax = plan.buyback_max_price == null ? null : Number(plan.buyback_max_price);
+  if (buybackMax != null && payload.price > buybackMax + 1e-9) return `回补价 ${num(payload.price)} 高于上限 ${num(buybackMax)}，不要追买。`;
+  if (impact.remainingShares < 200) return "回补后持仓仍不足200股，反T闭环股数可能不匹配，请先复核成交数量。";
+  return "";
+}
+
 function openManualTradeConfirm(form, payload, item, impact) {
   state.pendingManualTrade = { form, payload };
   document.querySelector("#manualTradeConfirmTitle").textContent = `${payload.side === "sell" ? "确认卖出" : "确认买入"} ${item.name}`;
   document.querySelector("#manualTradeConfirmBody").innerHTML = renderManualTradeConfirmation(item, payload, impact);
+  setManualTradeConfirmError("");
   document.querySelector("#manualTradeConfirm").hidden = false;
   document.querySelector("#manualTradeConfirm").setAttribute("aria-hidden", "false");
 }
@@ -646,6 +669,7 @@ function closeManualTradeConfirm() {
   document.querySelector("#manualTradeConfirm").hidden = true;
   document.querySelector("#manualTradeConfirm").setAttribute("aria-hidden", "true");
   document.querySelector("#manualTradeConfirmButton").disabled = false;
+  setManualTradeConfirmError("");
 }
 
 function prepareManualTradeConfirmation(form) {
@@ -656,6 +680,11 @@ function prepareManualTradeConfirmation(form) {
   const impact = item ? manualTradeImpact(item, payload.side, payload.price, payload.shares) : null;
   if (!impact || !impact.valid) {
     status.textContent = impact?.message || "请先输入有效成交信息。";
+    return;
+  }
+  const preflightError = manualTradePreflightError(item, payload, impact);
+  if (preflightError) {
+    status.textContent = preflightError;
     return;
   }
   status.textContent = "请在确认弹层核对成交后影响。";
@@ -678,6 +707,7 @@ async function submitManualTrade(payload, form) {
     await loadData();
   } catch (error) {
     status.textContent = `更新失败：${error.message}`;
+    setManualTradeConfirmError(`写入失败：${error.message}`);
     throw error;
   }
 }
