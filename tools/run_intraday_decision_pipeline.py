@@ -107,6 +107,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         max_daily_age_days=args.max_daily_age_days,
         min_minute_bars=args.min_minute_bars,
         max_minute_age_hours=args.max_minute_age_hours,
+        max_consistency_diff_pct=args.max_consistency_diff_pct,
     )
     write_json(Path(args.data_quality_output), data_quality)
     write_text(Path(args.data_quality_markdown_output), render_data_quality_markdown(data_quality))
@@ -213,6 +214,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-daily-age-days", type=int, default=5)
     parser.add_argument("--min-minute-bars", type=int, default=120)
     parser.add_argument("--max-minute-age-hours", type=float, default=30.0)
+    parser.add_argument("--max-consistency-diff-pct", type=float, default=1.0)
     parser.add_argument("--action-backtests", default="data/metadata/portfolio-action-matrix-backtests.after-plan.json")
     parser.add_argument("--reverse-t-backtest", default="data/metadata/reverse-t-backtest.json")
     parser.add_argument("--reverse-t-forecast", default="data/metadata/reverse-t-forecast.json")

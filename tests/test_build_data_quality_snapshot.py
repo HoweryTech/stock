@@ -51,7 +51,7 @@ class DataQualitySnapshotTest(unittest.TestCase):
             write_position(position, "600000")
             write_daily(base / "daily.csv", {"600000": [f"2026-07-{day:02d}" for day in range(1, 16)] + ["2026-07-16"]})
             write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-16 10:00")
-            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0}}]}
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0, "latest_price": 10.0}}]}
 
             report = build_report(
                 [position],
@@ -67,6 +67,7 @@ class DataQualitySnapshotTest(unittest.TestCase):
         self.assertEqual(report["items"][0]["overall_status"], "usable")
         self.assertEqual(report["items"][0]["data_trust"]["level"], "high")
         self.assertTrue(report["items"][0]["data_trust"]["intraday_decision_allowed"])
+        self.assertEqual(report["items"][0]["source_consistency"]["status"], "pass")
         self.assertIn("持仓数据质量快照", render_markdown(report))
 
     def test_detects_stale_quote_and_minute_cache(self) -> None:
@@ -76,7 +77,7 @@ class DataQualitySnapshotTest(unittest.TestCase):
             write_position(position, "600000")
             write_daily(base / "daily.csv", {"600000": [f"2026-07-{day:02d}" for day in range(1, 22)]})
             write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-14 15:00")
-            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 120.0}}]}
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 120.0, "latest_price": 10.0}}]}
 
             report = build_report(
                 [position],
@@ -102,7 +103,7 @@ class DataQualitySnapshotTest(unittest.TestCase):
             write_position(position, "001248")
             write_daily(base / "daily.csv", {"001248": ["2026-07-15"] * 8})
             write_minutes(base / "minutes/001248.json", "001248", 130, "2026-07-16 10:00")
-            snapshot = {"items": [{"code": "001248", "quote": {"quote_lag_seconds": 3.0}}]}
+            snapshot = {"items": [{"code": "001248", "quote": {"quote_lag_seconds": 3.0, "latest_price": 10.0}}]}
 
             report = build_report([position], snapshot, base / "daily.csv", base / "minutes", as_of=datetime(2026, 7, 16, 10, 5, 0))
 
@@ -112,6 +113,29 @@ class DataQualitySnapshotTest(unittest.TestCase):
         self.assertEqual(item["daily"]["status"], "insufficient")
         self.assertTrue(item["blockers"])
 
+    def test_missing_quote_price_blocks_intraday_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            position = base / "positions/POS-600000.yaml"
+            write_position(position, "600000")
+            write_daily(base / "daily.csv", {"600000": [f"2026-07-{day:02d}" for day in range(1, 16)] + ["2026-07-16"]})
+            write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-16 10:00")
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0}}]}
+
+            report = build_report(
+                [position],
+                snapshot,
+                base / "daily.csv",
+                base / "minutes",
+                as_of=datetime(2026, 7, 16, 10, 5, 0),
+                min_daily_bars=10,
+            )
+
+        item = report["items"][0]
+        self.assertEqual(item["quote"]["status"], "missing")
+        self.assertEqual(item["overall_status"], "missing")
+        self.assertEqual(item["data_trust"]["level"], "low")
+
     def test_stale_daily_with_fresh_quote_is_medium_trust(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
@@ -119,7 +143,7 @@ class DataQualitySnapshotTest(unittest.TestCase):
             write_position(position, "600000")
             write_daily(base / "daily.csv", {"600000": [f"2026-06-{day:02d}" for day in range(1, 22)]})
             write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-16 10:00")
-            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0}}]}
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0, "latest_price": 10.0}}]}
 
             report = build_report(
                 [position],
@@ -133,6 +157,30 @@ class DataQualitySnapshotTest(unittest.TestCase):
         self.assertEqual(item["overall_status"], "stale")
         self.assertEqual(item["data_trust"]["level"], "medium")
         self.assertFalse(item["data_trust"]["intraday_decision_allowed"])
+
+    def test_price_conflict_is_low_trust(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            position = base / "positions/POS-600000.yaml"
+            write_position(position, "600000")
+            write_daily(base / "daily.csv", {"600000": [f"2026-07-{day:02d}" for day in range(1, 22)]})
+            write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-16 10:00")
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0, "latest_price": 11.5}}]}
+
+            report = build_report(
+                [position],
+                snapshot,
+                base / "daily.csv",
+                base / "minutes",
+                as_of=datetime(2026, 7, 16, 10, 5, 0),
+                min_daily_bars=10,
+                max_consistency_diff_pct=1.0,
+            )
+
+        item = report["items"][0]
+        self.assertEqual(item["source_consistency"]["status"], "conflict")
+        self.assertEqual(item["data_trust"]["level"], "low")
+        self.assertIn("一致性", item["data_trust"]["reasons"][0])
 
 
 if __name__ == "__main__":

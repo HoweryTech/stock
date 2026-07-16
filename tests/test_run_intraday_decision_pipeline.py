@@ -68,10 +68,10 @@ def write_minute_bars(path: Path) -> None:
         {
             "timestamp": f"2026-07-16 {9 + (index // 60):02d}:{index % 60:02d}",
             "code": "600000",
-            "open": 10.0,
-            "high": 10.1,
-            "low": 9.9,
-            "close": 10.0,
+            "open": 11.2,
+            "high": 11.3,
+            "low": 11.1,
+            "close": 11.25,
         }
         for index in range(130)
     ]
@@ -109,6 +109,7 @@ def make_args(base: Path) -> Namespace:
         max_daily_age_days=5,
         min_minute_bars=120,
         max_minute_age_hours=999.0,
+        max_consistency_diff_pct=1.0,
         action_backtests=str(base / "missing-action-backtests.json"),
         reverse_t_backtest=str(base / "missing-reverse-backtest.json"),
         reverse_t_forecast=str(base / "missing-reverse-forecast.json"),

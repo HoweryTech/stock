@@ -192,6 +192,7 @@ def rebuild_quality(args: argparse.Namespace, position_paths: list[Path]) -> dic
         max_daily_age_days=args.max_daily_age_days,
         min_minute_bars=args.min_minute_bars,
         max_minute_age_hours=args.max_minute_age_hours,
+        max_consistency_diff_pct=args.max_consistency_diff_pct,
     )
     write_json(Path(args.quality_output), report)
     write_text(Path(args.quality_markdown_output), render_quality_markdown(report))
@@ -270,6 +271,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-daily-age-days", type=int, default=5)
     parser.add_argument("--min-minute-bars", type=int, default=120)
     parser.add_argument("--max-minute-age-hours", type=float, default=30.0)
+    parser.add_argument("--max-consistency-diff-pct", type=float, default=1.0)
     parser.add_argument("--fetch-datalen", type=int, default=320)
     parser.add_argument("--request-interval-seconds", type=float, default=0.2)
     parser.add_argument("--commission-rate", type=float, default=0.0003)

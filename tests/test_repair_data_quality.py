@@ -45,6 +45,7 @@ def make_args(base: Path) -> Namespace:
         max_daily_age_days=5,
         min_minute_bars=120,
         max_minute_age_hours=30.0,
+        max_consistency_diff_pct=1.0,
         fetch_datalen=320,
         request_interval_seconds=0,
         commission_rate=0.0003,
