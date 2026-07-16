@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.backtest_positive_timing import build_report, simulate_day, summarize_threshold, trade_fees
+from tools.backtest_positive_timing import build_report, simulate_day, summarize_threshold, trade_bounds, trade_fees
 
 
 def make_day(day: str = "2026-07-16") -> list[dict]:
@@ -49,6 +49,8 @@ class BacktestPositiveTimingTest(unittest.TestCase):
             stop_pct=1.0,
             trade_shares=100,
             costs=self.costs,
+            adaptive_bounds=False,
+            minimum_net_profit=0.0,
         )
 
         self.assertTrue(trades)
@@ -87,10 +89,42 @@ class BacktestPositiveTimingTest(unittest.TestCase):
                 trade_shares=100,
                 costs=self.costs,
                 min_triggers=1,
+                adaptive_bounds=False,
+                minimum_net_profit=0.0,
             )
 
         self.assertEqual(report["portfolio_recommended_threshold"], 65)
         self.assertEqual(report["items"][0]["recommended"]["verdict"], "usable_for_watch")
+
+    def test_adaptive_bounds_raise_target_to_cover_minimum_fee(self) -> None:
+        costs = {
+            "commission_rate": 0.0003,
+            "minimum_commission": 5.0,
+            "stamp_duty_rate": 0.0005,
+            "transfer_fee_rate": 0.00001,
+        }
+        prefix = make_day()[:20]
+
+        bounds = trade_bounds(
+            prefix,
+            6.0,
+            100,
+            costs,
+            target_pct=1.2,
+            stop_pct=1.0,
+            adaptive=True,
+            min_target_pct=1.2,
+            max_target_pct=4.0,
+            min_stop_pct=0.8,
+            max_stop_pct=2.0,
+            range_target_multiplier=1.2,
+            range_stop_multiplier=0.8,
+            minimum_net_profit=5.0,
+        )
+
+        self.assertFalse(bounds["fee_blocked"])
+        self.assertGreater(bounds["target_pct"], 1.2)
+        self.assertGreaterEqual(bounds["stop_pct"], 0.8)
 
 
 if __name__ == "__main__":

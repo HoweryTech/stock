@@ -40,6 +40,86 @@ def trade_fees(buy_price: float, sell_price: float, shares: int, costs: dict[str
     }
 
 
+def average(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def clamp(value: float, min_value: float, max_value: float) -> float:
+    return max(min_value, min(value, max_value))
+
+
+def recent_range_pct(bars: list[dict[str, Any]], window: int = 20) -> float | None:
+    ranges = []
+    for bar in bars[-window:]:
+        high = as_float(bar.get("high"))
+        low = as_float(bar.get("low"))
+        close = as_float(bar.get("close"))
+        if high is not None and low is not None and close not in (None, 0):
+            ranges.append((high - low) / close * 100)
+    return average(ranges)
+
+
+def fee_aware_target_pct(
+    buy_price: float,
+    shares: int,
+    costs: dict[str, float],
+    *,
+    minimum_net_profit: float,
+    start_pct: float,
+    max_pct: float,
+) -> float | None:
+    pct = start_pct
+    while pct <= max_pct + 1e-9:
+        sell_price = buy_price * (1 + pct / 100)
+        if trade_fees(buy_price, sell_price, shares, costs)["net_profit"] >= minimum_net_profit:
+            return pct
+        pct += 0.05
+    return None
+
+
+def trade_bounds(
+    prefix: list[dict[str, Any]],
+    buy_price: float,
+    shares: int,
+    costs: dict[str, float],
+    *,
+    target_pct: float,
+    stop_pct: float,
+    adaptive: bool,
+    min_target_pct: float,
+    max_target_pct: float,
+    min_stop_pct: float,
+    max_stop_pct: float,
+    range_target_multiplier: float,
+    range_stop_multiplier: float,
+    minimum_net_profit: float,
+) -> dict[str, Any]:
+    if adaptive:
+        range_pct = recent_range_pct(prefix) or target_pct
+        raw_target = clamp(range_pct * range_target_multiplier, min_target_pct, max_target_pct)
+        raw_stop = clamp(range_pct * range_stop_multiplier, min_stop_pct, max_stop_pct)
+    else:
+        range_pct = recent_range_pct(prefix)
+        raw_target = target_pct
+        raw_stop = stop_pct
+    fee_target = fee_aware_target_pct(
+        buy_price,
+        shares,
+        costs,
+        minimum_net_profit=minimum_net_profit,
+        start_pct=raw_target,
+        max_pct=max_target_pct if adaptive else max(raw_target, max_target_pct),
+    )
+    return {
+        "adaptive": adaptive,
+        "range_pct": round4(range_pct),
+        "raw_target_pct": round4(raw_target),
+        "target_pct": round4(fee_target),
+        "stop_pct": round4(raw_stop),
+        "fee_blocked": fee_target is None,
+    }
+
+
 def group_by_day(bars: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for bar in bars:
@@ -69,6 +149,14 @@ def simulate_day(
     stop_pct: float,
     trade_shares: int,
     costs: dict[str, float],
+    adaptive_bounds: bool = False,
+    min_target_pct: float = 1.2,
+    max_target_pct: float = 4.0,
+    min_stop_pct: float = 0.8,
+    max_stop_pct: float = 2.0,
+    range_target_multiplier: float = 1.2,
+    range_stop_multiplier: float = 0.8,
+    minimum_net_profit: float = 5.0,
 ) -> list[dict[str, Any]]:
     trades: list[dict[str, Any]] = []
     index = 19
@@ -84,8 +172,29 @@ def simulate_day(
         if buy_price in (None, 0):
             index += 1
             continue
-        target_price = round(buy_price * (1 + target_pct / 100), 4)
-        stop_price = round(buy_price * (1 - stop_pct / 100), 4)
+        bounds = trade_bounds(
+            day_bars[: index + 1],
+            buy_price,
+            trade_shares,
+            costs,
+            target_pct=target_pct,
+            stop_pct=stop_pct,
+            adaptive=adaptive_bounds,
+            min_target_pct=min_target_pct,
+            max_target_pct=max_target_pct,
+            min_stop_pct=min_stop_pct,
+            max_stop_pct=max_stop_pct,
+            range_target_multiplier=range_target_multiplier,
+            range_stop_multiplier=range_stop_multiplier,
+            minimum_net_profit=minimum_net_profit,
+        )
+        if bounds["fee_blocked"]:
+            index += 1
+            continue
+        effective_target_pct = float(bounds["target_pct"])
+        effective_stop_pct = float(bounds["stop_pct"])
+        target_price = round(buy_price * (1 + effective_target_pct / 100), 4)
+        stop_price = round(buy_price * (1 - effective_stop_pct / 100), 4)
         outcome = "timeout"
         exit_price = as_float(day_bars[min(len(day_bars) - 1, entry_index + horizon_bars)].get("close"), buy_price) or buy_price
         exit_time = day_bars[min(len(day_bars) - 1, entry_index + horizon_bars)].get("timestamp")
@@ -114,6 +223,10 @@ def simulate_day(
                 "buy_price": round4(buy_price),
                 "target_price": round4(target_price),
                 "stop_price": round4(stop_price),
+                "target_pct": round4(effective_target_pct),
+                "stop_pct": round4(effective_stop_pct),
+                "range_pct": bounds["range_pct"],
+                "adaptive_bounds": adaptive_bounds,
                 "exit_price": round4(float(exit_price)),
                 "shares": trade_shares,
                 **fees,
@@ -177,6 +290,14 @@ def summarize_code(
     trade_shares: int,
     costs: dict[str, float],
     min_triggers: int,
+    adaptive_bounds: bool,
+    min_target_pct: float,
+    max_target_pct: float,
+    min_stop_pct: float,
+    max_stop_pct: float,
+    range_target_multiplier: float,
+    range_stop_multiplier: float,
+    minimum_net_profit: float,
 ) -> dict[str, Any]:
     grouped = group_by_day(bars)
     threshold_results = []
@@ -193,6 +314,14 @@ def summarize_code(
                     stop_pct=stop_pct,
                     trade_shares=trade_shares,
                     costs=costs,
+                    adaptive_bounds=adaptive_bounds,
+                    min_target_pct=min_target_pct,
+                    max_target_pct=max_target_pct,
+                    min_stop_pct=min_stop_pct,
+                    max_stop_pct=max_stop_pct,
+                    range_target_multiplier=range_target_multiplier,
+                    range_stop_multiplier=range_stop_multiplier,
+                    minimum_net_profit=minimum_net_profit,
                 )
             )
         threshold_results.append(summarize_threshold(trades, threshold))
@@ -219,6 +348,14 @@ def build_report(
     trade_shares: int,
     costs: dict[str, float],
     min_triggers: int,
+    adaptive_bounds: bool = True,
+    min_target_pct: float = 1.2,
+    max_target_pct: float = 4.0,
+    min_stop_pct: float = 0.8,
+    max_stop_pct: float = 2.0,
+    range_target_multiplier: float = 1.2,
+    range_stop_multiplier: float = 0.8,
+    minimum_net_profit: float = 5.0,
 ) -> dict[str, Any]:
     minute_by_code = load_minute_bars(cache_dir)
     items = []
@@ -243,6 +380,14 @@ def build_report(
                 trade_shares=trade_shares,
                 costs=costs,
                 min_triggers=min_triggers,
+                adaptive_bounds=adaptive_bounds,
+                min_target_pct=min_target_pct,
+                max_target_pct=max_target_pct,
+                min_stop_pct=min_stop_pct,
+                max_stop_pct=max_stop_pct,
+                range_target_multiplier=range_target_multiplier,
+                range_stop_multiplier=range_stop_multiplier,
+                minimum_net_profit=minimum_net_profit,
             )
         )
     recommendations = Counter(item["recommended"]["threshold"] for item in items if item["recommended"]["threshold"] is not None)
@@ -256,6 +401,14 @@ def build_report(
             "horizon_minutes": horizon_bars * 5,
             "target_pct": target_pct,
             "stop_pct": stop_pct,
+            "adaptive_bounds": adaptive_bounds,
+            "min_target_pct": min_target_pct,
+            "max_target_pct": max_target_pct,
+            "min_stop_pct": min_stop_pct,
+            "max_stop_pct": max_stop_pct,
+            "range_target_multiplier": range_target_multiplier,
+            "range_stop_multiplier": range_stop_multiplier,
+            "minimum_net_profit": minimum_net_profit,
             "trade_shares": trade_shares,
             "min_triggers": min_triggers,
             "fees_included": True,
@@ -278,6 +431,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--horizon-bars", type=int, default=6)
     parser.add_argument("--target-pct", type=float, default=1.2)
     parser.add_argument("--stop-pct", type=float, default=1.0)
+    parser.add_argument("--fixed-bounds", action="store_true", help="Use fixed target/stop percentages instead of volatility and fee-aware bounds.")
+    parser.add_argument("--min-target-pct", type=float, default=1.2)
+    parser.add_argument("--max-target-pct", type=float, default=4.0)
+    parser.add_argument("--min-stop-pct", type=float, default=0.8)
+    parser.add_argument("--max-stop-pct", type=float, default=2.0)
+    parser.add_argument("--range-target-multiplier", type=float, default=1.2)
+    parser.add_argument("--range-stop-multiplier", type=float, default=0.8)
+    parser.add_argument("--minimum-net-profit", type=float, default=5.0)
     parser.add_argument("--trade-shares", type=int, default=100)
     parser.add_argument("--min-triggers", type=int, default=5)
     parser.add_argument("--commission-rate", type=float, default=0.0003)
@@ -307,6 +468,14 @@ def main() -> int:
         trade_shares=args.trade_shares,
         costs=costs,
         min_triggers=args.min_triggers,
+        adaptive_bounds=not args.fixed_bounds,
+        min_target_pct=args.min_target_pct,
+        max_target_pct=args.max_target_pct,
+        min_stop_pct=args.min_stop_pct,
+        max_stop_pct=args.max_stop_pct,
+        range_target_multiplier=args.range_target_multiplier,
+        range_stop_multiplier=args.range_stop_multiplier,
+        minimum_net_profit=args.minimum_net_profit,
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
