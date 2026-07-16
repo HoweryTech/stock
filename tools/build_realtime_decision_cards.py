@@ -47,9 +47,11 @@ QUALITY_BLOCKER_STATUSES = {"missing", "insufficient"}
 SUPPLEMENTAL_CAPITAL_POLICY = {
     "supplemental_capital_allowed": True,
     "account_cash_required": False,
-    "max_single_add_pct_total_assets": 3.0,
+    "base_single_add_pct_total_assets": 3.0,
+    "strong_single_add_pct_total_assets": 5.0,
+    "max_single_add_pct_total_assets": 5.0,
     "max_stock_position_pct_after_add": 12.0,
-    "max_added_risk_pct_total_assets": 0.35,
+    "max_added_risk_pct_total_assets": 0.5,
     "min_stop_buffer_pct": 3.0,
     "min_target_gap_pct": 1.2,
 }
@@ -542,8 +544,15 @@ def build_capital_plan(
     position: dict[str, Any],
     *,
     total_assets: float | None = None,
+    technical_assessment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     policy = dict(SUPPLEMENTAL_CAPITAL_POLICY)
+    technical_label = str((technical_assessment or {}).get("label") or "")
+    technical_score = as_float((technical_assessment or {}).get("score"))
+    strong_setup = technical_label == "bullish" and technical_score is not None and technical_score >= 18
+    effective_single_add_pct = (
+        policy["strong_single_add_pct_total_assets"] if strong_setup else policy["base_single_add_pct_total_assets"]
+    )
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
     ma5 = as_float(levels.get("ma5"))
@@ -560,6 +569,8 @@ def build_capital_plan(
         "applicable": state == "positive_t_watch",
         "status": "not_applicable",
         "status_label": "仅正T观察候选才评估追加资金",
+        "single_add_tier": "strong" if strong_setup else "base",
+        "effective_single_add_pct_total_assets": effective_single_add_pct,
         "max_additional_capital": None,
         "suggested_buy_shares": 0,
         "estimated_buy_amount": None,
@@ -583,7 +594,7 @@ def build_capital_plan(
             }
         )
         return plan
-    max_single_cash = float(total_assets) * policy["max_single_add_pct_total_assets"] / 100
+    max_single_cash = float(total_assets) * effective_single_add_pct / 100
     current_position_pct = live_pct or 0.0
     capacity_pct = policy["max_stock_position_pct_after_add"] - current_position_pct
     position_capacity_cash = max(0.0, float(total_assets) * capacity_pct / 100)
@@ -641,7 +652,7 @@ def build_capital_plan(
             "status": "watch",
             "status_label": "可用追加资金进入正T观察，不要求账户当前现金已足额在场",
             "steps": [
-                f"最多只准备追加 {money_text(max_cash)}，不是无限补仓；单次追加不超过总资产 {policy['max_single_add_pct_total_assets']:.1f}%。",
+                f"最多只准备追加 {money_text(max_cash)}，不是无限补仓；本轮单次追加上限为总资产 {effective_single_add_pct:.1f}%。",
                 f"只在价格回落到 {buy_zone_low:.2f}-{buy_zone_high:.2f} 区间且数据质量仍为高/中可信时，才考虑买入 {int(suggested_shares)} 股。",
                 f"买入后目标不是长期摊低成本，而是在 {target_low:.2f}-{target_high:.2f} 区间优先卖出新增的 {int(suggested_shares)} 股完成正T。",
                 f"若买入后跌破止损价 {money_text(stop_loss)}，新增仓位按止损处理；预计新增风险约 {money_text(added_risk)}。",
@@ -649,6 +660,10 @@ def build_capital_plan(
             ],
         }
     )
+    if strong_setup:
+        plan["reasons"].append("多周期技术指标达到 bullish，正T追加资金上限从基础3%放宽到5%。")
+    else:
+        plan["reasons"].append("技术面未达到强趋势，只使用基础3%追加资金上限。")
     return plan
 
 
@@ -801,7 +816,13 @@ def build_card(
     )
     blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment)
     levels = price_levels(portfolio, t_check, intraday, reverse_forecast)
-    capital_plan = build_capital_plan(state, levels, intraday.get("position", {}), total_assets=total_assets)
+    capital_plan = build_capital_plan(
+        state,
+        levels,
+        intraday.get("position", {}),
+        total_assets=total_assets,
+        technical_assessment=technical_assessment,
+    )
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",

@@ -82,6 +82,21 @@ def bearish_technical_doc(code: str = "600000") -> dict:
     return {"items": [{"code": code, "periods": {"daily": weak_period, "weekly": weak_period, "monthly": weak_period}}]}
 
 
+def bullish_technical_doc(code: str = "600000") -> dict:
+    strong_period = {
+        "bar_count": 60,
+        "latest_trade_date": "2026-07-16",
+        "close": 10.0,
+        "macd": {"status": "ok", "dif": 0.2, "dea": 0.1, "histogram": 0.2},
+        "boll": {"status": "ok", "middle": 9.8, "upper": 10.8, "lower": 8.8, "percent_b": 0.6, "width_pct": 20.0},
+        "rsi": {"status": "ok", "rsi6": 58.0, "rsi14": 56.0},
+        "kdj": {"status": "ok", "k": 65.0, "d": 55.0, "j": 85.0},
+        "atr": {"status": "ok", "atr": 0.3, "atr_pct": 3.0},
+        "volume": {"status": "ok", "latest_volume": 300.0, "avg_volume_5": 250.0, "avg_volume_20": 180.0, "volume_ratio_20": 1.67},
+    }
+    return {"items": [{"code": code, "periods": {"daily": strong_period, "weekly": strong_period, "monthly": strong_period}}]}
+
+
 class RealtimeDecisionCardsTest(unittest.TestCase):
     def test_hard_t_blocker_takes_exit_risk_priority(self) -> None:
         portfolio = portfolio_result()
@@ -136,10 +151,39 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["price_levels"]["near_stop_block_price"], 9.596)
         self.assertEqual(card["capital_plan"]["status"], "watch")
         self.assertFalse(card["capital_plan"]["account_cash_required"])
-        self.assertEqual(card["capital_plan"]["max_single_add_pct_total_assets"], 3.0)
+        self.assertEqual(card["capital_plan"]["single_add_tier"], "base")
+        self.assertEqual(card["capital_plan"]["effective_single_add_pct_total_assets"], 3.0)
+        self.assertEqual(card["capital_plan"]["max_single_add_pct_total_assets"], 5.0)
         self.assertEqual(card["capital_plan"]["suggested_buy_shares"], 100)
         self.assertTrue(any("最多只准备追加" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("买入后目标不是长期摊低成本" in step for step in card["decision"]["action_steps"]))
+
+    def test_bullish_positive_t_can_raise_supplemental_capital_limit_to_five_pct(self) -> None:
+        item = intraday_item()
+        item["position"]["shares"] = 100
+        item["position"]["market_value"] = 1000.0
+        item["position"]["live_position_pct"] = 2.0
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(conclusion="positive_t_candidate"),
+            None,
+            None,
+            None,
+            None,
+            bullish_technical_doc(),
+            generated_at=datetime(2026, 7, 16, 9, 35, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "positive_t_watch")
+        self.assertEqual(card["technical_assessment"]["label"], "bullish")
+        self.assertEqual(card["capital_plan"]["single_add_tier"], "strong")
+        self.assertEqual(card["capital_plan"]["effective_single_add_pct_total_assets"], 5.0)
+        self.assertEqual(card["capital_plan"]["max_additional_capital"], 2500.0)
+        self.assertTrue(any("放宽到5%" in reason for reason in card["capital_plan"]["reasons"]))
+        self.assertTrue(any("总资产 5.0%" in step for step in card["decision"]["action_steps"]))
 
     def test_reverse_t_price_levels_prefer_indicator_forecast_zone(self) -> None:
         report = build_report(

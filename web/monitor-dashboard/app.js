@@ -454,8 +454,9 @@ function renderCapitalPlan(plan) {
   const metrics = [
     ["状态", plan.status_label || "--"],
     ["账户现金要求", plan.account_cash_required ? "要求已足额" : "可临时补充"],
+    ["额度档位", plan.single_add_tier === "strong" ? "强趋势5%" : "基础3%"],
     ["单次追加上限", money(plan.max_additional_capital)],
-    ["占总资产上限", pct(plan.max_single_add_pct_total_assets)],
+    ["本轮占总资产上限", pct(plan.effective_single_add_pct_total_assets ?? plan.max_single_add_pct_total_assets)],
     ["单票加仓后上限", pct(plan.max_stock_position_pct_after_add)],
     ["建议买入数量", `${plan.suggested_buy_shares || 0}股`],
     ["预计买入金额", money(plan.estimated_buy_amount)],
