@@ -473,6 +473,7 @@ function renderTechnicalAssessment(assessment) {
   return detailSection(
     "技术指标",
     `<p>${technicalBadge(assessment)} <strong>${escapeHtml(technicalLabel(assessment))}</strong></p>
+    ${assessment.summary ? `<p class="technical-summary"><strong>技术结论：</strong>${escapeHtml(assessment.summary)}</p>` : ""}
     <div class="metric-grid">
       <dl class="metric"><dt>综合技术分</dt><dd>${assessment.score == null ? "--" : Number(assessment.score).toFixed(1)}</dd></dl>
       <dl class="metric"><dt>判断标签</dt><dd>${escapeHtml(technicalLabel(assessment))}</dd></dl>

@@ -363,9 +363,30 @@ def build_technical_dimension_scores(periods: dict[str, Any], weights: dict[str,
     return normalized, signals
 
 
+def technical_dimension_summary(scores: dict[str, float]) -> str:
+    trend = as_float(scores.get("trend"), 0.0) or 0.0
+    risk = as_float(scores.get("risk"), 0.0) or 0.0
+    reversal = as_float(scores.get("reversal"), 0.0) or 0.0
+    volume = as_float(scores.get("volume_confirmation"), 0.0) or 0.0
+    multi = as_float(scores.get("multi_timeframe"), 0.0) or 0.0
+    if risk <= -18 and reversal > 0 and trend <= 0 and volume <= 0:
+        return "有一点反转迹象，但风险分明显拖累，趋势和量能还没确认，所以不支持继续追买或继续做T。"
+    if risk <= -18:
+        return "风险分明显拖累，当前先控制风险，不支持追买、补仓或做T。"
+    if trend > 10 and volume > 5 and multi >= 0:
+        return "趋势和量能同时转强，多周期没有明显冲突，可进入人工观察候选。"
+    if reversal > 6 and trend <= 0:
+        return "反转迹象开始出现，但趋势还没确认，只能观察，不能提前买入。"
+    if trend <= -10 and volume <= 0:
+        return "趋势和量能都偏弱，当前不支持买入或做T。"
+    if multi < 0:
+        return "多周期一致性偏空，即使短线反弹也需要降低操作级别。"
+    return "技术维度没有形成明确共振，维持观察，不因单一指标触发交易。"
+
+
 def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> dict[str, Any]:
     if not technical_indicators:
-        return {"available": False, "score": None, "label": "missing", "signals": [], "periods": {}, "dimension_scores": {}, "dimension_signals": []}
+        return {"available": False, "score": None, "label": "missing", "signals": [], "periods": {}, "dimension_scores": {}, "dimension_signals": [], "summary": ""}
     periods = technical_indicators.get("periods") or {}
     weights = {"daily": 0.55, "weekly": 0.35, "monthly": 0.10}
     total = 0.0
@@ -406,6 +427,7 @@ def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> d
         "periods": period_summary,
         "dimension_scores": dimension_scores,
         "dimension_signals": dimension_signals,
+        "summary": technical_dimension_summary(dimension_scores),
     }
 
 
