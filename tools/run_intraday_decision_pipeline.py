@@ -17,6 +17,7 @@ try:
     from tools.build_realtime_decision_cards import render_markdown as render_decision_cards_markdown
     from tools.check_portfolio_positions import expand_position_paths, summarize_positions
     from tools.check_portfolio_t_opportunities import check_portfolio_t_opportunities
+    from tools.fetch_daily_bars_sina import fetch_daily_bars
     from tools.monitor_intraday_positions import build_snapshot, render_markdown as render_intraday_markdown
     from tools.risk_check import as_float, load_yaml, value_at
 except ModuleNotFoundError:
@@ -26,6 +27,7 @@ except ModuleNotFoundError:
     from build_realtime_decision_cards import render_markdown as render_decision_cards_markdown
     from check_portfolio_positions import expand_position_paths, summarize_positions
     from check_portfolio_t_opportunities import check_portfolio_t_opportunities
+    from fetch_daily_bars_sina import fetch_daily_bars
     from monitor_intraday_positions import build_snapshot, render_markdown as render_intraday_markdown
     from risk_check import as_float, load_yaml, value_at
 
@@ -66,6 +68,13 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     position_paths = expand_position_paths(args.positions)
     profile = load_yaml(Path(args.profile))
     settings = pipeline_settings(args, profile)
+    codes = [str(value_at(load_yaml(path), "stock.code") or "") for path in position_paths]
+    codes = [code for code in dict.fromkeys(codes) if code]
+
+    daily_refresh: dict[str, Any] | None = None
+    if not args.skip_daily_refresh:
+        daily_refresh = fetch_daily_bars(codes, Path(args.daily_bars), datalen=args.daily_fetch_datalen, merge_existing=True)
+        write_json(Path(args.daily_fetch_metadata_output), daily_refresh)
 
     intraday_snapshot = build_snapshot(
         position_paths,
@@ -152,6 +161,15 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 "success_count": intraday_snapshot.get("success_count", 0),
                 "error_count": len(intraday_snapshot.get("errors", []) or []),
             },
+            "daily_refresh": {
+                "enabled": not args.skip_daily_refresh,
+                "output": args.daily_fetch_metadata_output,
+                "requested_code_count": 0 if daily_refresh is None else daily_refresh.get("requested_code_count", 0),
+                "fetched_row_count": 0 if daily_refresh is None else daily_refresh.get("fetched_row_count", 0),
+                "start_date": None if daily_refresh is None else daily_refresh.get("start_date"),
+                "end_date": None if daily_refresh is None else daily_refresh.get("end_date"),
+                "error_count": 0 if daily_refresh is None else len(daily_refresh.get("errors", []) or []),
+            },
             "portfolio_check": {
                 "output": args.portfolio_check_output,
                 "conclusion": portfolio_check.get("conclusion"),
@@ -195,6 +213,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--positions", nargs="+", required=True)
     parser.add_argument("--profile", default="config/investment-profile.yaml")
     parser.add_argument("--daily-bars", default="data/processed/daily_bars.csv")
+    parser.add_argument("--skip-daily-refresh", action="store_true", help="Use existing daily bar cache without refreshing from Sina.")
+    parser.add_argument("--daily-fetch-datalen", type=int, default=120)
+    parser.add_argument("--daily-fetch-metadata-output", default="data/metadata/daily_bars.fetch.json")
     parser.add_argument("--total-assets", type=float, required=True)
     parser.add_argument("--max-stale-seconds", type=int, default=60)
     parser.add_argument("--commission-rate", type=float, default=0.0003)

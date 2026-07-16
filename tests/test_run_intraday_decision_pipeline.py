@@ -84,6 +84,9 @@ def make_args(base: Path) -> Namespace:
         positions=[str(base / "positions/*.yaml")],
         profile=str(base / "investment-profile.yaml"),
         daily_bars=str(base / "daily_bars.csv"),
+        skip_daily_refresh=False,
+        daily_fetch_datalen=120,
+        daily_fetch_metadata_output=str(base / "metadata/daily-fetch.json"),
         total_assets=100000.0,
         max_stale_seconds=60,
         commission_rate=0.0003,
@@ -166,12 +169,25 @@ class RunIntradayDecisionPipelineTest(unittest.TestCase):
                 ],
             }
 
-            with patch("tools.run_intraday_decision_pipeline.build_snapshot", return_value=fake_snapshot):
+            fake_daily_refresh = {
+                "requested_code_count": 1,
+                "fetched_row_count": 25,
+                "start_date": "2026-07-01",
+                "end_date": "2026-07-25",
+                "errors": [],
+            }
+            with (
+                patch("tools.run_intraday_decision_pipeline.fetch_daily_bars", return_value=fake_daily_refresh) as daily_fetch,
+                patch("tools.run_intraday_decision_pipeline.build_snapshot", return_value=fake_snapshot),
+            ):
                 metadata = run_pipeline(make_args(base))
 
+            daily_fetch.assert_called_once()
             self.assertEqual(metadata["steps"]["intraday_snapshot"]["success_count"], 1)
+            self.assertEqual(metadata["steps"]["daily_refresh"]["fetched_row_count"], 25)
             self.assertEqual(metadata["steps"]["decision_cards"]["card_count"], 1)
             self.assertTrue((base / "metadata/intraday.json").exists())
+            self.assertTrue((base / "metadata/daily-fetch.json").exists())
             self.assertTrue((base / "metadata/portfolio.json").exists())
             self.assertTrue((base / "metadata/t.json").exists())
             self.assertTrue((base / "metadata/data-quality.json").exists())
