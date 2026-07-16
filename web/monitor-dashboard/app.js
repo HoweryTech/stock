@@ -604,7 +604,100 @@ function nextPlanAfterManualTrade(item, payload, impact) {
   return "买入成交后系统会更新持仓成本，并重新评估是否允许继续加仓、做T或需要风险复核。";
 }
 
-function renderManualTradeConfirmation(item, payload, impact) {
+function reverseTCloseEstimate(item, payload) {
+  if (payload.trade_intent !== "reverse_t_close") return null;
+  const openLeg = item.reverse_t_plan?.open_reverse_t_leg || {};
+  const sellPrice = Number(openLeg.sell_price || 0);
+  const shares = Number(payload.shares || 0);
+  if (!sellPrice || !payload.price || !shares) return null;
+  const sellFees = Number(openLeg.fees?.total_fees || 0);
+  const buyFees = estimateManualTradeFees("buy", payload.price, shares).total;
+  const grossProfit = (sellPrice - payload.price) * shares;
+  const netProfit = grossProfit - sellFees - buyFees;
+  return {grossProfit, netProfit, totalFees: sellFees + buyFees};
+}
+
+function manualTradePreflightChecks(item, payload, impact) {
+  const checks = [];
+  const add = (label, status, message, blocking = false) => checks.push({label, status, message, blocking});
+  const sideLabel = payload.side === "sell" ? "卖出" : "买入";
+  add(
+    "成交信息",
+    "pass",
+    `${sideLabel} ${num(payload.shares, 0)} 股，成交价 ${num(payload.price)} 元；请确认券商软件已真实成交。`,
+  );
+  if (payload.shares % 100 === 0) {
+    add("交易单位", "pass", "数量为100股整数手。");
+  } else {
+    add("交易单位", "block", "A股手工成交数量应按100股整数手填写。", true);
+  }
+  if (payload.side === "sell") {
+    add(
+      "成交后持仓",
+      impact.remainingShares >= 0 ? "pass" : "block",
+      impact.remainingShares >= 0 ? `成交后剩余 ${num(impact.remainingShares, 0)} 股。` : "卖出数量超过当前持仓。",
+      impact.remainingShares < 0,
+    );
+  } else {
+    add("成交后持仓", "pass", `成交后持仓 ${num(impact.remainingShares, 0)} 股，预计新成本 ${money(impact.weightedCost)}。`);
+  }
+
+  if (payload.trade_intent === "reverse_t_close") {
+    const plan = item.reverse_t_plan || {};
+    const openLegId = plan.open_reverse_t_leg?.id || "";
+    const buybackMax = plan.buyback_max_price == null ? null : Number(plan.buyback_max_price);
+    const linkedOk = Boolean(openLegId && payload.linked_trade_id && payload.linked_trade_id === openLegId);
+    add(
+      "反T卖出腿",
+      linkedOk ? "pass" : "block",
+      linkedOk ? `已关联开放卖出腿 ${openLegId}。` : `关联卖出腿缺失或不匹配；当前开放腿是 ${openLegId || "--"}。`,
+      !linkedOk,
+    );
+    const priceOk = buybackMax == null || payload.price <= buybackMax + 1e-9;
+    add(
+      "回补价格",
+      priceOk ? "pass" : "block",
+      buybackMax == null ? "费用模型未给出回补上限，请人工复核。" : priceOk ? `回补价 ${num(payload.price)} 不高于上限 ${num(buybackMax)}。` : `回补价 ${num(payload.price)} 高于上限 ${num(buybackMax)}，不要追买。`,
+      !priceOk,
+    );
+    const estimate = reverseTCloseEstimate(item, payload);
+    if (estimate) {
+      const enoughProfit = estimate.netProfit >= 5;
+      add(
+        "预计净收益",
+        enoughProfit ? "pass" : "warn",
+        `毛收益 ${money(estimate.grossProfit)}，总费用 ${money(estimate.totalFees)}，扣费后约 ${money(estimate.netProfit)}。`,
+      );
+    }
+  } else if (payload.trade_intent === "reverse_t_open") {
+    const zone = item.reverse_t_plan?.sell_zone || [];
+    const zoneOk = zone.length < 2 || (payload.price >= Number(zone[0]) && payload.price <= Number(zone[1]));
+    add(
+      "反T卖出区间",
+      zoneOk ? "pass" : "warn",
+      zone.length < 2 ? "当前没有明确卖出观察区，按真实成交记录但不作为系统候选反T。" : zoneOk ? `卖出价位于 ${num(zone[0])}-${num(zone[1])} 元观察区。` : `卖出价不在 ${num(zone[0])}-${num(zone[1])} 元观察区，请确认这是手工决策。`,
+    );
+  } else {
+    add("成交意图", "warn", "这会按普通手工成交写入，不会关闭或打开反T腿。");
+  }
+  add("写入结果", checks.some(check => check.blocking) ? "block" : "pass", checks.some(check => check.blocking) ? "存在硬性失败项，暂不允许写入。" : "允许写入本地持仓并刷新建议。", checks.some(check => check.blocking));
+  return checks;
+}
+
+function manualTradePreflightError(item, payload, impact) {
+  return manualTradePreflightChecks(item, payload, impact).find(check => check.blocking)?.message || "";
+}
+
+function renderPreflightChecks(checks) {
+  return `<div class="preflight-list">${checks.map(check => `
+    <div class="preflight-item preflight-${escapeHtml(check.status)}">
+      <strong>${escapeHtml(check.label)}</strong>
+      <span>${check.status === "pass" ? "通过" : check.status === "warn" ? "复核" : "阻断"}</span>
+      <p>${escapeHtml(check.message)}</p>
+    </div>`).join("")}</div>`;
+}
+
+function renderManualTradeConfirmation(item, payload, impact, checks) {
   const sideLabel = payload.side === "sell" ? "卖出" : "买入";
   const intentLabel = {
     reverse_t_open: "反T卖出腿",
@@ -628,6 +721,8 @@ function renderManualTradeConfirmation(item, payload, impact) {
   if (payload.linked_trade_id) metrics.push(["关联卖出记录", payload.linked_trade_id]);
   return `<p><strong>请确认这笔成交已经在券商软件真实成交。</strong></p>
     <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    <h4>交易前自检</h4>
+    ${renderPreflightChecks(checks)}
     <h4>成交后的下一步计划</h4>
     <p>${escapeHtml(nextPlanAfterManualTrade(item, payload, impact))}</p>
     <p class="secondary">确认后会立即写入本地持仓文件，并刷新实时建议。</p>`;
@@ -639,26 +734,12 @@ function setManualTradeConfirmError(message) {
   target.hidden = !message;
 }
 
-function manualTradePreflightError(item, payload, impact) {
-  if (!Number.isFinite(payload.price) || payload.price <= 0) return "成交价格无效，请重新填入真实成交价。";
-  if (!Number.isFinite(payload.shares) || payload.shares <= 0) return "成交数量无效，请重新填入真实成交股数。";
-  if (payload.shares % 100 !== 0) return "A股手工成交数量应按100股整数手填写。";
-  if (payload.trade_intent !== "reverse_t_close") return "";
-  const plan = item.reverse_t_plan || {};
-  const openLegId = plan.open_reverse_t_leg?.id || "";
-  if (!openLegId) return "当前没有开放中的反T卖出腿，不能按反T回补写入。";
-  if (!payload.linked_trade_id) return "反T回补缺少关联卖出记录，请点击系统的“填入反T回补”按钮重新填入。";
-  if (payload.linked_trade_id !== openLegId) return `关联卖出记录不匹配：当前开放腿是 ${openLegId}。`;
-  const buybackMax = plan.buyback_max_price == null ? null : Number(plan.buyback_max_price);
-  if (buybackMax != null && payload.price > buybackMax + 1e-9) return `回补价 ${num(payload.price)} 高于上限 ${num(buybackMax)}，不要追买。`;
-  if (impact.remainingShares < 200) return "回补后持仓仍不足200股，反T闭环股数可能不匹配，请先复核成交数量。";
-  return "";
-}
-
-function openManualTradeConfirm(form, payload, item, impact) {
-  state.pendingManualTrade = { form, payload };
+function openManualTradeConfirm(form, payload, item, impact, checks) {
+  const blocking = checks.some(check => check.blocking);
+  state.pendingManualTrade = blocking ? null : { form, payload };
   document.querySelector("#manualTradeConfirmTitle").textContent = `${payload.side === "sell" ? "确认卖出" : "确认买入"} ${item.name}`;
-  document.querySelector("#manualTradeConfirmBody").innerHTML = renderManualTradeConfirmation(item, payload, impact);
+  document.querySelector("#manualTradeConfirmBody").innerHTML = renderManualTradeConfirmation(item, payload, impact, checks);
+  document.querySelector("#manualTradeConfirmButton").disabled = blocking;
   setManualTradeConfirmError("");
   document.querySelector("#manualTradeConfirm").hidden = false;
   document.querySelector("#manualTradeConfirm").setAttribute("aria-hidden", "false");
@@ -682,13 +763,10 @@ function prepareManualTradeConfirmation(form) {
     status.textContent = impact?.message || "请先输入有效成交信息。";
     return;
   }
+  const checks = manualTradePreflightChecks(item, payload, impact);
   const preflightError = manualTradePreflightError(item, payload, impact);
-  if (preflightError) {
-    status.textContent = preflightError;
-    return;
-  }
-  status.textContent = "请在确认弹层核对成交后影响。";
-  openManualTradeConfirm(form, payload, item, impact);
+  status.textContent = preflightError ? "交易前自检存在阻断项，请在确认弹层查看。" : "请在确认弹层核对成交后影响。";
+  openManualTradeConfirm(form, payload, item, impact, checks);
 }
 
 async function submitManualTrade(payload, form) {

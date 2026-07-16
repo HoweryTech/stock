@@ -300,6 +300,24 @@ th:nth-child(8) { width: 100px; }
 .confirm-body { padding: 15px 16px; }
 .confirm-body p { margin: 0 0 10px; }
 .confirm-body h4 { margin: 14px 0 8px; font-size: 12px; color: var(--muted); }
+.preflight-list { display: grid; gap: 8px; margin: 0 0 10px; }
+.preflight-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.preflight-item strong { font-size: 13px; }
+.preflight-item span { align-self: start; min-width: 42px; text-align: center; padding: 2px 7px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.preflight-item p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.preflight-pass span { color: var(--green); background: var(--green-bg); }
+.preflight-warn { border-color: #e5c46d; background: var(--amber-bg); }
+.preflight-warn span { color: var(--amber); background: #fff; }
+.preflight-block { border-color: #f0aaa3; background: var(--red-bg); }
+.preflight-block span { color: var(--red); background: #fff; }
 .confirm-error {
   margin: 0 16px 12px;
   padding: 9px 10px;
