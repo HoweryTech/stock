@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 
-from tools.build_realtime_decision_cards import build_report, build_technical_operation, render_markdown, technical_dimension_summary
+from tools.build_realtime_decision_cards import build_report, build_technical_operation, build_technical_unlock_alert, render_markdown, technical_dimension_summary
 
 
 def intraday_item(code: str = "600000", *, signals=None, reverse_status: str = "watch") -> dict:
@@ -570,6 +570,35 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
             ["risk_recovered", "trend_positive", "volume_confirmed"],
         )
         self.assertTrue(all(condition["passed"] is False for condition in operation["unlock_conditions"]))
+
+    def test_technical_unlock_alert_emits_when_blocked_condition_is_near(self) -> None:
+        operation = build_technical_operation(
+            {
+                "available": True,
+                "label": "slightly_bearish",
+                "summary": "风险分明显拖累，当前先控制风险，不支持追买、补仓或做T。",
+                "dimension_scores": {
+                    "trend": 0.5,
+                    "risk": -19.0,
+                    "reversal": 1.0,
+                    "volume_confirmation": 0.8,
+                    "multi_timeframe": 0.0,
+                },
+            }
+        )
+
+        alert = build_technical_unlock_alert(
+            {
+                "code": "600000",
+                "name": "浦发银行",
+                "decision": {"technical_operation": operation},
+            }
+        )
+
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert["type"], "technical_unlock_near")
+        self.assertEqual(alert["severity"], "watch")
+        self.assertTrue(any(condition["code"] == "risk_recovered" for condition in alert["matched_conditions"]))
 
 
 if __name__ == "__main__":

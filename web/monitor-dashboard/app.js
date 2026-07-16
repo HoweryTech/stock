@@ -1182,14 +1182,26 @@ function closeDetail() {
 
 function renderEvents() {
   const container = document.querySelector("#eventList");
-  if (!state.events.length) {
+  const technicalAlerts = state.decisionReport?.technical_unlock_alerts || [];
+  if (!state.events.length && !technicalAlerts.length) {
     container.innerHTML = '<div class="empty-state">暂无状态变化事件</div>';
     return;
   }
-  container.innerHTML = state.events.map(event => {
+  const alertHtml = technicalAlerts.map(alert => {
+    const conditions = alert.matched_conditions || [];
+    const conditionText = conditions.map(condition => `${condition.label || condition.code}: ${condition.current ?? "--"} / ${condition.target || "--"}`).join("；");
+    return `<article class="event-item event-technical">
+      <div class="event-time">${escapeHtml(state.decisionReport?.generated_at || "")}</div>
+      <div class="event-title">${escapeHtml(alert.code || "")} ${escapeHtml(alert.name || "")} · ${escapeHtml(alert.title || "技术解锁提醒")}</div>
+      <p>${escapeHtml(alert.message || "")}</p>
+      ${conditionText ? `<div class="event-changes"><span class="event-tag">${escapeHtml(conditionText)}</span></div>` : ""}
+    </article>`;
+  }).join("");
+  const monitorHtml = state.events.map(event => {
     const tags = Object.entries(event.signature || {}).map(([code, info]) => `<span class="event-tag">${code} · ${labels[info.state] || info.state}${info.reverse_t_price_alert ? " · 反T价格提醒" : ""}</span>`).join("");
     return `<article class="event-item"><div class="event-time">${escapeHtml(event.generated_at)}</div><div class="event-changes">${tags}</div></article>`;
   }).join("");
+  container.innerHTML = alertHtml + monitorHtml;
 }
 
 function updateHeader(status) {

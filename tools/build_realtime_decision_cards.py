@@ -384,13 +384,25 @@ def technical_dimension_summary(scores: dict[str, float]) -> str:
     return "技术维度没有形成明确共振，维持观察，不因单一指标触发交易。"
 
 
-def technical_unlock_condition(code: str, label: str, current: float | None, target: str, passed: bool) -> dict[str, Any]:
+def technical_unlock_condition(
+    code: str,
+    label: str,
+    current: Any,
+    target: str,
+    passed: bool,
+    *,
+    operator: str | None = None,
+    target_value: float | None = None,
+) -> dict[str, Any]:
+    current_value = rounded(current) if isinstance(current, int | float) else current
     return {
         "code": code,
         "label": label,
-        "current": rounded(current),
+        "current": current_value,
         "target": target,
         "passed": passed,
+        "operator": operator,
+        "target_value": rounded(target_value),
     }
 
 
@@ -417,14 +429,14 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
     label = str(assessment.get("label") or "")
     summary = str(assessment.get("summary") or technical_dimension_summary(scores))
     risk_recovery_conditions = [
-        technical_unlock_condition("risk_recovered", "风险分", risk, "> -18.0", risk > -18),
-        technical_unlock_condition("trend_positive", "趋势分", trend, "> 0.0", trend > 0),
-        technical_unlock_condition("volume_confirmed", "量能确认", volume, "> 0.0", volume > 0),
+        technical_unlock_condition("risk_recovered", "风险分", risk, "> -18.0", risk > -18, operator=">", target_value=-18.0),
+        technical_unlock_condition("trend_positive", "趋势分", trend, "> 0.0", trend > 0, operator=">", target_value=0.0),
+        technical_unlock_condition("volume_confirmed", "量能确认", volume, "> 0.0", volume > 0, operator=">", target_value=0.0),
     ]
     watch_conditions = [
-        technical_unlock_condition("trend_strong", "趋势分", trend, "> 10.0", trend > 10),
-        technical_unlock_condition("volume_strong", "量能确认", volume, "> 5.0", volume > 5),
-        technical_unlock_condition("multi_not_negative", "多周期一致", multi, ">= 0.0", multi >= 0),
+        technical_unlock_condition("trend_strong", "趋势分", trend, "> 10.0", trend > 10, operator=">", target_value=10.0),
+        technical_unlock_condition("volume_strong", "量能确认", volume, "> 5.0", volume > 5, operator=">", target_value=5.0),
+        technical_unlock_condition("multi_not_negative", "多周期一致", multi, ">= 0.0", multi >= 0, operator=">=", target_value=0.0),
         {"code": "technical_label_positive", "label": "技术标签", "current": label or None, "target": "bullish 或 slightly_bullish", "passed": label in {"bullish", "slightly_bullish"}},
     ]
     if risk <= -18 and reversal > 0 and trend <= 0 and volume <= 0:
@@ -466,9 +478,9 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
             "reason": summary,
             "next_step": "反转还没有被趋势确认，先观察；不要提前买入，也不要把反弹当成可执行做T信号。",
             "unlock_conditions": [
-                technical_unlock_condition("trend_positive", "趋势分", trend, "> 0.0", trend > 0),
-                technical_unlock_condition("volume_confirmed", "量能确认", volume, "> 0.0", volume > 0),
-                technical_unlock_condition("risk_not_heavy", "风险分", risk, "> -18.0", risk > -18),
+                technical_unlock_condition("trend_positive", "趋势分", trend, "> 0.0", trend > 0, operator=">", target_value=0.0),
+                technical_unlock_condition("volume_confirmed", "量能确认", volume, "> 0.0", volume > 0, operator=">", target_value=0.0),
+                technical_unlock_condition("risk_not_heavy", "风险分", risk, "> -18.0", risk > -18, operator=">", target_value=-18.0),
             ],
         }
     if trend <= -10 and volume <= 0:
@@ -480,8 +492,8 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
             "reason": summary,
             "next_step": "趋势和量能没有配合，继续持有观察；等趋势或量能至少有一项明显修复后再复核。",
             "unlock_conditions": [
-                technical_unlock_condition("trend_recovered", "趋势分", trend, "> -10.0", trend > -10),
-                technical_unlock_condition("volume_confirmed", "量能确认", volume, "> 0.0", volume > 0),
+                technical_unlock_condition("trend_recovered", "趋势分", trend, "> -10.0", trend > -10, operator=">", target_value=-10.0),
+                technical_unlock_condition("volume_confirmed", "量能确认", volume, "> 0.0", volume > 0, operator=">", target_value=0.0),
             ],
         }
     return {
@@ -492,6 +504,67 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
         "reason": summary,
         "next_step": "技术面没有形成可执行共振，本轮不因单一指标触发交易。",
         "unlock_conditions": watch_conditions,
+    }
+
+
+TECHNICAL_UNLOCK_NEAR_MARGIN = {
+    "risk_recovered": 3.0,
+    "risk_not_heavy": 3.0,
+    "trend_positive": 1.5,
+    "volume_confirmed": 1.5,
+    "trend_recovered": 2.0,
+    "trend_strong": 2.0,
+    "volume_strong": 2.0,
+    "multi_not_negative": 2.0,
+}
+
+
+def technical_condition_near_unlock(condition: dict[str, Any]) -> bool:
+    if condition.get("passed"):
+        return False
+    current = as_float(condition.get("current"))
+    target = as_float(condition.get("target_value"))
+    if current is None or target is None:
+        return False
+    margin = TECHNICAL_UNLOCK_NEAR_MARGIN.get(str(condition.get("code")), 0.0)
+    operator = condition.get("operator")
+    if operator in {">", ">="} and current < target:
+        return (target - current) <= margin
+    if operator in {"<", "<="} and current > target:
+        return (current - target) <= margin
+    return False
+
+
+def build_technical_unlock_alert(card: dict[str, Any]) -> dict[str, Any] | None:
+    operation = ((card.get("decision") or {}).get("technical_operation") or {})
+    if operation.get("allow_buy_watch") or operation.get("allow_t_watch"):
+        return None
+    conditions = operation.get("unlock_conditions") or []
+    all_passed = all(condition.get("passed") for condition in conditions) if conditions else False
+    active_conditions = conditions if all_passed else [condition for condition in conditions if technical_condition_near_unlock(condition)]
+    if not active_conditions:
+        return None
+    alert_type = "technical_unlocked" if all_passed else "technical_unlock_near"
+    title = "技术面已满足解锁条件" if all_passed else "技术面接近解锁条件"
+    waiting = [condition for condition in conditions if not condition.get("passed")]
+    next_condition = waiting[0] if waiting else None
+    if all_passed:
+        message = "技术门禁条件已全部满足，可重新评估正T/反T观察，但仍需通过实时价格、数据质量和止损距离。"
+    elif next_condition:
+        message = f"{next_condition.get('label')} 当前 {next_condition.get('current')}，目标 {next_condition.get('target')}；接近后可重新评估。"
+    else:
+        message = operation.get("next_step") or "技术条件接近解锁，等待下一轮确认。"
+    return {
+        "code": card.get("code"),
+        "name": card.get("name"),
+        "type": alert_type,
+        "severity": "action" if all_passed else "watch",
+        "title": title,
+        "message": message,
+        "technical_tier": operation.get("tier"),
+        "technical_tier_label": operation.get("tier_label"),
+        "conditions": conditions,
+        "matched_conditions": active_conditions,
     }
 
 
@@ -1514,6 +1587,7 @@ def build_report(
     state_counts: dict[str, int] = {}
     for card in cards:
         state_counts[card["state"]] = state_counts.get(card["state"], 0) + 1
+    technical_unlock_alerts = [alert for card in cards if (alert := build_technical_unlock_alert(card))]
     return {
         "generated_at": (generated_at or datetime.now().astimezone()).isoformat(timespec="seconds"),
         "source": {
@@ -1529,6 +1603,7 @@ def build_report(
         },
         "card_count": len(cards),
         "state_counts": dict(sorted(state_counts.items())),
+        "technical_unlock_alerts": technical_unlock_alerts,
         "cards": sorted(cards, key=lambda card: (-decision_priority(card["state"]), str(card["code"]))),
     }
 

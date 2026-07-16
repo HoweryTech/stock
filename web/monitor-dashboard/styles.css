@@ -372,7 +372,9 @@ th:nth-child(8) { width: 100px; }
 .event-list { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
 .event-item { padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .event-item:last-child { border-bottom: 0; }
+.event-technical { background: #fbfcfd; }
 .event-time { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.event-title { margin-bottom: 6px; font-weight: 700; }
 .event-changes { display: flex; flex-wrap: wrap; gap: 6px; }
 .event-tag { padding: 3px 7px; border-radius: 3px; background: #eef1f4; font-size: 12px; }
 
