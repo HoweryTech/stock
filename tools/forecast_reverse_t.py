@@ -23,6 +23,9 @@ except ModuleNotFoundError:
     from risk_check import as_float, load_yaml, value_at
 
 
+MAX_PREDICTED_BUYBACK_GAP_PCT = 5.0
+
+
 def average(values: list[float]) -> float:
     return sum(values) / len(values)
 
@@ -123,13 +126,14 @@ def forecast(code: str, name: str, bars: list[dict[str, Any]], shares: int, cost
     high_up_pct = max(low_up_pct, quantile(up_moves, 0.75))
     zone_low = round(current_price * (1 + low_up_pct / 100), 2)
     zone_high = round(current_price * (1 + high_up_pct / 100), 2)
-    viable = fee_viable_trade(zone_low, max_shares, costs, min_gap_pct=1.2)
+    viable = fee_viable_trade(zone_low, max_shares, costs, min_gap_pct=1.2, max_gap_pct=MAX_PREDICTED_BUYBACK_GAP_PCT)
     if not viable:
         return {
             "code": code, "name": name, "status": "fee_blocked", "status_label": "预测价差不足以覆盖费用",
             "as_of": bars[-1]["timestamp"], "horizon_minutes": 30,
             "current_price": current_price, "predicted_sell_zone": [zone_low, zone_high],
             "predicted_buyback_max_price": None,
+            "max_buyback_gap_pct": MAX_PREDICTED_BUYBACK_GAP_PCT,
             "sample_count": len(samples), "neighbor_count": len(nearest),
             "indicators": {"model": "nearest_5minute_patterns", "features": ["returns", "range_position", "MACD", "BOLL", "RSI", "volume_ratio", "ATR", "time_of_day"]},
             "execution_allowed": False,
@@ -161,6 +165,7 @@ def forecast(code: str, name: str, bars: list[dict[str, Any]], shares: int, cost
         "predicted_buyback_max_price": viable["buyback_max_price"],
         "trade_shares": viable["trade_shares"], "required_gap_pct": required_pullback,
         "estimated_net_profit_at_limit": viable["fees"]["net_profit"],
+        "max_buyback_gap_pct": MAX_PREDICTED_BUYBACK_GAP_PCT,
         "sample_count": len(samples), "neighbor_count": len(nearest),
         "indicators": {"model": "nearest_5minute_patterns", "features": ["returns", "range_position", "MACD", "BOLL", "RSI", "volume_ratio", "ATR", "time_of_day"]},
         "execution_allowed": False,
