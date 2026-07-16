@@ -345,6 +345,16 @@ def latest_day_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [bar for bar in bars if str(bar.get("timestamp") or "").startswith(latest_date)]
 
 
+def positive_t_blocker(code: str, label: str, current: str, reason: str, next_step: str) -> dict[str, str]:
+    return {
+        "code": code,
+        "label": label,
+        "current": current,
+        "reason": reason,
+        "next_step": next_step,
+    }
+
+
 def build_positive_timing(
     intraday: dict[str, Any],
     t_check: dict[str, Any] | None,
@@ -352,7 +362,7 @@ def build_positive_timing(
     technical_assessment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not t_check or t_check.get("conclusion") != "positive_t_candidate":
-        return {"available": False, "status": "not_applicable", "score": None, "signals": [], "buy_zone": None, "target_sell_zone": None}
+        return {"available": False, "status": "not_applicable", "score": None, "signals": [], "blockers": [], "next_action": "当前不是正T候选，不评估正T买入腿。", "buy_zone": None, "target_sell_zone": None}
     day_bars = latest_day_bars(minute_bars or [])
     if len(day_bars) < 20:
         return {
@@ -360,6 +370,16 @@ def build_positive_timing(
             "status": "insufficient",
             "score": None,
             "signals": [f"最新交易日5分钟线数量 {len(day_bars)} 少于20，不能确认正T买点。"],
+            "blockers": [
+                positive_t_blocker(
+                    "minute_sample_insufficient",
+                    "分钟线样本",
+                    f"{len(day_bars)} / 20 根",
+                    "5分钟线不足，MA20、RSI、量比和回踩结构还不能稳定计算。",
+                    "继续等待分钟线缓存补齐到至少20根，再重新判断正T。",
+                )
+            ],
+            "next_action": "不买入。等待5分钟线样本补齐后系统自动重新评分。",
             "buy_zone": None,
             "target_sell_zone": None,
         }
@@ -372,7 +392,24 @@ def build_positive_timing(
     volumes = [as_float(bar.get("volume")) for bar in day_bars]
     volumes = [value for value in volumes if value is not None]
     if len(closes) < 20:
-        return {"available": False, "status": "insufficient", "score": None, "signals": ["5分钟线价格字段不足，不能确认正T买点。"], "buy_zone": None, "target_sell_zone": None}
+        return {
+            "available": False,
+            "status": "insufficient",
+            "score": None,
+            "signals": ["5分钟线价格字段不足，不能确认正T买点。"],
+            "blockers": [
+                positive_t_blocker(
+                    "minute_price_insufficient",
+                    "分钟线价格",
+                    f"{len(closes)} / 20 个有效收盘价",
+                    "分钟线价格字段不完整，无法确认MA、RSI和回踩区间。",
+                    "刷新分钟线缓存；价格字段补齐前不执行正T。",
+                )
+            ],
+            "next_action": "不买入。先修复分钟线数据完整性。",
+            "buy_zone": None,
+            "target_sell_zone": None,
+        }
     current = as_float(value_at(intraday, "quote.latest_price"), closes[-1]) or closes[-1]
     ma5 = average(closes[-5:])
     ma20 = average(closes[-20:])
@@ -489,6 +526,41 @@ def build_positive_timing(
     buy_low = min(buy_high, max(buy_low_candidates))
     target_low = max(current, buy_high * 1.012)
     status = "confirmed" if score >= POSITIVE_T_SCORE_THRESHOLD and confirmation_count >= 2 and technical_supported else "watch"
+    blockers: list[dict[str, str]] = []
+    if score < POSITIVE_T_SCORE_THRESHOLD:
+        blockers.append(
+            positive_t_blocker(
+                "score_below_threshold",
+                "分时评分",
+                f"{score:.1f} / {POSITIVE_T_SCORE_THRESHOLD}",
+                "分时趋势、回踩幅度、动能、量能和资金流的综合分还没有达到买入确认线。",
+                f"继续观察，只有评分达到 {POSITIVE_T_SCORE_THRESHOLD:.0f} 分及以上才允许进入正T买入区间。",
+            )
+        )
+    if confirmation_count < 2:
+        blockers.append(
+            positive_t_blocker(
+                "confirmation_insufficient",
+                "确认信号",
+                f"{confirmation_count} / 2",
+                "MA5修复、放量阳线、主力净流入三项里至少需要两项共振，当前确认不足。",
+                "等待重新站上MA5、最新5分钟放量阳线，或主力净流入转正后再评估。",
+            )
+        )
+    if not technical_supported:
+        blockers.append(
+            positive_t_blocker(
+                "higher_timeframe_weak",
+                "日/周/月背景",
+                technical_label,
+                "大周期技术背景偏弱，不能只凭盘中反弹去追加资金做正T。",
+                "等待技术背景恢复到 neutral 或更强；恢复前只允许持有观察、减仓或风险复核，不做正T买入腿。",
+            )
+        )
+    next_action = "可进入正T买入观察区；按买入区、目标卖出区和资金上限执行，不长期摊低成本。"
+    if blockers:
+        first = blockers[0]
+        next_action = f"当前不买入。先处理阻断项：{first['label']}，{first['next_step']}"
     return {
         "available": True,
         "status": status,
@@ -498,6 +570,8 @@ def build_positive_timing(
         "buy_zone": [rounded(buy_low), rounded(buy_high)] if status == "confirmed" else None,
         "target_sell_zone": [rounded(target_low), rounded(target_low + 0.02)] if status == "confirmed" else None,
         "signals": signals[:8],
+        "blockers": blockers,
+        "next_action": next_action,
         "metrics": {
             "ma5": rounded(ma5),
             "ma20": rounded(ma20),

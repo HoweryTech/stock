@@ -501,9 +501,17 @@ function renderPositiveTiming(timing) {
     ["技术背景允许正T", timing.metrics?.technical_supported === false ? "否" : "是"],
   ];
   const signals = timing.signals || [];
+  const blockers = timing.blockers || [];
   return detailSection(
     "正T分时评分",
     `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    ${timing.next_action ? `<div class="action-panel action-${timing.status === "confirmed" ? "positive_t_watch" : "hold_no_add"}"><div class="action-panel-title">下一步动作</div><p>${escapeHtml(timing.next_action)}</p></div>` : ""}
+    ${blockers.length ? `<h4>未能执行正T的原因</h4><div class="blocker-list">${blockers.map(blocker => `
+      <div class="blocker-item">
+        <div><strong>${escapeHtml(blocker.label || blocker.code || "阻断项")}</strong><span>${escapeHtml(blocker.current || "--")}</span></div>
+        <p>${escapeHtml(blocker.reason || "")}</p>
+        <p class="secondary">${escapeHtml(blocker.next_step || "")}</p>
+      </div>`).join("")}</div>` : ""}
     ${signals.length ? `<h4>评分依据</h4><ul class="reason-list">${signals.map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}`
   );
 }

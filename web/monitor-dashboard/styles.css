@@ -268,6 +268,11 @@ th:nth-child(8) { width: 100px; }
 .consistency-pass span { color: var(--green); background: var(--green-bg); }
 .consistency-conflict span { color: var(--red); background: var(--red-bg); }
 .consistency-reference_only span, .consistency-skipped span, .consistency-unknown span { color: var(--muted); background: #eef1f4; }
+.blocker-list { display: grid; gap: 8px; }
+.blocker-item { padding: 10px 11px; border: 1px solid #e5c46d; border-radius: 6px; background: var(--amber-bg); }
+.blocker-item > div { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.blocker-item span { flex: 0 0 auto; min-height: 20px; padding: 2px 7px; border-radius: 4px; color: var(--amber); background: rgba(255, 255, 255, 0.72); font-size: 12px; font-weight: 600; }
+.blocker-item p { margin: 7px 0 0; }
 .technical-table-wrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; }
 .technical-table { min-width: 720px; table-layout: fixed; }
 .technical-table th { height: 34px; padding: 0 8px; }

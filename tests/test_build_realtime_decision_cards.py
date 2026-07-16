@@ -199,6 +199,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["capital_plan"]["status"], "watch")
         self.assertEqual(card["positive_timing"]["status"], "confirmed")
         self.assertGreaterEqual(card["positive_timing"]["score"], 65.0)
+        self.assertEqual(card["positive_timing"]["blockers"], [])
+        self.assertIn("可进入正T买入观察区", card["positive_timing"]["next_action"])
         self.assertFalse(card["capital_plan"]["account_cash_required"])
         self.assertEqual(card["capital_plan"]["single_add_tier"], "base")
         self.assertEqual(card["capital_plan"]["effective_single_add_pct_total_assets"], 3.0)
@@ -260,6 +262,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["positive_timing"]["status"], "watch")
         self.assertGreaterEqual(card["positive_timing"]["score"], 65.0)
         self.assertLess(card["positive_timing"]["metrics"]["confirmation_count"], 2)
+        self.assertTrue(any(blocker["code"] == "confirmation_insufficient" for blocker in card["positive_timing"]["blockers"]))
+        self.assertIn("当前不买入", card["positive_timing"]["next_action"])
         self.assertEqual(card["capital_plan"]["status"], "waiting_intraday_confirmation")
 
     def test_positive_t_confirmed_intraday_waits_when_daily_context_is_weak(self) -> None:
@@ -285,6 +289,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["state"], "hold_no_add")
         self.assertIn(card["technical_assessment"]["label"], {"bearish", "slightly_bearish"})
         self.assertFalse(card["positive_timing"]["metrics"]["technical_supported"])
+        self.assertTrue(any(blocker["code"] == "higher_timeframe_weak" for blocker in card["positive_timing"]["blockers"]))
         self.assertFalse(card["capital_plan"]["applicable"])
 
     def test_positive_t_candidate_without_intraday_confirmation_waits(self) -> None:
@@ -309,6 +314,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
 
         self.assertEqual(card["state"], "positive_t_watch")
         self.assertEqual(card["positive_timing"]["status"], "insufficient")
+        self.assertTrue(any(blocker["code"] == "minute_sample_insufficient" for blocker in card["positive_timing"]["blockers"]))
+        self.assertIn("不买入", card["positive_timing"]["next_action"])
         self.assertEqual(card["capital_plan"]["status"], "waiting_intraday_confirmation")
         self.assertIn("分时评分未确认", card["capital_plan"]["status_label"])
 
