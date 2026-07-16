@@ -573,6 +573,18 @@ python3 tools/run_intraday_decision_pipeline.py \
 
 该命令会顺序刷新准实时快照、组合日检、做T检查、数据质量快照和实时持仓决策卡，避免页面同时读取不同时间点的产物。
 
+检查等待交易时段的持仓是否已经需要刷新：
+
+```bash
+python3 tools/check_market_wait_refresh.py \
+  --decision-cards data/metadata/realtime-decision-cards.json \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --daily-bars data/processed/daily_bars.csv \
+  --total-assets 25480
+```
+
+该命令只读取决策卡并判断当前交易时段：盘前、午间休市、盘后或非交易日只提示继续等待；进入集合竞价或连续竞价后，如果仍有 `market_wait` 持仓，会输出可执行的完整日内决策链刷新命令。
+
 生成持仓数据质量快照：
 
 ```bash
