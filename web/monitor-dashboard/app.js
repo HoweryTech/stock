@@ -578,6 +578,22 @@ function renderManualTradeImpact(item, side, price, shares) {
   </div>`;
 }
 
+function reverseTradePresetControls(item) {
+  const plan = item.reverse_t_plan || {};
+  const sellZone = plan.sell_zone || [];
+  const shares = Number(plan.trade_shares || 0);
+  if (plan.status !== "candidate" || sellZone.length < 2 || !shares) return "";
+  const sellPrice = Number(sellZone[0]);
+  const buybackPrice = plan.buyback_max_price == null ? null : Number(plan.buyback_max_price);
+  const buttons = [
+    `<button class="secondary-action" type="button" data-manual-preset data-side="sell" data-price="${escapeHtml(sellPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-note="反T卖出：按系统候选步骤记录">填入反T卖出</button>`,
+  ];
+  if (buybackPrice != null) {
+    buttons.push(`<button class="secondary-action" type="button" data-manual-preset data-side="buy" data-price="${escapeHtml(buybackPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-note="反T回补：按系统回补上限记录">填入反T回补</button>`);
+  }
+  return `<div class="manual-preset"><div class="manual-preset-title">反T快捷填入</div><div class="manual-preset-actions">${buttons.join("")}</div></div>`;
+}
+
 function manualTradeSection(item) {
   const currentPrice = item.quote?.latest_price == null ? "" : Number(item.quote.latest_price).toFixed(2);
   const maxSellShares = Number(item.position?.shares || 0);
@@ -586,6 +602,7 @@ function manualTradeSection(item) {
   return detailSection(
     "手工成交更新",
     `<form class="manual-trade-form" data-code="${escapeHtml(item.code)}">
+      ${reverseTradePresetControls(item)}
       <div class="manual-trade-grid">
         <label><span>方向</span><select name="side"><option value="sell">卖出</option><option value="buy">买入</option></select></label>
         <label><span>价格</span><input name="price" type="number" step="0.01" min="0.01" value="${escapeHtml(currentPrice)}" required></label>
@@ -604,11 +621,14 @@ function updateManualTradeImpact(form) {
   const item = state.snapshot?.items.find(entry => entry.code === code);
   if (!item) return;
   const target = form.querySelector(".manual-trade-impact");
+  const side = form.querySelector('[name="side"]')?.value;
+  const price = Number(form.querySelector('[name="price"]')?.value);
+  const shares = Number(form.querySelector('[name="shares"]')?.value);
   target.innerHTML = renderManualTradeImpact(
     item,
-    form.elements.side.value,
-    Number(form.elements.price.value),
-    Number(form.elements.shares.value),
+    side,
+    price,
+    shares,
   );
 }
 
@@ -936,10 +956,10 @@ document.querySelector("#detailContent").addEventListener("submit", async event 
   const button = form.querySelector("button[type='submit']");
   const payload = {
     code: form.dataset.code,
-    side: form.elements.side.value,
-    price: Number(form.elements.price.value),
-    shares: Number(form.elements.shares.value),
-    note: form.elements.note.value,
+    side: form.querySelector('[name="side"]')?.value,
+    price: Number(form.querySelector('[name="price"]')?.value),
+    shares: Number(form.querySelector('[name="shares"]')?.value),
+    note: form.querySelector('[name="note"]')?.value || "",
   };
   updateManualTradeImpact(form);
   const item = state.snapshot?.items.find(entry => entry.code === payload.code);
@@ -965,6 +985,19 @@ document.querySelector("#detailContent").addEventListener("submit", async event 
   } finally {
     button.disabled = false;
   }
+});
+document.querySelector("#detailContent").addEventListener("click", event => {
+  const button = event.target.closest("[data-manual-preset]");
+  if (!button) return;
+  const form = button.closest(".manual-trade-form");
+  if (!form) return;
+  form.querySelector('[name="side"]').value = button.dataset.side || "sell";
+  form.querySelector('[name="price"]').value = button.dataset.price || "";
+  form.querySelector('[name="shares"]').value = button.dataset.shares || "";
+  form.querySelector('[name="note"]').value = button.dataset.note || "";
+  updateManualTradeImpact(form);
+  const status = form.querySelector(".manual-trade-status");
+  status.textContent = "已填入系统建议成交参数；确认已真实成交后再点击记录。";
 });
 document.querySelector("#detailContent").addEventListener("input", event => {
   const form = event.target.closest(".manual-trade-form");
