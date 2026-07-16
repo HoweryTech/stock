@@ -241,6 +241,7 @@ th:nth-child(8) { width: 100px; }
   font-weight: 600;
 }
 .primary-action:disabled { opacity: 0.62; cursor: wait; }
+.danger-action { border-color: var(--red); background: var(--red); }
 .secondary-action {
   min-height: 30px;
   padding: 0 10px;
@@ -265,6 +266,31 @@ th:nth-child(8) { width: 100px; }
 .manual-impact-grid dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; margin: 0; }
 .manual-impact-grid dt { color: var(--muted); font-size: 12px; }
 .manual-impact-grid dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.confirm-modal {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(17, 24, 32, 0.42);
+}
+.confirm-modal[hidden] { display: none; }
+.confirm-dialog {
+  width: min(560px, 96vw);
+  max-height: min(720px, 92vh);
+  overflow-y: auto;
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.confirm-header { min-height: 68px; padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 14px; align-items: center; }
+.confirm-header p { margin: 0 0 3px; color: var(--muted); font-size: 12px; }
+.confirm-header h2 { margin: 0; font-size: 18px; }
+.confirm-body { padding: 15px 16px; }
+.confirm-body p { margin: 0 0 10px; }
+.confirm-body h4 { margin: 14px 0 8px; font-size: 12px; color: var(--muted); }
+.confirm-actions { padding: 13px 16px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 10px; }
 .action-exit_risk_review { border-color: #f0aaa3; background: var(--red-bg); }
 .action-data_insufficient { border-color: #e5c46d; background: var(--amber-bg); }
 .action-risk_reduction_review, .action-hold_no_add { border-color: #e5c46d; background: var(--amber-bg); }
@@ -323,5 +349,7 @@ th:nth-child(8) { width: 100px; }
   .card-advice { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); line-height: 1.5; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
   .manual-trade-grid { grid-template-columns: 1fr; }
+  .confirm-actions { justify-content: stretch; }
+  .confirm-actions button { flex: 1; }
   .technical-line, .quality-line { align-items: flex-start; }
 }

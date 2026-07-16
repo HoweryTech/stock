@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>持仓监控台</title>
-  <link rel="stylesheet" href="/styles.css?v=20260716-open-reverse-t-leg">
+  <link rel="stylesheet" href="/styles.css?v=20260716-manual-confirm-modal">
 </head>
 <body>
   <header class="app-header">
@@ -82,8 +82,24 @@
     </div>
     <div id="detailContent"></div>
   </aside>
+  <section class="confirm-modal" id="manualTradeConfirm" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="manualTradeConfirmTitle">
+    <div class="confirm-dialog">
+      <div class="confirm-header">
+        <div>
+          <p>成交写入确认</p>
+          <h2 id="manualTradeConfirmTitle">确认更新持仓</h2>
+        </div>
+        <button class="close-button" id="manualTradeCancelTop" type="button" aria-label="关闭确认" title="关闭">×</button>
+      </div>
+      <div class="confirm-body" id="manualTradeConfirmBody"></div>
+      <div class="confirm-actions">
+        <button class="secondary-action" id="manualTradeCancel" type="button">取消</button>
+        <button class="primary-action danger-action" id="manualTradeConfirmButton" type="button">确认写入并刷新</button>
+      </div>
+    </div>
+  </section>
   <div class="scrim" id="scrim" hidden></div>
 
-  <script src="/app.js?v=20260716-open-reverse-t-leg" defer></script>
+  <script src="/app.js?v=20260716-manual-confirm-modal" defer></script>
 </body>
 </html>

@@ -10,6 +10,7 @@ const state = {
   filter: "all",
   search: "",
   selectedCode: null,
+  pendingManualTrade: null,
 };
 
 const labels = {
@@ -578,6 +579,109 @@ function renderManualTradeImpact(item, side, price, shares) {
   </div>`;
 }
 
+function manualTradePayload(form) {
+  return {
+    code: form.dataset.code,
+    side: form.querySelector('[name="side"]')?.value,
+    price: Number(form.querySelector('[name="price"]')?.value),
+    shares: Number(form.querySelector('[name="shares"]')?.value),
+    note: form.querySelector('[name="note"]')?.value || "",
+    trade_intent: form.querySelector('[name="trade_intent"]')?.value || "",
+    linked_trade_id: form.querySelector('[name="linked_trade_id"]')?.value || "",
+  };
+}
+
+function nextPlanAfterManualTrade(item, payload, impact) {
+  if (payload.trade_intent === "reverse_t_close") {
+    return "回补成交后，系统会关闭这笔开放反T腿，持仓恢复后重新计算成本和下一步建议。";
+  }
+  if (payload.trade_intent === "reverse_t_open") {
+    return "卖出成交后，系统会跟踪这笔开放反T腿；未到回补上限不追买。";
+  }
+  if (payload.side === "sell") {
+    return impact.remainingShares <= 0 ? "成交后该股持仓归零，系统会按退出后的状态重新生成建议。" : "成交后系统会按剩余股数重新评估仓位、止损风险和是否还能做T。";
+  }
+  return "买入成交后系统会更新持仓成本，并重新评估是否允许继续加仓、做T或需要风险复核。";
+}
+
+function renderManualTradeConfirmation(item, payload, impact) {
+  const sideLabel = payload.side === "sell" ? "卖出" : "买入";
+  const intentLabel = {
+    reverse_t_open: "反T卖出腿",
+    reverse_t_close: "反T回补",
+  }[payload.trade_intent] || "普通手工成交";
+  const metrics = [
+    ["证券", `${item.code} ${item.name}`],
+    ["成交方向", sideLabel],
+    ["成交意图", intentLabel],
+    ["成交价格", `${num(payload.price)}元`],
+    ["成交数量", `${payload.shares}股`],
+    ["预估费用", money(impact.fees.total)],
+    ["成交后股数", `${impact.remainingShares.toFixed(0)}股`],
+    ["是否还能反T", impact.reverseTSupported ? "可以继续观察" : "不足200股，不支持保留底仓反T"],
+  ];
+  if (payload.side === "sell") {
+    metrics.push(["预计实现盈亏", money(impact.realizedPnl)]);
+  } else {
+    metrics.push(["预计新成本", money(impact.weightedCost)]);
+  }
+  if (payload.linked_trade_id) metrics.push(["关联卖出记录", payload.linked_trade_id]);
+  return `<p><strong>请确认这笔成交已经在券商软件真实成交。</strong></p>
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    <h4>成交后的下一步计划</h4>
+    <p>${escapeHtml(nextPlanAfterManualTrade(item, payload, impact))}</p>
+    <p class="secondary">确认后会立即写入本地持仓文件，并刷新实时建议。</p>`;
+}
+
+function openManualTradeConfirm(form, payload, item, impact) {
+  state.pendingManualTrade = { form, payload };
+  document.querySelector("#manualTradeConfirmTitle").textContent = `${payload.side === "sell" ? "确认卖出" : "确认买入"} ${item.name}`;
+  document.querySelector("#manualTradeConfirmBody").innerHTML = renderManualTradeConfirmation(item, payload, impact);
+  document.querySelector("#manualTradeConfirm").hidden = false;
+  document.querySelector("#manualTradeConfirm").setAttribute("aria-hidden", "false");
+}
+
+function closeManualTradeConfirm() {
+  state.pendingManualTrade = null;
+  document.querySelector("#manualTradeConfirm").hidden = true;
+  document.querySelector("#manualTradeConfirm").setAttribute("aria-hidden", "true");
+  document.querySelector("#manualTradeConfirmButton").disabled = false;
+}
+
+function prepareManualTradeConfirmation(form) {
+  const status = form.querySelector(".manual-trade-status");
+  const payload = manualTradePayload(form);
+  updateManualTradeImpact(form);
+  const item = state.snapshot?.items.find(entry => entry.code === payload.code);
+  const impact = item ? manualTradeImpact(item, payload.side, payload.price, payload.shares) : null;
+  if (!impact || !impact.valid) {
+    status.textContent = impact?.message || "请先输入有效成交信息。";
+    return;
+  }
+  status.textContent = "请在确认弹层核对成交后影响。";
+  openManualTradeConfirm(form, payload, item, impact);
+}
+
+async function submitManualTrade(payload, form) {
+  const status = form.querySelector(".manual-trade-status");
+  status.textContent = "正在更新持仓并刷新建议...";
+  try {
+    const response = await fetch("/api/manual-trade", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    status.textContent = "已更新，正在重新加载页面数据。";
+    closeManualTradeConfirm();
+    await loadData();
+  } catch (error) {
+    status.textContent = `更新失败：${error.message}`;
+    throw error;
+  }
+}
+
 function reverseTradePresetControls(item) {
   const plan = item.reverse_t_plan || {};
   const sellZone = plan.sell_zone || [];
@@ -888,6 +992,13 @@ function updateHeader(status) {
   document.querySelector("#latencyText").textContent = `最大延迟 ${maxLag.toFixed(1)}秒`;
 }
 
+function manualTradeInteractionActive() {
+  const modal = document.querySelector("#manualTradeConfirm");
+  if (modal && !modal.hidden) return true;
+  const active = document.activeElement;
+  return Boolean(active && active.closest && active.closest(".manual-trade-form"));
+}
+
 async function loadData() {
   try {
     const fetchJson = async (url, fallback = null, required = false) => {
@@ -926,7 +1037,7 @@ async function loadData() {
     renderSummary();
     renderPositions();
     renderEvents();
-    if (state.selectedCode) openDetail(state.selectedCode);
+    if (state.selectedCode && !manualTradeInteractionActive()) openDetail(state.selectedCode);
   } catch (error) {
     document.querySelector("#monitorStatus").textContent = "数据连接失败";
     document.querySelector("#statusDot").className = "status-dot offline";
@@ -963,43 +1074,15 @@ document.querySelector("#detailContent").addEventListener("submit", async event 
   const form = event.target.closest(".manual-trade-form");
   if (!form) return;
   event.preventDefault();
-  const status = form.querySelector(".manual-trade-status");
-  const button = form.querySelector("button[type='submit']");
-  const payload = {
-    code: form.dataset.code,
-    side: form.querySelector('[name="side"]')?.value,
-    price: Number(form.querySelector('[name="price"]')?.value),
-    shares: Number(form.querySelector('[name="shares"]')?.value),
-    note: form.querySelector('[name="note"]')?.value || "",
-    trade_intent: form.querySelector('[name="trade_intent"]')?.value || "",
-    linked_trade_id: form.querySelector('[name="linked_trade_id"]')?.value || "",
-  };
-  updateManualTradeImpact(form);
-  const item = state.snapshot?.items.find(entry => entry.code === payload.code);
-  const impact = item ? manualTradeImpact(item, payload.side, payload.price, payload.shares) : null;
-  if (!impact || !impact.valid) {
-    status.textContent = impact?.message || "请先输入有效成交信息。";
-    return;
-  }
-  status.textContent = "正在更新持仓并刷新建议...";
-  button.disabled = true;
-  try {
-    const response = await fetch("/api/manual-trade", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    status.textContent = "已更新，正在重新加载页面数据。";
-    await loadData();
-  } catch (error) {
-    status.textContent = `更新失败：${error.message}`;
-  } finally {
-    button.disabled = false;
-  }
+  prepareManualTradeConfirmation(form);
 });
 document.querySelector("#detailContent").addEventListener("click", event => {
+  const submitButton = event.target.closest(".manual-trade-form button[type='submit']");
+  if (submitButton) {
+    event.preventDefault();
+    prepareManualTradeConfirmation(submitButton.closest(".manual-trade-form"));
+    return;
+  }
   const button = event.target.closest("[data-manual-preset]");
   if (!button) return;
   const form = button.closest(".manual-trade-form");
@@ -1022,7 +1105,30 @@ document.querySelector("#detailContent").addEventListener("change", event => {
   const form = event.target.closest(".manual-trade-form");
   if (form) updateManualTradeImpact(form);
 });
-document.addEventListener("keydown", event => { if (event.key === "Escape") closeDetail(); });
+document.querySelector("#manualTradeCancel").addEventListener("click", closeManualTradeConfirm);
+document.querySelector("#manualTradeCancelTop").addEventListener("click", closeManualTradeConfirm);
+document.querySelector("#manualTradeConfirm").addEventListener("click", event => {
+  if (event.target.id === "manualTradeConfirm") closeManualTradeConfirm();
+});
+document.querySelector("#manualTradeConfirmButton").addEventListener("click", async event => {
+  const pending = state.pendingManualTrade;
+  if (!pending) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await submitManualTrade(pending.payload, pending.form);
+  } catch (_error) {
+    button.disabled = false;
+  }
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  if (!document.querySelector("#manualTradeConfirm").hidden) {
+    closeManualTradeConfirm();
+    return;
+  }
+  closeDetail();
+});
 
 loadData();
 setInterval(loadData, 5000);
