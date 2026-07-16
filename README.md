@@ -58,6 +58,7 @@
 - [估值指标导入](./docs/估值指标导入.md)
 - [价值质量策略筛选](./docs/价值质量策略筛选.md)
 - [趋势强度基础因子](./docs/趋势强度基础因子.md)
+- [多周期技术指标](./docs/多周期技术指标.md)
 - [趋势强度策略筛选](./docs/趋势强度策略筛选.md)
 - [多策略候选池合并](./docs/多策略候选池合并.md)
 - [观察池报告](./docs/观察池报告.md)
@@ -185,6 +186,18 @@ python3 tools/calc_trend_factors.py \
   --metadata-output data/metadata/trend_factors.json \
   --windows 5,20
 ```
+
+### 计算多周期技术指标
+
+```bash
+python3 tools/calc_technical_indicators.py \
+  --daily-bars data/processed/daily_bars.csv \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --output data/metadata/technical-indicators.json \
+  --markdown-output reports/technical-indicators.md
+```
+
+该工具基于本地 OHLCV 日线聚合日线、周线和月线，计算 `MACD(12,26,9)`、`BOLL(20,2)`、`RSI(6,14)`、`KDJ(9,3,3)`、`ATR(14)` 和 20 根量比。它计算的是技术证据，不直接生成买卖动作。
 
 ### 筛选趋势强度候选股
 
