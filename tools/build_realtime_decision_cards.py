@@ -112,6 +112,10 @@ def index_simple_items(doc: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     return {str(item["code"]): item for item in doc.get("items", []) if item.get("code")}
 
 
+def index_technical_indicators(doc: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    return index_simple_items(doc)
+
+
 def data_quality_status(data_quality: dict[str, Any] | None) -> str | None:
     if not data_quality:
         return None
@@ -149,9 +153,132 @@ def decision_priority(state: str) -> int:
         "risk_reduction_review": 60,
         "positive_t_watch": 45,
         "reverse_t_watch": 40,
-        "hold_no_add": 30,
+        "hold_no_add": 50,
         "observe": 10,
     }.get(state, 0)
+
+
+def indicator_value(period_data: dict[str, Any], path: str) -> float | None:
+    current: Any = period_data
+    for part in path.split("."):
+        current = current.get(part) if isinstance(current, dict) else None
+    return as_float(current)
+
+
+def score_period_indicators(period: str, period_data: dict[str, Any], weight: float) -> tuple[float, list[str]]:
+    score = 0.0
+    signals: list[str] = []
+
+    macd_histogram = indicator_value(period_data, "macd.histogram")
+    macd_dif = indicator_value(period_data, "macd.dif")
+    macd_dea = indicator_value(period_data, "macd.dea")
+    if macd_histogram is not None:
+        if macd_histogram > 0:
+            score += 12 * weight
+            signals.append(f"{period}: MACD柱为正，动能偏多。")
+        elif macd_histogram < 0:
+            score -= 12 * weight
+            signals.append(f"{period}: MACD柱为负，动能偏弱。")
+    if macd_dif is not None and macd_dea is not None:
+        if macd_dif > macd_dea:
+            score += 6 * weight
+        elif macd_dif < macd_dea:
+            score -= 6 * weight
+
+    percent_b = indicator_value(period_data, "boll.percent_b")
+    if percent_b is not None:
+        if percent_b < 0.15:
+            score -= 10 * weight
+            signals.append(f"{period}: 价格接近或跌破BOLL下轨，趋势承压。")
+        elif percent_b > 0.9:
+            score -= 6 * weight
+            signals.append(f"{period}: 价格接近BOLL上轨，追高风险上升。")
+        elif 0.35 <= percent_b <= 0.75:
+            score += 4 * weight
+
+    rsi14 = indicator_value(period_data, "rsi.rsi14")
+    if rsi14 is not None:
+        if rsi14 < 30:
+            score -= 8 * weight
+            signals.append(f"{period}: RSI14低于30，弱势或超卖。")
+        elif rsi14 < 45:
+            score -= 4 * weight
+        elif rsi14 <= 65:
+            score += 5 * weight
+        elif rsi14 > 75:
+            score -= 6 * weight
+            signals.append(f"{period}: RSI14高于75，短线过热。")
+
+    k_value = indicator_value(period_data, "kdj.k")
+    d_value = indicator_value(period_data, "kdj.d")
+    j_value = indicator_value(period_data, "kdj.j")
+    if k_value is not None and d_value is not None:
+        score += (3 if k_value >= d_value else -3) * weight
+    if j_value is not None:
+        if j_value < 0:
+            score -= 5 * weight
+            signals.append(f"{period}: KDJ-J低于0，短线偏弱。")
+        elif j_value > 100:
+            score -= 5 * weight
+            signals.append(f"{period}: KDJ-J高于100，短线过热。")
+
+    atr_pct = indicator_value(period_data, "atr.atr_pct")
+    if atr_pct is not None and atr_pct >= 8:
+        score -= 6 * weight
+        signals.append(f"{period}: ATR%为{atr_pct:.2f}，波动风险偏高。")
+
+    volume_ratio = indicator_value(period_data, "volume.volume_ratio_20")
+    if volume_ratio is not None:
+        if volume_ratio >= 1.5:
+            score += (6 if (macd_histogram or 0) >= 0 else -3) * weight
+            signals.append(f"{period}: 20根量比{volume_ratio:.2f}，成交明显放大。")
+        elif volume_ratio < 0.7:
+            score -= 3 * weight
+
+    return score, signals
+
+
+def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> dict[str, Any]:
+    if not technical_indicators:
+        return {"available": False, "score": None, "label": "missing", "signals": [], "periods": {}}
+    periods = technical_indicators.get("periods") or {}
+    weights = {"daily": 0.55, "weekly": 0.35, "monthly": 0.10}
+    total = 0.0
+    signals: list[str] = []
+    period_summary: dict[str, Any] = {}
+    for period, weight in weights.items():
+        period_data = periods.get(period) or {}
+        period_score, period_signals = score_period_indicators(period, period_data, weight)
+        total += period_score
+        signals.extend(period_signals[:3])
+        period_summary[period] = {
+            "bar_count": period_data.get("bar_count"),
+            "latest_trade_date": period_data.get("latest_trade_date"),
+            "score": rounded(period_score),
+            "macd_histogram": rounded(indicator_value(period_data, "macd.histogram")),
+            "boll_percent_b": rounded(indicator_value(period_data, "boll.percent_b")),
+            "rsi14": rounded(indicator_value(period_data, "rsi.rsi14")),
+            "kdj_j": rounded(indicator_value(period_data, "kdj.j")),
+            "atr_pct": rounded(indicator_value(period_data, "atr.atr_pct")),
+            "volume_ratio_20": rounded(indicator_value(period_data, "volume.volume_ratio_20")),
+        }
+    if total >= 18:
+        label = "bullish"
+    elif total <= -18:
+        label = "bearish"
+    elif total >= 6:
+        label = "slightly_bullish"
+    elif total <= -6:
+        label = "slightly_bearish"
+    else:
+        label = "neutral"
+    return {
+        "available": True,
+        "score": rounded(total),
+        "label": label,
+        "signals": signals[:8],
+        "periods": period_summary,
+    }
 
 
 def choose_state(
@@ -160,6 +287,7 @@ def choose_state(
     t_check: dict[str, Any] | None,
     reverse_backtest: dict[str, Any] | None,
     data_quality: dict[str, Any] | None,
+    technical_assessment: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     signal_codes = {item.get("code") for item in intraday.get("signals", [])}
     portfolio_action_codes = {item.get("code") for item in (portfolio or {}).get("actions", [])}
@@ -195,6 +323,8 @@ def choose_state(
         states.append(("positive_t_watch", "日线环境进入正T观察候选。"))
     if value_at(intraday, "reverse_t_plan.status") == "candidate":
         states.append(("reverse_t_watch", "盘中价格进入反T观察候选。"))
+    if (technical_assessment or {}).get("label") == "bearish":
+        states.append(("hold_no_add", "多周期技术指标偏弱，禁止补仓和做T，先观察风险变化。"))
     if signal_codes & {"below_ma20", "intraday_drop"}:
         states.append(("hold_no_add", "盘中走势偏弱，禁止补仓。"))
     if reverse_backtest and reverse_backtest.get("verdict") in {"insufficient_sample", "weak_result"} and value_at(intraday, "reverse_t_plan.status") == "candidate":
@@ -242,8 +372,15 @@ def build_evidence(
     reverse_backtest: dict[str, Any] | None,
     reverse_forecast: dict[str, Any] | None,
     data_quality: dict[str, Any] | None,
+    technical_assessment: dict[str, Any] | None = None,
 ) -> list[str]:
     evidence: list[str] = []
+    if technical_assessment and technical_assessment.get("available"):
+        evidence.append(
+            f"[技术指标] {technical_assessment.get('label')} · score={technical_assessment.get('score')}"
+        )
+        for signal in technical_assessment.get("signals", [])[:4]:
+            evidence.append(f"[技术指标] {signal}")
     if data_quality:
         trust = data_quality.get("data_trust") or {}
         trust_text = trust.get("label") or trust.get("level") or "-"
@@ -289,6 +426,7 @@ def build_blockers(
     t_check: dict[str, Any] | None,
     reverse_backtest: dict[str, Any] | None,
     data_quality: dict[str, Any] | None,
+    technical_assessment: dict[str, Any] | None = None,
 ) -> list[str]:
     blockers: list[str] = []
     if data_quality_status(data_quality) in QUALITY_BLOCKER_STATUSES:
@@ -297,6 +435,8 @@ def build_blockers(
         blockers.extend((data_quality.get("data_trust") or {}).get("reasons") or [])
     blockers.extend(signal.get("message") for signal in intraday.get("signals", []) if signal.get("severity") in {"block", "risk"})
     blockers.extend(item.get("message") for item in (t_check or {}).get("blockers", []))
+    if (technical_assessment or {}).get("label") == "bearish":
+        blockers.append("多周期技术指标偏弱，本轮禁止补仓和做T。")
     if reverse_backtest and reverse_backtest.get("verdict") != "pass":
         blockers.append(reverse_backtest.get("verdict_label") or "反T历史回测未通过。")
     return [item for item in blockers if item]
@@ -334,6 +474,17 @@ def confidence_for(state: str, evidence: list[str], blockers: list[str]) -> str:
     return "low"
 
 
+def technical_decision_note(technical_assessment: dict[str, Any]) -> str | None:
+    label = technical_assessment.get("label")
+    if label == "bearish":
+        return "技术指标偏弱时，不放宽做T限制；等日线或周线动能修复后再评估。"
+    if label == "bullish":
+        return "技术指标偏多，但仍只能作为观察证据，不能替代止损和人工确认。"
+    if label in {"slightly_bearish", "slightly_bullish"}:
+        return "技术指标只有轻微信号，继续结合实时价、止损距离和成交量验证。"
+    return None
+
+
 def build_card(
     intraday: dict[str, Any],
     portfolio: dict[str, Any] | None,
@@ -342,10 +493,21 @@ def build_card(
     reverse_backtest: dict[str, Any] | None,
     reverse_forecast: dict[str, Any] | None,
     data_quality: dict[str, Any] | None,
+    technical_indicators: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality)
-    evidence = build_evidence(intraday, portfolio, t_check, action_backtest, reverse_backtest, reverse_forecast, data_quality)
-    blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality)
+    technical_assessment = build_technical_assessment(technical_indicators)
+    state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment)
+    evidence = build_evidence(
+        intraday,
+        portfolio,
+        t_check,
+        action_backtest,
+        reverse_backtest,
+        reverse_forecast,
+        data_quality,
+        technical_assessment,
+    )
+    blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment)
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
@@ -391,7 +553,10 @@ def build_card(
             "market_session_phase": market_session(data_quality).get("phase"),
             "market_session_label": market_session(data_quality).get("label"),
             "live_quote_required": market_session(data_quality).get("live_quote_required"),
+            "technical_score": technical_assessment.get("score"),
+            "technical_label": technical_assessment.get("label"),
         },
+        "technical_assessment": technical_assessment,
         "data_quality": data_quality or {},
         "blockers": blockers,
         "evidence": evidence,
@@ -411,6 +576,7 @@ def build_report(
     reverse_t_backtest: dict[str, Any] | None,
     reverse_t_forecast: dict[str, Any] | None,
     data_quality: dict[str, Any] | None = None,
+    technical_indicators: dict[str, Any] | None = None,
     *,
     generated_at: datetime | None = None,
 ) -> dict[str, Any]:
@@ -420,6 +586,7 @@ def build_report(
     reverse_backtest_by_code = index_simple_items(reverse_t_backtest)
     reverse_forecast_by_code = index_simple_items(reverse_t_forecast)
     data_quality_by_code = index_simple_items(data_quality)
+    technical_by_code = index_technical_indicators(technical_indicators)
     cards = [
         build_card(
             item,
@@ -429,6 +596,7 @@ def build_report(
             reverse_backtest_by_code.get(str(item.get("code"))),
             reverse_forecast_by_code.get(str(item.get("code"))),
             data_quality_by_code.get(str(item.get("code"))),
+            technical_by_code.get(str(item.get("code"))),
         )
         for item in intraday_snapshot.get("items", [])
     ]
@@ -445,6 +613,7 @@ def build_report(
             "reverse_t_backtest_available": reverse_t_backtest is not None,
             "reverse_t_forecast_available": reverse_t_forecast is not None,
             "data_quality_available": data_quality is not None,
+            "technical_indicators_available": technical_indicators is not None,
         },
         "card_count": len(cards),
         "state_counts": dict(sorted(state_counts.items())),
@@ -465,17 +634,19 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- 卡片数：{report['card_count']}",
         f"- 状态分布：{report['state_counts']}",
         "",
-        "| 代码 | 名称 | 状态 | 当前价 | 止损 | 阻断价 | 动作 | 置信度 |",
-        "| --- | --- | --- | ---: | ---: | ---: | --- | --- |",
+        "| 代码 | 名称 | 状态 | 当前价 | 止损 | 阻断价 | 技术分 | 动作 | 置信度 |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for card in report["cards"]:
         levels = card["price_levels"]
         decision = card["decision"]
+        technical = card.get("technical_assessment") or {}
         lines.append(
             f"| {card['code']} | {card['name']} | {card['state_label']} | "
             f"{levels.get('current_price') if levels.get('current_price') is not None else '-'} | "
             f"{levels.get('stop_loss_price') if levels.get('stop_loss_price') is not None else '-'} | "
             f"{levels.get('near_stop_block_price') if levels.get('near_stop_block_price') is not None else '-'} | "
+            f"{technical.get('score') if technical.get('score') is not None else '-'} | "
             f"{decision['action_label']} | {decision['confidence']} |"
         )
     lines.extend(["", "## 明细", ""])
@@ -492,6 +663,9 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"- 关键价格：当前 {levels.get('current_price') or '-'}，止损 {levels.get('stop_loss_price') or '-'}，做T阻断价 {levels.get('near_stop_block_price') or '-'}，MA20 {levels.get('ma20') or '-'}",
             ]
         )
+        note = technical_decision_note(card.get("technical_assessment") or {})
+        if note:
+            lines.append(f"- 技术判断：{note}")
         if card["blockers"]:
             lines.append("- 阻断：")
             lines.extend(f"  - {item}" for item in card["blockers"][:4])
@@ -510,6 +684,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reverse-t-backtest", default="data/metadata/reverse-t-backtest.json")
     parser.add_argument("--reverse-t-forecast", default="data/metadata/reverse-t-forecast.json")
     parser.add_argument("--data-quality", default="data/metadata/data-quality-snapshot.json")
+    parser.add_argument("--technical-indicators", default="data/metadata/technical-indicators.json")
     parser.add_argument("--output", default="data/metadata/realtime-decision-cards.json")
     parser.add_argument("--markdown-output", default="reports/realtime-decision-cards.md")
     parser.add_argument("--json", action="store_true")
@@ -530,6 +705,7 @@ def main() -> int:
             load_json_if_exists(Path(args.reverse_t_backtest)),
             load_json_if_exists(Path(args.reverse_t_forecast)),
             load_json_if_exists(Path(args.data_quality)),
+            load_json_if_exists(Path(args.technical_indicators)),
         )
         write_json(Path(args.output), report)
         Path(args.markdown_output).parent.mkdir(parents=True, exist_ok=True)

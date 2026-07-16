@@ -124,6 +124,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     reverse_t_forecast_path = Path(args.reverse_t_forecast)
     if reverse_t_forecast_path.exists():
         reverse_t_forecast = json.loads(reverse_t_forecast_path.read_text(encoding="utf-8"))
+    technical_indicators = None
+    technical_indicators_path = Path(args.technical_indicators)
+    if technical_indicators_path.exists():
+        technical_indicators = json.loads(technical_indicators_path.read_text(encoding="utf-8"))
 
     decision_cards = build_decision_cards_report(
         intraday_snapshot,
@@ -133,6 +137,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         reverse_t_backtest,
         reverse_t_forecast,
         data_quality,
+        technical_indicators,
     )
     write_json(Path(args.decision_cards_output), decision_cards)
     write_text(Path(args.decision_cards_markdown_output), render_decision_cards_markdown(decision_cards))
@@ -178,6 +183,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "action_backtests": args.action_backtests,
             "reverse_t_backtest": args.reverse_t_backtest,
             "reverse_t_forecast": args.reverse_t_forecast,
+            "technical_indicators": args.technical_indicators,
         },
     }
     write_json(Path(args.metadata_output), metadata)
@@ -218,6 +224,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--action-backtests", default="data/metadata/portfolio-action-matrix-backtests.after-plan.json")
     parser.add_argument("--reverse-t-backtest", default="data/metadata/reverse-t-backtest.json")
     parser.add_argument("--reverse-t-forecast", default="data/metadata/reverse-t-forecast.json")
+    parser.add_argument("--technical-indicators", default="data/metadata/technical-indicators.json")
     parser.add_argument("--intraday-output", default="data/metadata/intraday-monitor.latest.json")
     parser.add_argument("--intraday-markdown-output", default="reports/intraday-monitor.latest.md")
     parser.add_argument("--portfolio-check-output", default="data/metadata/eastmoney-portfolio-check.after-threshold.json")

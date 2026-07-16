@@ -638,11 +638,12 @@ python3 tools/build_realtime_decision_cards.py \
   --portfolio-check data/metadata/eastmoney-portfolio-check.after-threshold.json \
   --t-opportunities data/metadata/eastmoney-portfolio-t-opportunities.near-config.json \
   --data-quality data/metadata/data-quality-snapshot.json \
+  --technical-indicators data/metadata/technical-indicators.json \
   --output data/metadata/realtime-decision-cards.json \
   --markdown-output reports/realtime-decision-cards.md
 ```
 
-决策卡会把准实时行情、数据质量、组合日检、做T检查、动作矩阵回测、反T回测和反T预测合并成每只持仓的状态、关键价格、阻断原因、证据链和下一步动作。它只生成辅助建议，不自动下单。
+决策卡会把准实时行情、数据质量、组合日检、做T检查、多周期技术指标、动作矩阵回测、反T回测和反T预测合并成每只持仓的状态、关键价格、技术评分、阻断原因、证据链和下一步动作。它只生成辅助建议，不自动下单。
 
 本地监控界面会自动读取 `/api/decision-cards`，列表状态和个股详情优先展示决策卡结论，并显示数据质量、可信等级、数据源一致性与阻断原因。
 

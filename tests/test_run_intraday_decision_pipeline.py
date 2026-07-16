@@ -113,6 +113,7 @@ def make_args(base: Path) -> Namespace:
         action_backtests=str(base / "missing-action-backtests.json"),
         reverse_t_backtest=str(base / "missing-reverse-backtest.json"),
         reverse_t_forecast=str(base / "missing-reverse-forecast.json"),
+        technical_indicators=str(base / "missing-technical-indicators.json"),
         intraday_output=str(base / "metadata/intraday.json"),
         intraday_markdown_output=str(base / "reports/intraday.md"),
         portfolio_check_output=str(base / "metadata/portfolio.json"),

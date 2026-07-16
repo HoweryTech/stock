@@ -67,6 +67,21 @@ def t_result(code: str = "600000", *, conclusion: str = "watch_only", blockers=N
     }
 
 
+def bearish_technical_doc(code: str = "600000") -> dict:
+    weak_period = {
+        "bar_count": 60,
+        "latest_trade_date": "2026-07-16",
+        "close": 10.0,
+        "macd": {"status": "ok", "dif": -0.2, "dea": -0.1, "histogram": -0.2},
+        "boll": {"status": "ok", "middle": 11.0, "upper": 12.0, "lower": 10.0, "percent_b": 0.05, "width_pct": 18.0},
+        "rsi": {"status": "ok", "rsi6": 20.0, "rsi14": 25.0},
+        "kdj": {"status": "ok", "k": 15.0, "d": 30.0, "j": -5.0},
+        "atr": {"status": "ok", "atr": 0.9, "atr_pct": 9.0},
+        "volume": {"status": "ok", "latest_volume": 100.0, "avg_volume_5": 150.0, "avg_volume_20": 200.0, "volume_ratio_20": 0.5},
+    }
+    return {"items": [{"code": code, "periods": {"daily": weak_period, "weekly": weak_period, "monthly": weak_period}}]}
+
+
 class RealtimeDecisionCardsTest(unittest.TestCase):
     def test_hard_t_blocker_takes_exit_risk_priority(self) -> None:
         report = build_report(
@@ -210,6 +225,31 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["market_context"]["source_consistency_status"], "conflict")
         self.assertIn("[数据一致性] conflict · 阈值 1.0%", card["evidence"])
         self.assertIn("[数据源冲突] 东方财富现价与分钟线最新收盘价差 2.00%。", card["evidence"])
+
+    def test_bearish_technical_indicators_block_t_watch(self) -> None:
+        report = build_report(
+            {"items": [intraday_item()]},
+            portfolio_result(),
+            t_result(conclusion="positive_t_candidate"),
+            None,
+            None,
+            None,
+            None,
+            bearish_technical_doc(),
+            generated_at=datetime(2026, 7, 16, 9, 34, 0),
+        )
+        content = render_markdown(report)
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "hold_no_add")
+        self.assertEqual(card["decision"]["action"], "hold_without_adding")
+        self.assertEqual(card["technical_assessment"]["label"], "bearish")
+        self.assertLess(card["technical_assessment"]["score"], -18)
+        self.assertEqual(card["market_context"]["technical_label"], "bearish")
+        self.assertIn("多周期技术指标偏弱，本轮禁止补仓和做T。", card["blockers"])
+        self.assertIn("[技术指标] bearish", "\n".join(card["evidence"]))
+        self.assertIn("技术判断", content)
 
 
 if __name__ == "__main__":
