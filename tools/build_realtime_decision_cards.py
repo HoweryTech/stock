@@ -349,6 +349,7 @@ def build_positive_timing(
     intraday: dict[str, Any],
     t_check: dict[str, Any] | None,
     minute_bars: list[dict[str, Any]] | None,
+    technical_assessment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not t_check or t_check.get("conclusion") != "positive_t_candidate":
         return {"available": False, "status": "not_applicable", "score": None, "signals": [], "buy_zone": None, "target_sell_zone": None}
@@ -390,6 +391,8 @@ def build_positive_timing(
     avg_volume_20 = average(volumes[-20:]) if len(volumes) >= 20 else None
     volume_ratio = None if avg_volume_20 in (None, 0) or not volumes else volumes[-1] / avg_volume_20
     main_flow = as_float(value_at(intraday, "capital_flow.main_net_inflow_ratio_pct"))
+    technical_label = str((technical_assessment or {}).get("label") or "")
+    technical_supported = technical_label not in {"bearish", "slightly_bearish"}
     recaptured_ma5 = (
         current is not None
         and ma5 is not None
@@ -473,6 +476,8 @@ def build_positive_timing(
 
     score = max(0.0, min(100.0, score))
     confirmation_count = sum(bool(item) for item in (recaptured_ma5, bullish_volume_candle, flow_confirmed))
+    if not technical_supported:
+        signals.append(f"日/周/月技术背景为 {technical_label}，不允许仅凭分时信号做正T。")
     if confirmation_count < 2:
         signals.append("确认信号少于2个，需要等待MA5修复、放量阳线或主力净流入进一步共振。")
     buy_high = min(value for value in [current, ma5] if value is not None) if ma5 is not None else current
@@ -483,7 +488,7 @@ def build_positive_timing(
         buy_low_candidates.append(recent_low)
     buy_low = min(buy_high, max(buy_low_candidates))
     target_low = max(current, buy_high * 1.012)
-    status = "confirmed" if score >= POSITIVE_T_SCORE_THRESHOLD and confirmation_count >= 2 else "watch"
+    status = "confirmed" if score >= POSITIVE_T_SCORE_THRESHOLD and confirmation_count >= 2 and technical_supported else "watch"
     return {
         "available": True,
         "status": status,
@@ -506,6 +511,8 @@ def build_positive_timing(
             "bullish_volume_candle": bullish_volume_candle,
             "flow_confirmed": flow_confirmed,
             "confirmation_count": confirmation_count,
+            "technical_label": technical_label or None,
+            "technical_supported": technical_supported,
         },
     }
 
@@ -1047,7 +1054,7 @@ def build_card(
     minute_bars: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     technical_assessment = build_technical_assessment(technical_indicators)
-    positive_timing = build_positive_timing(intraday, t_check, minute_bars)
+    positive_timing = build_positive_timing(intraday, t_check, minute_bars, technical_assessment)
     state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment)
     evidence = build_evidence(
         intraday,

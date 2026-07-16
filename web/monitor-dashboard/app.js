@@ -497,6 +497,8 @@ function renderPositiveTiming(timing) {
     ["MA5修复", timing.metrics?.recaptured_ma5 ? "是" : "否"],
     ["放量阳线", timing.metrics?.bullish_volume_candle ? "是" : "否"],
     ["资金流确认", timing.metrics?.flow_confirmed ? "是" : "否"],
+    ["大周期技术背景", timing.metrics?.technical_label || "--"],
+    ["技术背景允许正T", timing.metrics?.technical_supported === false ? "否" : "是"],
   ];
   const signals = timing.signals || [];
   return detailSection(

@@ -97,6 +97,21 @@ def bullish_technical_doc(code: str = "600000") -> dict:
     return {"items": [{"code": code, "periods": {"daily": strong_period, "weekly": strong_period, "monthly": strong_period}}]}
 
 
+def slightly_bearish_technical_doc(code: str = "600000") -> dict:
+    mild_weak_period = {
+        "bar_count": 60,
+        "latest_trade_date": "2026-07-16",
+        "close": 10.0,
+        "macd": {"status": "ok", "dif": -0.02, "dea": -0.01, "histogram": -0.02},
+        "boll": {"status": "ok", "middle": 10.2, "upper": 11.0, "lower": 9.4, "percent_b": 0.4, "width_pct": 15.0},
+        "rsi": {"status": "ok", "rsi6": 42.0, "rsi14": 42.0},
+        "kdj": {"status": "ok", "k": 40.0, "d": 45.0, "j": 30.0},
+        "atr": {"status": "ok", "atr": 0.3, "atr_pct": 3.0},
+        "volume": {"status": "ok", "latest_volume": 120.0, "avg_volume_5": 130.0, "avg_volume_20": 160.0, "volume_ratio_20": 0.75},
+    }
+    return {"items": [{"code": code, "periods": {"daily": mild_weak_period, "weekly": mild_weak_period, "monthly": mild_weak_period}}]}
+
+
 def positive_minute_bars(code: str = "600000") -> dict[str, list[dict]]:
     closes = [9.70, 9.74, 9.78, 9.82, 9.86, 9.90, 9.94, 9.98, 10.02, 10.06, 10.10, 10.08, 10.04, 10.02, 10.00, 9.98, 9.96, 9.98, 9.96, 10.02]
     bars = []
@@ -246,6 +261,31 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertGreaterEqual(card["positive_timing"]["score"], 65.0)
         self.assertLess(card["positive_timing"]["metrics"]["confirmation_count"], 2)
         self.assertEqual(card["capital_plan"]["status"], "waiting_intraday_confirmation")
+
+    def test_positive_t_confirmed_intraday_waits_when_daily_context_is_weak(self) -> None:
+        item = intraday_item()
+        item["position"]["shares"] = 100
+        item["position"]["market_value"] = 1000.0
+        item["position"]["live_position_pct"] = 2.0
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(conclusion="positive_t_candidate"),
+            None,
+            None,
+            None,
+            None,
+            slightly_bearish_technical_doc(),
+            positive_minute_bars(),
+            generated_at=datetime(2026, 7, 16, 9, 37, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "hold_no_add")
+        self.assertIn(card["technical_assessment"]["label"], {"bearish", "slightly_bearish"})
+        self.assertFalse(card["positive_timing"]["metrics"]["technical_supported"])
+        self.assertFalse(card["capital_plan"]["applicable"])
 
     def test_positive_t_candidate_without_intraday_confirmation_waits(self) -> None:
         item = intraday_item()
