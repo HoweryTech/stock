@@ -384,6 +384,16 @@ def technical_dimension_summary(scores: dict[str, float]) -> str:
     return "技术维度没有形成明确共振，维持观察，不因单一指标触发交易。"
 
 
+def technical_unlock_condition(code: str, label: str, current: float | None, target: str, passed: bool) -> dict[str, Any]:
+    return {
+        "code": code,
+        "label": label,
+        "current": rounded(current),
+        "target": target,
+        "passed": passed,
+    }
+
+
 def build_technical_operation(technical_assessment: dict[str, Any] | None) -> dict[str, Any]:
     assessment = technical_assessment or {}
     if not assessment.get("available"):
@@ -394,6 +404,9 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
             "allow_t_watch": False,
             "reason": "日线、周线、月线技术指标不可用，不能用技术面放开买入或做T。",
             "next_step": "先补齐技术指标数据；补齐前只按止损、仓位和实时行情做风险控制。",
+            "unlock_conditions": [
+                {"code": "technical_data_available", "label": "技术指标数据", "current": None, "target": "日线/周线/月线指标可用", "passed": False}
+            ],
         }
     scores = assessment.get("dimension_scores") or {}
     trend = as_float(scores.get("trend"), 0.0) or 0.0
@@ -403,6 +416,17 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
     multi = as_float(scores.get("multi_timeframe"), 0.0) or 0.0
     label = str(assessment.get("label") or "")
     summary = str(assessment.get("summary") or technical_dimension_summary(scores))
+    risk_recovery_conditions = [
+        technical_unlock_condition("risk_recovered", "风险分", risk, "> -18.0", risk > -18),
+        technical_unlock_condition("trend_positive", "趋势分", trend, "> 0.0", trend > 0),
+        technical_unlock_condition("volume_confirmed", "量能确认", volume, "> 0.0", volume > 0),
+    ]
+    watch_conditions = [
+        technical_unlock_condition("trend_strong", "趋势分", trend, "> 10.0", trend > 10),
+        technical_unlock_condition("volume_strong", "量能确认", volume, "> 5.0", volume > 5),
+        technical_unlock_condition("multi_not_negative", "多周期一致", multi, ">= 0.0", multi >= 0),
+        {"code": "technical_label_positive", "label": "技术标签", "current": label or None, "target": "bullish 或 slightly_bullish", "passed": label in {"bullish", "slightly_bullish"}},
+    ]
     if risk <= -18 and reversal > 0 and trend <= 0 and volume <= 0:
         return {
             "tier": "risk_control_first",
@@ -411,6 +435,7 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
             "allow_t_watch": False,
             "reason": summary,
             "next_step": "不追买、不补仓、不做T；等风险分回到 -18 以上，且趋势分和量能确认至少转正后，再重新开放买入/做T观察。",
+            "unlock_conditions": risk_recovery_conditions,
         }
     if risk <= -18 or label == "bearish":
         return {
@@ -420,6 +445,7 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
             "allow_t_watch": False,
             "reason": summary,
             "next_step": "技术风险仍明显，先控制下行风险；只有风险分修复后，才允许讨论低吸或做T。",
+            "unlock_conditions": risk_recovery_conditions,
         }
     if trend > 10 and volume > 5 and multi >= 0 and label in {"bullish", "slightly_bullish"}:
         return {
@@ -429,6 +455,7 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
             "allow_t_watch": True,
             "reason": summary,
             "next_step": "允许进入人工观察候选，但仍要同时满足实时价格区间、数据质量、止损距离和成交确认。",
+            "unlock_conditions": watch_conditions,
         }
     if reversal > 6 and trend <= 0:
         return {
@@ -438,6 +465,11 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
             "allow_t_watch": False,
             "reason": summary,
             "next_step": "反转还没有被趋势确认，先观察；不要提前买入，也不要把反弹当成可执行做T信号。",
+            "unlock_conditions": [
+                technical_unlock_condition("trend_positive", "趋势分", trend, "> 0.0", trend > 0),
+                technical_unlock_condition("volume_confirmed", "量能确认", volume, "> 0.0", volume > 0),
+                technical_unlock_condition("risk_not_heavy", "风险分", risk, "> -18.0", risk > -18),
+            ],
         }
     if trend <= -10 and volume <= 0:
         return {
@@ -447,6 +479,10 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
             "allow_t_watch": False,
             "reason": summary,
             "next_step": "趋势和量能没有配合，继续持有观察；等趋势或量能至少有一项明显修复后再复核。",
+            "unlock_conditions": [
+                technical_unlock_condition("trend_recovered", "趋势分", trend, "> -10.0", trend > -10),
+                technical_unlock_condition("volume_confirmed", "量能确认", volume, "> 0.0", volume > 0),
+            ],
         }
     return {
         "tier": "observe_only",
@@ -455,6 +491,7 @@ def build_technical_operation(technical_assessment: dict[str, Any] | None) -> di
         "allow_t_watch": False,
         "reason": summary,
         "next_step": "技术面没有形成可执行共振，本轮不因单一指标触发交易。",
+        "unlock_conditions": watch_conditions,
     }
 
 

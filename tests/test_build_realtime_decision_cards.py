@@ -565,6 +565,11 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertFalse(operation["allow_buy_watch"])
         self.assertFalse(operation["allow_t_watch"])
         self.assertIn("不追买、不补仓、不做T", operation["next_step"])
+        self.assertEqual(
+            [condition["code"] for condition in operation["unlock_conditions"]],
+            ["risk_recovered", "trend_positive", "volume_confirmed"],
+        )
+        self.assertTrue(all(condition["passed"] is False for condition in operation["unlock_conditions"]))
 
 
 if __name__ == "__main__":

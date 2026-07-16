@@ -524,10 +524,18 @@ function renderTechnicalOperationBlock(operation, mode) {
   const allowed = mode === "positive_t" ? operation.allow_buy_watch : operation.allow_t_watch;
   if (allowed || operation.tier === "not_available") return "";
   const label = mode === "positive_t" ? "正T被技术面阻断" : "反T被技术面阻断";
+  const unlock = operation.unlock_conditions || [];
+  const unlockHtml = unlock.length ? `<h4>解锁条件</h4><div class="unlock-list">${unlock.map(condition => `
+    <div class="unlock-item ${condition.passed ? "unlock-pass" : "unlock-block"}">
+      <span>${condition.passed ? "已满足" : "未满足"}</span>
+      <strong>${escapeHtml(condition.label || condition.code || "条件")}</strong>
+      <p>当前：${escapeHtml(condition.current == null ? "--" : String(condition.current))}；目标：${escapeHtml(condition.target || "--")}</p>
+    </div>`).join("")}</div>` : "";
   return `<div class="blocker-item">
     <div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(operation.tier_label || "--")}</span></div>
     <p>${escapeHtml(operation.reason || "技术操作档位不支持本轮交易。")}</p>
     <p class="secondary">${escapeHtml(operation.next_step || "等待技术面修复后再重新评估。")}</p>
+    ${unlockHtml}
   </div>`;
 }
 
