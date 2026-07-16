@@ -266,6 +266,16 @@ th:nth-child(8) { width: 100px; }
 .manual-impact-grid dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; margin: 0; }
 .manual-impact-grid dt { color: var(--muted); font-size: 12px; }
 .manual-impact-grid dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.closure-summary {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.closure-summary span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .confirm-modal {
   position: fixed;
   z-index: 50;

@@ -157,6 +157,33 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertEqual(plan["open_reverse_t_leg"]["id"], "MANUAL-OPEN-000725")
         self.assertTrue(any("买回" in step for step in plan["execution_steps"]))
 
+    def test_analyze_quote_exposes_latest_reverse_t_closure(self) -> None:
+        closure = {
+            "status": "closed_profitable",
+            "sell_trade_id": "MANUAL-OPEN-000725",
+            "buy_trade_id": "MANUAL-CLOSE-000725",
+            "sell_price": 6.32,
+            "buy_price": 6.04,
+            "shares": 100.0,
+            "net_profit": 17.6717,
+            "cost_reduction_per_remaining_share": 0.0884,
+            "next_plan": "闭环完成。",
+        }
+        position = {
+            "stock": {"code": "000725", "name": "京东方A"},
+            "entry": {"shares": 200, "entry_price": 7.6025, "position_pct_of_total_assets": 4.72},
+            "tracking": {"latest_reverse_t_closure": closure},
+        }
+        quote = {"code": "000725", "latest_price": 6.04, "change_pct": -5.49, "quote_timestamp": 1000}
+
+        item = analyze_quote(
+            position, quote, self.history(), total_assets=25480, max_stale_seconds=60,
+            costs=self.costs, max_reverse_t_position_ratio_pct=50, now_timestamp=1001,
+        )
+
+        self.assertEqual(item["latest_reverse_t_closure"]["buy_trade_id"], "MANUAL-CLOSE-000725")
+        self.assertEqual(item["latest_reverse_t_closure"]["status"], "closed_profitable")
+
     def test_reduction_plan_rounds_to_board_lots(self) -> None:
         position = {"entry": {"shares": 1000}}
         plan = build_reduction_plan(position, {"latest_price": 3.29}, total_assets=25480)

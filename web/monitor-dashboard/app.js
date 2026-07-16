@@ -731,6 +731,31 @@ function manualTradeSection(item) {
   );
 }
 
+function reverseTClosureSection(item) {
+  const closure = item.latest_reverse_t_closure;
+  if (!closure) return "";
+  const metrics = [
+    ["卖出腿", `${num(closure.sell_price)}元 / ${num(closure.shares, 0)}股`],
+    ["回补腿", `${num(closure.buy_price)}元 / ${num(closure.shares, 0)}股`],
+    ["毛收益", money(closure.gross_profit)],
+    ["总费用", money(closure.fees?.total_fees)],
+    ["净收益", money(closure.net_profit)],
+    ["每股降本", money(closure.cost_reduction_per_remaining_share)],
+  ];
+  const statusText = closure.status === "closed_profitable" ? "闭环完成，扣费后盈利" : "闭环完成，但扣费后未盈利";
+  const toneClass = closure.status === "closed_profitable" ? "positive" : "negative";
+  return detailSection(
+    "反T闭环复盘",
+    `<div class="closure-summary ${toneClass}">
+      <strong>${escapeHtml(statusText)}</strong>
+      <span>${escapeHtml(closure.sell_trade_id || "--")} → ${escapeHtml(closure.buy_trade_id || "--")}</span>
+    </div>
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>
+    <h4>下一步计划</h4>
+    <p>${escapeHtml(closure.next_plan || "刷新实时建议后，按新的反T区间和风险状态重新判断。")}</p>`
+  );
+}
+
 function updateManualTradeImpact(form) {
   const code = form.dataset.code;
   const item = state.snapshot?.items.find(entry => entry.code === code);
@@ -895,6 +920,7 @@ function openDetail(code) {
   ];
   html += detailSection("主力资金流", `<div class="metric-grid">${flowMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">${escapeHtml(flow.interpretation || "")}</p>`);
   const reversePlan = item.reverse_t_plan;
+  html += reverseTClosureSection(item);
   if (reversePlan) {
     const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "仅供观察，不可执行";
     const zone = reversePlan.sell_zone ? `${num(reversePlan.sell_zone[0])}–${num(reversePlan.sell_zone[1])}元` : "--";

@@ -645,6 +645,7 @@ def analyze_quote(
             "interpretation": "按成交单大小统计的资金流，不代表识别具体机构身份。",
         },
         "signals": signals,
+        "latest_reverse_t_closure": value_at(position, "tracking.latest_reverse_t_closure"),
         "reverse_t_plan": reverse_t_plan,
         "reduction_plan": reduction_plan,
         "action_decision": action_decision,
@@ -754,6 +755,7 @@ def state_signature(snapshot: dict[str, Any]) -> dict[str, Any]:
             "signals": sorted(signal["code"] for signal in item["signals"]),
             "reverse_t_status": item.get("reverse_t_plan", {}).get("status"),
             "reverse_t_price_alert": bool(item.get("reverse_t_plan", {}).get("price_in_sell_zone")),
+            "latest_reverse_t_closure": (item.get("latest_reverse_t_closure") or {}).get("buy_trade_id"),
             "reduction_status": item.get("reduction_plan", {}).get("status"),
         }
         for item in snapshot["items"]

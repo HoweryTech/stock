@@ -66,6 +66,54 @@ def append_manual_trade(position: dict[str, Any], record: dict[str, Any]) -> Non
     history.append(record)
 
 
+def find_manual_trade(position: dict[str, Any], trade_id: str) -> dict[str, Any] | None:
+    history = position.get("manual_trade_history") or []
+    if not isinstance(history, list):
+        return None
+    for record in history:
+        if str(record.get("id") or "") == trade_id:
+            return record
+    return None
+
+
+def reverse_t_closure_summary(open_record: dict[str, Any], close_record: dict[str, Any], shares_after: float) -> dict[str, Any]:
+    sell_price = as_float(open_record.get("price"), 0.0) or 0.0
+    buy_price = as_float(close_record.get("price"), 0.0) or 0.0
+    open_shares = as_float(open_record.get("shares"), 0.0) or 0.0
+    close_shares = as_float(close_record.get("shares"), 0.0) or 0.0
+    shares = min(open_shares, close_shares)
+    sell_fees = as_float(value_at(open_record, "fees.total_fees"), 0.0) or 0.0
+    buy_fees = as_float(value_at(close_record, "fees.total_fees"), 0.0) or 0.0
+    gross_profit = (sell_price - buy_price) * shares
+    total_fees = sell_fees + buy_fees
+    net_profit = gross_profit - total_fees
+    cost_reduction = net_profit / shares_after if shares_after > 0 else None
+    status = "closed_profitable" if net_profit >= 0 else "closed_loss"
+    if status == "closed_profitable":
+        next_plan = "反T闭环完成；今天不再围绕同一卖出腿重复操作，刷新实时建议后只按新的区间观察。"
+    else:
+        next_plan = "反T闭环已记录但扣费后未盈利；暂停同类操作，先复核卖出价、回补价和费用参数。"
+    return {
+        "status": status,
+        "sell_trade_id": open_record.get("id"),
+        "buy_trade_id": close_record.get("id"),
+        "sell_occurred_at": open_record.get("occurred_at"),
+        "buy_occurred_at": close_record.get("occurred_at"),
+        "sell_price": round(sell_price, 4),
+        "buy_price": round(buy_price, 4),
+        "shares": float(shares),
+        "gross_profit": round(gross_profit, 4),
+        "fees": {
+            "sell_fees": round(sell_fees, 4),
+            "buy_fees": round(buy_fees, 4),
+            "total_fees": round(total_fees, 4),
+        },
+        "net_profit": round(net_profit, 4),
+        "cost_reduction_per_remaining_share": None if cost_reduction is None else round(cost_reduction, 4),
+        "next_plan": next_plan,
+    }
+
+
 def apply_manual_trade(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     code = str(args.code)
     side = str(args.side).lower()
@@ -138,6 +186,16 @@ def apply_manual_trade(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "shares_after": float(new_shares),
         "note": args.note or "",
     }
+    linked_trade_id = str(record.get("linked_trade_id") or "")
+    if side == "buy" and record["trade_intent"] == "reverse_t_close" and linked_trade_id:
+        open_record = find_manual_trade(position, linked_trade_id)
+        if open_record is None:
+            raise ValueError(f"linked reverse T open trade not found: {linked_trade_id}")
+        if open_record.get("side") != "sell" or open_record.get("trade_intent") != "reverse_t_open":
+            raise ValueError(f"linked trade is not a reverse T open sell: {linked_trade_id}")
+        closure = reverse_t_closure_summary(open_record, record, float(new_shares))
+        record["reverse_t_closure"] = closure
+        set_value(position, "tracking.latest_reverse_t_closure", closure)
     append_manual_trade(position, record)
     write_yaml(path, position, overwrite=True)
     return {"position_path": str(path), "trade": record, "position": {"shares": float(new_shares), "entry_price": value_at(position, "entry.entry_price")}}, path

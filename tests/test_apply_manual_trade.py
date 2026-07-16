@@ -87,6 +87,37 @@ class ApplyManualTradeTest(unittest.TestCase):
 
         self.assertEqual(updated["manual_trade_history"][-1]["trade_intent"], "reverse_t_open")
 
+    def test_reverse_t_close_records_closure_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            path = base / "positions/POS-000725.yaml"
+            path.parent.mkdir()
+            write_position(path)
+
+            apply_manual_trade(args(base, trade_intent="reverse_t_open", price=6.32))
+            opened = load_yaml(path)["manual_trade_history"][-1]
+            apply_manual_trade(
+                args(
+                    base,
+                    side="buy",
+                    shares=100.0,
+                    price=6.04,
+                    trade_intent="reverse_t_close",
+                    linked_trade_id=opened["id"],
+                )
+            )
+            updated = load_yaml(path)
+
+        closed = updated["manual_trade_history"][-1]
+        closure = closed["reverse_t_closure"]
+        self.assertEqual(closed["trade_intent"], "reverse_t_close")
+        self.assertEqual(closure["sell_trade_id"], opened["id"])
+        self.assertEqual(closure["buy_trade_id"], closed["id"])
+        self.assertAlmostEqual(closure["gross_profit"], 28.0, places=4)
+        self.assertAlmostEqual(closure["fees"]["total_fees"], 10.3283, places=4)
+        self.assertAlmostEqual(closure["net_profit"], 17.6717, places=4)
+        self.assertEqual(updated["tracking"]["latest_reverse_t_closure"]["buy_trade_id"], closed["id"])
+
 
 if __name__ == "__main__":
     unittest.main()
