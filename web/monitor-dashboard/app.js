@@ -55,8 +55,21 @@ function qualityLabel(quality) {
   }[qualityState(quality)] || "质量未知";
 }
 
+function trustLevel(quality) {
+  return quality?.data_trust?.level || "unknown";
+}
+
+function trustLabel(quality) {
+  return quality?.data_trust?.label || {
+    high: "高可信",
+    medium: "中可信",
+    low: "低可信",
+    unknown: "可信未知",
+  }[trustLevel(quality)] || "可信未知";
+}
+
 function qualitySummary(quality) {
-  const messages = [...(quality?.blockers || []), ...(quality?.warnings || [])];
+  const messages = [...(quality?.data_trust?.reasons || []), ...(quality?.blockers || []), ...(quality?.warnings || [])];
   if (messages.length) return messages[0];
   return qualityState(quality) === "usable" ? "行情、日线和分钟线可用于盘中判断。" : "尚未生成数据质量快照。";
 }
@@ -64,7 +77,7 @@ function qualitySummary(quality) {
 function qualityBadge(item) {
   const quality = dataQualityFor(item);
   const status = qualityState(quality);
-  return `<span class="quality-badge quality-${status}">${escapeHtml(qualityLabel(quality))}</span>`;
+  return `<span class="quality-badge quality-${status}">${escapeHtml(qualityLabel(quality))}</span><span class="trust-badge trust-${trustLevel(quality)}">${escapeHtml(trustLabel(quality))}</span>`;
 }
 
 function adviceFor(item) {
@@ -200,6 +213,8 @@ function renderSummary() {
   const dataPaused = decisionCards.filter(card => ["data_stale", "data_insufficient"].includes(card.state)).length;
   const qualityStale = decisionCards.filter(card => card.data_quality?.overall_status === "stale").length;
   const qualityBlocked = decisionCards.filter(card => ["insufficient", "missing"].includes(card.data_quality?.overall_status)).length;
+  const trustHigh = decisionCards.filter(card => card.data_quality?.data_trust?.level === "high").length;
+  const trustLow = decisionCards.filter(card => card.data_quality?.data_trust?.level === "low").length;
   const positiveT = decisionCards.filter(card => card.state === "positive_t_watch").length;
   const reverseTByCard = decisionCards.filter(card => card.state === "reverse_t_watch").length;
   const maxLag = Math.max(0, ...items.map(item => Number(item.quote.quote_lag_seconds || 0)));
@@ -211,7 +226,7 @@ function renderSummary() {
     ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
     ["浮动盈亏", money(pnl), "按最新快照估算"],
     ["退出风险", `${exitRisk || risk} 只`, `${dataPaused} 只暂停决策`],
-    ["数据质量", `${qualityStale} 过期 / ${qualityBlocked} 阻断`, "先补数据再看建议"],
+    ["数据可信", `${trustHigh} 高 / ${trustLow} 低`, `${qualityStale} 过期 · ${qualityBlocked} 阻断`],
     ["T观察", `${positiveT} 正T / ${reverseTByCard || reverseT} 反T`, `${priceAlerts} 只价格提醒 · ${forecastAlerts} 只概率预警`],
     ["最大延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
   ];
@@ -309,13 +324,15 @@ function openDetail(code) {
     const quality = decisionCard.data_quality || {};
     const qualityMetrics = [
       ["总状态", qualityLabel(quality)],
+      ["可信等级", trustLabel(quality)],
+      ["盘中确认", quality.data_trust?.intraday_decision_allowed ? "允许" : "禁止"],
       ["行情延迟", quality.quote?.lag_seconds == null ? "--" : `${Number(quality.quote.lag_seconds).toFixed(1)}s`],
       ["日线最新", quality.daily?.latest_trade_date || "--"],
       ["日线样本", quality.daily?.row_count ?? "--"],
       ["分钟线最新", quality.minute?.latest_timestamp || "--"],
       ["分钟线样本", quality.minute?.bar_count ?? "--"],
     ];
-    const qualityMessages = [...(quality.blockers || []), ...(quality.warnings || [])];
+    const qualityMessages = [...(quality.data_trust?.reasons || []), ...(quality.blockers || []), ...(quality.warnings || [])];
     const cardMetrics = [
       ["状态", decisionCard.state_label],
       ["建议动作", decision.action_label],

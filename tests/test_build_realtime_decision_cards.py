@@ -137,6 +137,12 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
                         "code": "600000",
                         "overall_status": "insufficient",
                         "status_label": "样本不足",
+                        "data_trust": {
+                            "level": "low",
+                            "label": "低可信",
+                            "intraday_decision_allowed": False,
+                            "reasons": ["日线: 日线数量 8 少于 20。"],
+                        },
                         "blockers": ["日线数量 8 少于 20。"],
                         "warnings": [],
                     }
@@ -151,6 +157,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["decision"]["action"], "complete_data_before_decision")
         self.assertIn("日线数量 8 少于 20。", card["blockers"])
         self.assertEqual(card["market_context"]["data_quality_status"], "insufficient")
+        self.assertEqual(card["market_context"]["data_trust_level"], "low")
 
 
 if __name__ == "__main__":

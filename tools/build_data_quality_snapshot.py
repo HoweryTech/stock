@@ -104,6 +104,14 @@ def status_label(status: str) -> str:
     }.get(status, status)
 
 
+def trust_label(level: str) -> str:
+    return {
+        "high": "高可信",
+        "medium": "中可信",
+        "low": "低可信",
+    }.get(level, level)
+
+
 def classify_quote(item: dict[str, Any] | None, max_lag_seconds: float) -> dict[str, Any]:
     if not item:
         return {"status": "missing", "lag_seconds": None, "message": "缺少准实时行情快照。"}
@@ -156,6 +164,29 @@ def overall_status(quote: dict[str, Any], daily: dict[str, Any], minute: dict[st
     return "usable"
 
 
+def data_trust(quote: dict[str, Any], daily: dict[str, Any], minute: dict[str, Any]) -> dict[str, Any]:
+    sections = {"行情": quote, "日线": daily, "分钟线": minute}
+    blocking = [f"{name}: {section['message']}" for name, section in sections.items() if section["status"] in {"missing", "insufficient"}]
+    stale = [f"{name}: {section['message']}" for name, section in sections.items() if section["status"] == "stale"]
+    if blocking or quote["status"] == "stale":
+        level = "low"
+        reasons = blocking or [f"行情: {quote['message']}"]
+        if stale and not blocking:
+            reasons = stale
+    elif stale:
+        level = "medium"
+        reasons = stale
+    else:
+        level = "high"
+        reasons = ["行情、日线和分钟线均满足当前阈值。"]
+    return {
+        "level": level,
+        "label": trust_label(level),
+        "intraday_decision_allowed": level == "high",
+        "reasons": reasons,
+    }
+
+
 def build_item(
     position_path: Path,
     intraday_by_code: dict[str, dict[str, Any]],
@@ -176,6 +207,7 @@ def build_item(
     daily = classify_daily(daily_stats.get(code), as_of, min_daily_bars, max_daily_age_days)
     minute = classify_minute(minute_stats.get(code), as_of, min_minute_bars, max_minute_age_hours)
     status = overall_status(quote, daily, minute)
+    trust = data_trust(quote, daily, minute)
     blockers = [section["message"] for section in (quote, daily, minute) if section["status"] in {"missing", "insufficient"}]
     warnings = [section["message"] for section in (quote, daily, minute) if section["status"] == "stale"]
     return {
@@ -185,6 +217,7 @@ def build_item(
         "overall_status": status,
         "status_label": status_label(status),
         "usable_for_intraday_decision": status == "usable",
+        "data_trust": trust,
         "quote": quote,
         "daily": daily,
         "minute": minute,
@@ -226,8 +259,11 @@ def build_report(
         for path in position_paths
     ]
     status_counts: dict[str, int] = {}
+    trust_counts: dict[str, int] = {}
     for item in items:
         status_counts[item["overall_status"]] = status_counts.get(item["overall_status"], 0) + 1
+        trust_level = item["data_trust"]["level"]
+        trust_counts[trust_level] = trust_counts.get(trust_level, 0) + 1
     return {
         "generated_at": as_of.isoformat(timespec="seconds"),
         "thresholds": {
@@ -240,6 +276,7 @@ def build_report(
         "position_count": len(items),
         "usable_count": status_counts.get("usable", 0),
         "status_counts": dict(sorted(status_counts.items())),
+        "trust_counts": dict(sorted(trust_counts.items())),
         "items": sorted(items, key=lambda item: (item["overall_status"], item["code"])),
     }
 
@@ -250,10 +287,10 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         f"生成时间：{report['generated_at']}",
         "",
-        f"持仓数：{report['position_count']}，可用于盘中判断：{report['usable_count']}，状态分布：{report['status_counts']}",
+        f"持仓数：{report['position_count']}，可用于盘中判断：{report['usable_count']}，状态分布：{report['status_counts']}，可信等级：{report.get('trust_counts', {})}",
         "",
-        "| 代码 | 名称 | 总状态 | 行情延迟 | 日线最新 | 分钟线最新 | 说明 |",
-        "| --- | --- | --- | ---: | --- | --- | --- |",
+        "| 代码 | 名称 | 总状态 | 可信等级 | 行情延迟 | 日线最新 | 分钟线最新 | 说明 |",
+        "| --- | --- | --- | --- | ---: | --- | --- | --- |",
     ]
     for item in report["items"]:
         quote = item["quote"]
@@ -262,7 +299,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         notes = item["blockers"] or item["warnings"] or ["可用"]
         lag = quote.get("lag_seconds")
         lines.append(
-            f"| {item['code']} | {item['name']} | {item['status_label']} | "
+            f"| {item['code']} | {item['name']} | {item['status_label']} | {item['data_trust']['label']} | "
             f"{'-' if lag is None else f'{lag:.1f}s'} | "
             f"{daily.get('latest_trade_date') or '-'} ({daily.get('status')}) | "
             f"{minute.get('latest_timestamp') or '-'} ({minute.get('status')}) | "

@@ -63,7 +63,10 @@ class DataQualitySnapshotTest(unittest.TestCase):
             )
 
         self.assertEqual(report["usable_count"], 1)
+        self.assertEqual(report["trust_counts"], {"high": 1})
         self.assertEqual(report["items"][0]["overall_status"], "usable")
+        self.assertEqual(report["items"][0]["data_trust"]["level"], "high")
+        self.assertTrue(report["items"][0]["data_trust"]["intraday_decision_allowed"])
         self.assertIn("持仓数据质量快照", render_markdown(report))
 
     def test_detects_stale_quote_and_minute_cache(self) -> None:
@@ -86,6 +89,8 @@ class DataQualitySnapshotTest(unittest.TestCase):
 
         item = report["items"][0]
         self.assertEqual(item["overall_status"], "stale")
+        self.assertEqual(item["data_trust"]["level"], "low")
+        self.assertFalse(item["data_trust"]["intraday_decision_allowed"])
         self.assertEqual(item["quote"]["status"], "stale")
         self.assertEqual(item["minute"]["status"], "stale")
         self.assertTrue(item["warnings"])
@@ -103,8 +108,31 @@ class DataQualitySnapshotTest(unittest.TestCase):
 
         item = report["items"][0]
         self.assertEqual(item["overall_status"], "insufficient")
+        self.assertEqual(item["data_trust"]["level"], "low")
         self.assertEqual(item["daily"]["status"], "insufficient")
         self.assertTrue(item["blockers"])
+
+    def test_stale_daily_with_fresh_quote_is_medium_trust(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            position = base / "positions/POS-600000.yaml"
+            write_position(position, "600000")
+            write_daily(base / "daily.csv", {"600000": [f"2026-06-{day:02d}" for day in range(1, 22)]})
+            write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-16 10:00")
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0}}]}
+
+            report = build_report(
+                [position],
+                snapshot,
+                base / "daily.csv",
+                base / "minutes",
+                as_of=datetime(2026, 7, 16, 10, 5, 0),
+            )
+
+        item = report["items"][0]
+        self.assertEqual(item["overall_status"], "stale")
+        self.assertEqual(item["data_trust"]["level"], "medium")
+        self.assertFalse(item["data_trust"]["intraday_decision_allowed"])
 
 
 if __name__ == "__main__":

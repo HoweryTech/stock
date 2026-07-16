@@ -116,6 +116,12 @@ def data_quality_status(data_quality: dict[str, Any] | None) -> str | None:
     return str(data_quality.get("overall_status") or "")
 
 
+def data_trust_level(data_quality: dict[str, Any] | None) -> str | None:
+    if not data_quality:
+        return None
+    return str(value_at(data_quality, "data_trust.level") or "")
+
+
 def decision_priority(state: str) -> int:
     return {
         "exit_risk_review": 90,
@@ -140,8 +146,11 @@ def choose_state(
     portfolio_action_codes = {item.get("code") for item in (portfolio or {}).get("actions", [])}
     t_blockers = {item.get("code") for item in (t_check or {}).get("blockers", [])}
     quality_status = data_quality_status(data_quality)
+    trust_level = data_trust_level(data_quality)
     states: list[tuple[str, str]] = []
 
+    if trust_level == "low":
+        states.append(("data_insufficient", "数据可信等级为低，不能验证盘中建议。"))
     if "stale_quote" in signal_codes:
         states.append(("data_stale", "盘中行情过期，不能给实时执行建议。"))
     if quality_status == "stale":
@@ -210,7 +219,11 @@ def build_evidence(
 ) -> list[str]:
     evidence: list[str] = []
     if data_quality:
-        evidence.append(f"[数据质量] {data_quality.get('status_label') or data_quality.get('overall_status')}")
+        trust = data_quality.get("data_trust") or {}
+        trust_text = trust.get("label") or trust.get("level") or "-"
+        evidence.append(f"[数据质量] {data_quality.get('status_label') or data_quality.get('overall_status')} · {trust_text}")
+        for reason in trust.get("reasons", [])[:2]:
+            evidence.append(f"[可信等级] {reason}")
         for message in (data_quality.get("warnings") or [])[:2]:
             evidence.append(f"[数据质量过期] {message}")
     for signal in intraday.get("signals", [])[:3]:
@@ -246,6 +259,8 @@ def build_blockers(
     blockers: list[str] = []
     if data_quality_status(data_quality) in QUALITY_BLOCKER_STATUSES:
         blockers.extend(data_quality.get("blockers") or [])
+    if data_trust_level(data_quality) == "low":
+        blockers.extend((data_quality.get("data_trust") or {}).get("reasons") or [])
     blockers.extend(signal.get("message") for signal in intraday.get("signals", []) if signal.get("severity") in {"block", "risk"})
     blockers.extend(item.get("message") for item in (t_check or {}).get("blockers", []))
     if reverse_backtest and reverse_backtest.get("verdict") != "pass":
@@ -334,6 +349,7 @@ def build_card(
             "reverse_t_forecast_status": (reverse_forecast or {}).get("status"),
             "action_backtest_weak_rule_count": (action_backtest or {}).get("weak_rule_count"),
             "data_quality_status": data_quality_status(data_quality),
+            "data_trust_level": data_trust_level(data_quality),
         },
         "data_quality": data_quality or {},
         "blockers": blockers,
