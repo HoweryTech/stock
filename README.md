@@ -571,7 +571,7 @@ python3 tools/run_intraday_decision_pipeline.py \
   --total-assets 25480
 ```
 
-该命令会顺序刷新准实时快照、组合日检、做T检查和实时持仓决策卡，避免页面同时读取不同时间点的产物。
+该命令会顺序刷新准实时快照、组合日检、做T检查、数据质量快照和实时持仓决策卡，避免页面同时读取不同时间点的产物。
 
 生成持仓数据质量快照：
 
@@ -592,11 +592,12 @@ python3 tools/build_realtime_decision_cards.py \
   --intraday-snapshot data/metadata/intraday-monitor.latest.json \
   --portfolio-check data/metadata/eastmoney-portfolio-check.after-threshold.json \
   --t-opportunities data/metadata/eastmoney-portfolio-t-opportunities.near-config.json \
+  --data-quality data/metadata/data-quality-snapshot.json \
   --output data/metadata/realtime-decision-cards.json \
   --markdown-output reports/realtime-decision-cards.md
 ```
 
-决策卡会把准实时行情、组合日检、做T检查、动作矩阵回测、反T回测和反T预测合并成每只持仓的状态、关键价格、阻断原因、证据链和下一步动作。它只生成辅助建议，不自动下单。
+决策卡会把准实时行情、数据质量、组合日检、做T检查、动作矩阵回测、反T回测和反T预测合并成每只持仓的状态、关键价格、阻断原因、证据链和下一步动作。它只生成辅助建议，不自动下单。
 
 本地监控界面会自动读取 `/api/decision-cards`，列表状态和个股详情优先展示决策卡结论。
 

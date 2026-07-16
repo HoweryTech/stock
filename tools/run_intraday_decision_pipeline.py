@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.build_data_quality_snapshot import build_report as build_data_quality_report
+    from tools.build_data_quality_snapshot import render_markdown as render_data_quality_markdown
     from tools.build_realtime_decision_cards import build_report as build_decision_cards_report
     from tools.build_realtime_decision_cards import render_markdown as render_decision_cards_markdown
     from tools.check_portfolio_positions import expand_position_paths, summarize_positions
@@ -18,6 +20,8 @@ try:
     from tools.monitor_intraday_positions import build_snapshot, render_markdown as render_intraday_markdown
     from tools.risk_check import as_float, load_yaml, value_at
 except ModuleNotFoundError:
+    from build_data_quality_snapshot import build_report as build_data_quality_report
+    from build_data_quality_snapshot import render_markdown as render_data_quality_markdown
     from build_realtime_decision_cards import build_report as build_decision_cards_report
     from build_realtime_decision_cards import render_markdown as render_decision_cards_markdown
     from check_portfolio_positions import expand_position_paths, summarize_positions
@@ -93,6 +97,20 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     )
     write_json(Path(args.t_opportunities_output), t_opportunities)
 
+    data_quality = build_data_quality_report(
+        position_paths,
+        intraday_snapshot,
+        Path(args.daily_bars),
+        Path(args.minute_cache_dir),
+        max_quote_lag_seconds=args.max_quote_lag_seconds,
+        min_daily_bars=args.min_daily_bars,
+        max_daily_age_days=args.max_daily_age_days,
+        min_minute_bars=args.min_minute_bars,
+        max_minute_age_hours=args.max_minute_age_hours,
+    )
+    write_json(Path(args.data_quality_output), data_quality)
+    write_text(Path(args.data_quality_markdown_output), render_data_quality_markdown(data_quality))
+
     action_backtests = None
     action_backtests_path = Path(args.action_backtests)
     if action_backtests_path.exists():
@@ -113,6 +131,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         action_backtests,
         reverse_t_backtest,
         reverse_t_forecast,
+        data_quality,
     )
     write_json(Path(args.decision_cards_output), decision_cards)
     write_text(Path(args.decision_cards_markdown_output), render_decision_cards_markdown(decision_cards))
@@ -137,6 +156,12 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 "output": args.t_opportunities_output,
                 "execution_conclusion_counts": t_opportunities.get("execution_conclusion_counts", {}),
             },
+            "data_quality": {
+                "output": args.data_quality_output,
+                "markdown_output": args.data_quality_markdown_output,
+                "usable_count": data_quality.get("usable_count", 0),
+                "status_counts": data_quality.get("status_counts", {}),
+            },
             "decision_cards": {
                 "output": args.decision_cards_output,
                 "markdown_output": args.decision_cards_markdown_output,
@@ -148,6 +173,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "positions": args.positions,
             "profile": args.profile,
             "daily_bars": args.daily_bars,
+            "minute_cache_dir": args.minute_cache_dir,
             "action_backtests": args.action_backtests,
             "reverse_t_backtest": args.reverse_t_backtest,
             "reverse_t_forecast": args.reverse_t_forecast,
@@ -181,6 +207,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pullback-pct", type=float, default=3.0)
     parser.add_argument("--overextended-pct", type=float, default=6.0)
     parser.add_argument("--min-spread-pct", type=float, default=1.2)
+    parser.add_argument("--minute-cache-dir", default="data/processed/minute-bars")
+    parser.add_argument("--max-quote-lag-seconds", type=float, default=60.0)
+    parser.add_argument("--min-daily-bars", type=int, default=20)
+    parser.add_argument("--max-daily-age-days", type=int, default=5)
+    parser.add_argument("--min-minute-bars", type=int, default=120)
+    parser.add_argument("--max-minute-age-hours", type=float, default=30.0)
     parser.add_argument("--action-backtests", default="data/metadata/portfolio-action-matrix-backtests.after-plan.json")
     parser.add_argument("--reverse-t-backtest", default="data/metadata/reverse-t-backtest.json")
     parser.add_argument("--reverse-t-forecast", default="data/metadata/reverse-t-forecast.json")
@@ -188,6 +220,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--intraday-markdown-output", default="reports/intraday-monitor.latest.md")
     parser.add_argument("--portfolio-check-output", default="data/metadata/eastmoney-portfolio-check.after-threshold.json")
     parser.add_argument("--t-opportunities-output", default="data/metadata/eastmoney-portfolio-t-opportunities.near-config.json")
+    parser.add_argument("--data-quality-output", default="data/metadata/data-quality-snapshot.json")
+    parser.add_argument("--data-quality-markdown-output", default="reports/data-quality-snapshot.md")
     parser.add_argument("--decision-cards-output", default="data/metadata/realtime-decision-cards.json")
     parser.add_argument("--decision-cards-markdown-output", default="reports/realtime-decision-cards.md")
     parser.add_argument("--metadata-output", default="data/metadata/intraday-decision-pipeline.json")

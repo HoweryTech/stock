@@ -1,4 +1,5 @@
 import csv
+import json
 import tempfile
 import unittest
 from argparse import Namespace
@@ -62,6 +63,22 @@ def write_daily_bars(path: Path) -> None:
             previous = close
 
 
+def write_minute_bars(path: Path) -> None:
+    bars = [
+        {
+            "timestamp": f"2026-07-16 {9 + (index // 60):02d}:{index % 60:02d}",
+            "code": "600000",
+            "open": 10.0,
+            "high": 10.1,
+            "low": 9.9,
+            "close": 10.0,
+        }
+        for index in range(130)
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"name": "浦发银行", "bars": bars}), encoding="utf-8")
+
+
 def make_args(base: Path) -> Namespace:
     return Namespace(
         positions=[str(base / "positions/*.yaml")],
@@ -86,6 +103,12 @@ def make_args(base: Path) -> Namespace:
         pullback_pct=3.0,
         overextended_pct=6.0,
         min_spread_pct=1.2,
+        minute_cache_dir=str(base / "minute-bars"),
+        max_quote_lag_seconds=60.0,
+        min_daily_bars=20,
+        max_daily_age_days=5,
+        min_minute_bars=120,
+        max_minute_age_hours=999.0,
         action_backtests=str(base / "missing-action-backtests.json"),
         reverse_t_backtest=str(base / "missing-reverse-backtest.json"),
         reverse_t_forecast=str(base / "missing-reverse-forecast.json"),
@@ -93,6 +116,8 @@ def make_args(base: Path) -> Namespace:
         intraday_markdown_output=str(base / "reports/intraday.md"),
         portfolio_check_output=str(base / "metadata/portfolio.json"),
         t_opportunities_output=str(base / "metadata/t.json"),
+        data_quality_output=str(base / "metadata/data-quality.json"),
+        data_quality_markdown_output=str(base / "reports/data-quality.md"),
         decision_cards_output=str(base / "metadata/cards.json"),
         decision_cards_markdown_output=str(base / "reports/cards.md"),
         metadata_output=str(base / "metadata/pipeline.json"),
@@ -117,6 +142,7 @@ class RunIntradayDecisionPipelineTest(unittest.TestCase):
             position["risk"]["stop_loss_price"] = 9.5
             write_yaml(base / "positions/POS-600000.yaml", position)
             write_daily_bars(base / "daily_bars.csv")
+            write_minute_bars(base / "minute-bars/600000.json")
             fake_snapshot = {
                 "generated_at": "2026-07-16T09:30:00+08:00",
                 "success_count": 1,
@@ -146,12 +172,15 @@ class RunIntradayDecisionPipelineTest(unittest.TestCase):
             self.assertTrue((base / "metadata/intraday.json").exists())
             self.assertTrue((base / "metadata/portfolio.json").exists())
             self.assertTrue((base / "metadata/t.json").exists())
+            self.assertTrue((base / "metadata/data-quality.json").exists())
             self.assertTrue((base / "metadata/cards.json").exists())
+            self.assertTrue((base / "reports/data-quality.md").exists())
             self.assertTrue((base / "reports/cards.md").exists())
             cards = load_yaml(base / "metadata/cards.json")
 
         self.assertEqual(cards["card_count"], 1)
         self.assertIn(cards["cards"][0]["state"], {"observe", "positive_t_watch", "hold_no_add"})
+        self.assertEqual(cards["cards"][0]["market_context"]["data_quality_status"], "usable")
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ ACTION_LABELS = {
 
 HARD_T_BLOCKERS = {"stop_loss_triggered", "near_stop_loss", "limit_down", "stock_suspended"}
 DATA_BLOCKERS = {"insufficient_daily_bars", "missing_price_or_stop_loss"}
+QUALITY_BLOCKER_STATUSES = {"missing", "insufficient"}
 
 
 def load_json_if_exists(path: Path | None) -> dict[str, Any] | None:
@@ -109,6 +110,12 @@ def index_simple_items(doc: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     return {str(item["code"]): item for item in doc.get("items", []) if item.get("code")}
 
 
+def data_quality_status(data_quality: dict[str, Any] | None) -> str | None:
+    if not data_quality:
+        return None
+    return str(data_quality.get("overall_status") or "")
+
+
 def decision_priority(state: str) -> int:
     return {
         "exit_risk_review": 90,
@@ -127,14 +134,20 @@ def choose_state(
     portfolio: dict[str, Any] | None,
     t_check: dict[str, Any] | None,
     reverse_backtest: dict[str, Any] | None,
+    data_quality: dict[str, Any] | None,
 ) -> tuple[str, str]:
     signal_codes = {item.get("code") for item in intraday.get("signals", [])}
     portfolio_action_codes = {item.get("code") for item in (portfolio or {}).get("actions", [])}
     t_blockers = {item.get("code") for item in (t_check or {}).get("blockers", [])}
+    quality_status = data_quality_status(data_quality)
     states: list[tuple[str, str]] = []
 
     if "stale_quote" in signal_codes:
         states.append(("data_stale", "盘中行情过期，不能给实时执行建议。"))
+    if quality_status == "stale":
+        states.append(("data_stale", "行情、日线或分钟线存在过期数据，不能给实时执行建议。"))
+    if quality_status in QUALITY_BLOCKER_STATUSES:
+        states.append(("data_insufficient", "行情、日线或分钟线数据缺失或样本不足，不能验证盘中建议。"))
     if portfolio_action_codes & {"stop_loss_triggered"} or t_blockers & HARD_T_BLOCKERS:
         states.append(("exit_risk_review", "触发或逼近硬风控，退出风险优先于做T。"))
     if t_blockers & DATA_BLOCKERS:
@@ -193,8 +206,13 @@ def build_evidence(
     action_backtest: dict[str, Any] | None,
     reverse_backtest: dict[str, Any] | None,
     reverse_forecast: dict[str, Any] | None,
+    data_quality: dict[str, Any] | None,
 ) -> list[str]:
     evidence: list[str] = []
+    if data_quality:
+        evidence.append(f"[数据质量] {data_quality.get('status_label') or data_quality.get('overall_status')}")
+        for message in (data_quality.get("warnings") or [])[:2]:
+            evidence.append(f"[数据质量过期] {message}")
     for signal in intraday.get("signals", [])[:3]:
         evidence.append(f"[盘中:{signal.get('code')}] {signal.get('message')}")
     for item in (portfolio or {}).get("warnings", [])[:2]:
@@ -223,8 +241,11 @@ def build_blockers(
     intraday: dict[str, Any],
     t_check: dict[str, Any] | None,
     reverse_backtest: dict[str, Any] | None,
+    data_quality: dict[str, Any] | None,
 ) -> list[str]:
     blockers: list[str] = []
+    if data_quality_status(data_quality) in QUALITY_BLOCKER_STATUSES:
+        blockers.extend(data_quality.get("blockers") or [])
     blockers.extend(signal.get("message") for signal in intraday.get("signals", []) if signal.get("severity") in {"block", "risk"})
     blockers.extend(item.get("message") for item in (t_check or {}).get("blockers", []))
     if reverse_backtest and reverse_backtest.get("verdict") != "pass":
@@ -269,10 +290,11 @@ def build_card(
     action_backtest: dict[str, Any] | None,
     reverse_backtest: dict[str, Any] | None,
     reverse_forecast: dict[str, Any] | None,
+    data_quality: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest)
-    evidence = build_evidence(intraday, portfolio, t_check, action_backtest, reverse_backtest, reverse_forecast)
-    blockers = build_blockers(intraday, t_check, reverse_backtest)
+    state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality)
+    evidence = build_evidence(intraday, portfolio, t_check, action_backtest, reverse_backtest, reverse_forecast, data_quality)
+    blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality)
     action_code = {
         "data_stale": "pause_intraday_decision",
         "exit_risk_review": "create_exit_or_risk_review",
@@ -311,7 +333,9 @@ def build_card(
             "reverse_t_backtest_verdict": (reverse_backtest or {}).get("verdict"),
             "reverse_t_forecast_status": (reverse_forecast or {}).get("status"),
             "action_backtest_weak_rule_count": (action_backtest or {}).get("weak_rule_count"),
+            "data_quality_status": data_quality_status(data_quality),
         },
+        "data_quality": data_quality or {},
         "blockers": blockers,
         "evidence": evidence,
         "guardrails": [
@@ -329,6 +353,7 @@ def build_report(
     action_backtests: dict[str, Any] | None,
     reverse_t_backtest: dict[str, Any] | None,
     reverse_t_forecast: dict[str, Any] | None,
+    data_quality: dict[str, Any] | None = None,
     *,
     generated_at: datetime | None = None,
 ) -> dict[str, Any]:
@@ -337,6 +362,7 @@ def build_report(
     action_backtest_by_code = index_action_backtests(action_backtests)
     reverse_backtest_by_code = index_simple_items(reverse_t_backtest)
     reverse_forecast_by_code = index_simple_items(reverse_t_forecast)
+    data_quality_by_code = index_simple_items(data_quality)
     cards = [
         build_card(
             item,
@@ -345,6 +371,7 @@ def build_report(
             action_backtest_by_code.get(str(item.get("code"))),
             reverse_backtest_by_code.get(str(item.get("code"))),
             reverse_forecast_by_code.get(str(item.get("code"))),
+            data_quality_by_code.get(str(item.get("code"))),
         )
         for item in intraday_snapshot.get("items", [])
     ]
@@ -360,6 +387,7 @@ def build_report(
             "action_backtests_available": action_backtests is not None,
             "reverse_t_backtest_available": reverse_t_backtest is not None,
             "reverse_t_forecast_available": reverse_t_forecast is not None,
+            "data_quality_available": data_quality is not None,
         },
         "card_count": len(cards),
         "state_counts": dict(sorted(state_counts.items())),
@@ -424,6 +452,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--action-backtests", default="data/metadata/portfolio-action-matrix-backtests.after-plan.json")
     parser.add_argument("--reverse-t-backtest", default="data/metadata/reverse-t-backtest.json")
     parser.add_argument("--reverse-t-forecast", default="data/metadata/reverse-t-forecast.json")
+    parser.add_argument("--data-quality", default="data/metadata/data-quality-snapshot.json")
     parser.add_argument("--output", default="data/metadata/realtime-decision-cards.json")
     parser.add_argument("--markdown-output", default="reports/realtime-decision-cards.md")
     parser.add_argument("--json", action="store_true")
@@ -443,6 +472,7 @@ def main() -> int:
             load_json_if_exists(Path(args.action_backtests)),
             load_json_if_exists(Path(args.reverse_t_backtest)),
             load_json_if_exists(Path(args.reverse_t_forecast)),
+            load_json_if_exists(Path(args.data_quality)),
         )
         write_json(Path(args.output), report)
         Path(args.markdown_output).parent.mkdir(parents=True, exist_ok=True)

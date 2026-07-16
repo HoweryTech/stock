@@ -123,6 +123,35 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIn("实时持仓决策卡", content)
         self.assertIn("行情过期", content)
 
+    def test_data_quality_insufficient_blocks_decision(self) -> None:
+        report = build_report(
+            {"items": [intraday_item()]},
+            portfolio_result(),
+            t_result(),
+            None,
+            None,
+            None,
+            {
+                "items": [
+                    {
+                        "code": "600000",
+                        "overall_status": "insufficient",
+                        "status_label": "样本不足",
+                        "blockers": ["日线数量 8 少于 20。"],
+                        "warnings": [],
+                    }
+                ]
+            },
+            generated_at=datetime(2026, 7, 16, 9, 33, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "data_insufficient")
+        self.assertEqual(card["decision"]["action"], "complete_data_before_decision")
+        self.assertIn("日线数量 8 少于 20。", card["blockers"])
+        self.assertEqual(card["market_context"]["data_quality_status"], "insufficient")
+
 
 if __name__ == "__main__":
     unittest.main()
