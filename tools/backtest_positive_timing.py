@@ -163,7 +163,7 @@ def simulate_day(
     while index < len(day_bars) - 1:
         timing = score_prefix(code, day_bars[: index + 1])
         score = as_float(timing.get("score"))
-        if score is None or score < threshold:
+        if score is None or score < threshold or timing.get("status") != "confirmed":
             index += 1
             continue
         entry_index = index + 1

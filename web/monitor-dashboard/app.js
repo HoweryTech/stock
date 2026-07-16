@@ -493,6 +493,10 @@ function renderPositiveTiming(timing) {
     ["RSI14", timing.metrics?.rsi14 == null ? "--" : Number(timing.metrics.rsi14).toFixed(1)],
     ["5分钟量比", timing.metrics?.volume_ratio == null ? "--" : Number(timing.metrics.volume_ratio).toFixed(2)],
     ["主力净流入占比", pct(timing.metrics?.main_flow_ratio_pct)],
+    ["确认信号数", timing.metrics?.confirmation_count == null ? "--" : String(timing.metrics.confirmation_count)],
+    ["MA5修复", timing.metrics?.recaptured_ma5 ? "是" : "否"],
+    ["放量阳线", timing.metrics?.bullish_volume_candle ? "是" : "否"],
+    ["资金流确认", timing.metrics?.flow_confirmed ? "是" : "否"],
   ];
   const signals = timing.signals || [];
   return detailSection(

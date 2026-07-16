@@ -375,10 +375,14 @@ def build_positive_timing(
     current = as_float(value_at(intraday, "quote.latest_price"), closes[-1]) or closes[-1]
     ma5 = average(closes[-5:])
     ma20 = average(closes[-20:])
+    previous_ma5 = average(closes[-6:-1]) if len(closes) >= 6 else None
+    previous_close = closes[-2] if len(closes) >= 2 else None
+    latest_open = as_float(day_bars[-1].get("open"))
+    latest_close = closes[-1]
     recent_high = max(highs) if highs else None
     recent_low = min(lows) if lows else None
     pullback_pct = None if recent_high in (None, 0) else (current / recent_high - 1) * 100
-    rebound_pct = None if len(closes) < 2 or closes[-2] == 0 else (current / closes[-2] - 1) * 100
+    rebound_pct = None if previous_close in (None, 0) else (current / previous_close - 1) * 100
     ema12 = ema_latest(closes, 12)
     ema26 = ema_latest(closes, 26)
     macd_hist = None if ema12 is None or ema26 is None else ema12 - ema26
@@ -386,6 +390,21 @@ def build_positive_timing(
     avg_volume_20 = average(volumes[-20:]) if len(volumes) >= 20 else None
     volume_ratio = None if avg_volume_20 in (None, 0) or not volumes else volumes[-1] / avg_volume_20
     main_flow = as_float(value_at(intraday, "capital_flow.main_net_inflow_ratio_pct"))
+    recaptured_ma5 = (
+        current is not None
+        and ma5 is not None
+        and previous_close is not None
+        and previous_ma5 is not None
+        and previous_close < previous_ma5
+        and current >= ma5
+    )
+    bullish_volume_candle = (
+        latest_open is not None
+        and latest_close > latest_open
+        and volume_ratio is not None
+        and volume_ratio >= 1.05
+    )
+    flow_confirmed = main_flow is not None and main_flow >= 1.0
 
     score = 0.0
     signals: list[str] = []
@@ -411,6 +430,12 @@ def build_positive_timing(
     if rebound_pct is not None and rebound_pct > 0:
         score += 10
         signals.append(f"最新5分钟价格较上一根回升 {rebound_pct:.2f}%。")
+    if recaptured_ma5:
+        score += 15
+        signals.append("最新5分钟重新站上MA5，回踩后出现修复确认。")
+    if bullish_volume_candle:
+        score += 10
+        signals.append("最新5分钟为放量阳线，低吸买点获得成交确认。")
     if macd_hist is not None:
         if macd_hist > 0:
             score += 12
@@ -447,6 +472,9 @@ def build_positive_timing(
             signals.append(f"主力净流入占比 {main_flow:.2f}%，资金流偏弱。")
 
     score = max(0.0, min(100.0, score))
+    confirmation_count = sum(bool(item) for item in (recaptured_ma5, bullish_volume_candle, flow_confirmed))
+    if confirmation_count < 2:
+        signals.append("确认信号少于2个，需要等待MA5修复、放量阳线或主力净流入进一步共振。")
     buy_high = min(value for value in [current, ma5] if value is not None) if ma5 is not None else current
     buy_low_candidates = [buy_high * 0.988]
     if ma20 is not None:
@@ -455,7 +483,7 @@ def build_positive_timing(
         buy_low_candidates.append(recent_low)
     buy_low = min(buy_high, max(buy_low_candidates))
     target_low = max(current, buy_high * 1.012)
-    status = "confirmed" if score >= POSITIVE_T_SCORE_THRESHOLD else "watch"
+    status = "confirmed" if score >= POSITIVE_T_SCORE_THRESHOLD and confirmation_count >= 2 else "watch"
     return {
         "available": True,
         "status": status,
@@ -474,6 +502,10 @@ def build_positive_timing(
             "rsi14": rounded(rsi14),
             "volume_ratio": rounded(volume_ratio),
             "main_flow_ratio_pct": rounded(main_flow),
+            "recaptured_ma5": recaptured_ma5,
+            "bullish_volume_candle": bullish_volume_candle,
+            "flow_confirmed": flow_confirmed,
+            "confirmation_count": confirmation_count,
         },
     }
 

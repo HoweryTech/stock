@@ -7,20 +7,30 @@ from tools.backtest_positive_timing import build_report, simulate_day, summarize
 
 
 def make_day(day: str = "2026-07-16") -> list[dict]:
-    closes = [9.70, 9.74, 9.78, 9.82, 9.86, 9.90, 9.94, 9.98, 10.02, 10.06, 10.10, 10.08, 10.04, 10.02, 10.00, 9.98, 9.96, 9.98, 10.00, 10.00, 10.02, 10.14, 10.16, 10.18]
+    closes = [9.70, 9.74, 9.78, 9.82, 9.86, 9.90, 9.94, 9.98, 10.02, 10.06, 10.10, 10.08, 10.04, 10.02, 10.00, 9.98, 9.96, 9.98, 9.96, 10.02, 10.04, 10.18, 10.20, 10.22]
     bars = []
     for index, close in enumerate(closes):
         bars.append(
             {
                 "timestamp": f"{day} 10:{index:02d}",
                 "code": "600000",
-                "open": close,
+                "open": close - 0.01,
                 "high": close + 0.04,
                 "low": close - 0.02,
                 "close": close,
                 "volume": 1000 + index * 20,
             }
         )
+    return bars
+
+
+def make_unconfirmed_day(day: str = "2026-07-16") -> list[dict]:
+    bars = []
+    for bar in make_day(day):
+        item = dict(bar)
+        item["open"] = item["close"] + 0.01
+        item["volume"] = 600
+        bars.append(item)
     return bars
 
 
@@ -56,6 +66,22 @@ class BacktestPositiveTimingTest(unittest.TestCase):
         self.assertTrue(trades)
         self.assertEqual(trades[0]["outcome"], "completed")
         self.assertGreaterEqual(trades[0]["score"], 60)
+
+    def test_simulate_day_requires_confirmed_timing_status(self) -> None:
+        trades = simulate_day(
+            "600000",
+            make_unconfirmed_day(),
+            threshold=60,
+            horizon_bars=6,
+            target_pct=1.2,
+            stop_pct=1.0,
+            trade_shares=100,
+            costs=self.costs,
+            adaptive_bounds=False,
+            minimum_net_profit=0.0,
+        )
+
+        self.assertEqual(trades, [])
 
     def test_summarize_threshold(self) -> None:
         summary = summarize_threshold(
@@ -93,7 +119,7 @@ class BacktestPositiveTimingTest(unittest.TestCase):
                 minimum_net_profit=0.0,
             )
 
-        self.assertEqual(report["portfolio_recommended_threshold"], 65)
+        self.assertEqual(report["portfolio_recommended_threshold"], 70)
         self.assertEqual(report["items"][0]["recommended"]["verdict"], "usable_for_watch")
 
     def test_adaptive_bounds_raise_target_to_cover_minimum_fee(self) -> None:

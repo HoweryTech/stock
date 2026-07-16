@@ -98,7 +98,7 @@ def bullish_technical_doc(code: str = "600000") -> dict:
 
 
 def positive_minute_bars(code: str = "600000") -> dict[str, list[dict]]:
-    closes = [9.70, 9.74, 9.78, 9.82, 9.86, 9.90, 9.94, 9.98, 10.02, 10.06, 10.10, 10.08, 10.04, 10.02, 10.00, 9.98, 9.96, 9.98, 10.00, 10.00]
+    closes = [9.70, 9.74, 9.78, 9.82, 9.86, 9.90, 9.94, 9.98, 10.02, 10.06, 10.10, 10.08, 10.04, 10.02, 10.00, 9.98, 9.96, 9.98, 9.96, 10.02]
     bars = []
     for index, close in enumerate(closes):
         bars.append(
@@ -113,6 +113,17 @@ def positive_minute_bars(code: str = "600000") -> dict[str, list[dict]]:
             }
         )
     return {code: bars}
+
+
+def unconfirmed_minute_bars(code: str = "600000") -> dict[str, list[dict]]:
+    bars = positive_minute_bars(code)[code]
+    adjusted = []
+    for bar in bars:
+        item = dict(bar)
+        item["open"] = item["close"] + 0.01
+        item["volume"] = 600
+        adjusted.append(item)
+    return {code: adjusted}
 
 
 class RealtimeDecisionCardsTest(unittest.TestCase):
@@ -208,6 +219,33 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["capital_plan"]["max_additional_capital"], 2500.0)
         self.assertTrue(any("放宽到5%" in reason for reason in card["capital_plan"]["reasons"]))
         self.assertTrue(any("总资产 5.0%" in step for step in card["decision"]["action_steps"]))
+
+    def test_positive_t_score_without_confirmation_waits(self) -> None:
+        item = intraday_item()
+        item["position"]["shares"] = 100
+        item["position"]["market_value"] = 1000.0
+        item["position"]["live_position_pct"] = 2.0
+        item["capital_flow"]["main_net_inflow_ratio_pct"] = 0.0
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(conclusion="positive_t_candidate"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            unconfirmed_minute_bars(),
+            generated_at=datetime(2026, 7, 16, 9, 36, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "positive_t_watch")
+        self.assertEqual(card["positive_timing"]["status"], "watch")
+        self.assertGreaterEqual(card["positive_timing"]["score"], 65.0)
+        self.assertLess(card["positive_timing"]["metrics"]["confirmation_count"], 2)
+        self.assertEqual(card["capital_plan"]["status"], "waiting_intraday_confirmation")
 
     def test_positive_t_candidate_without_intraday_confirmation_waits(self) -> None:
         item = intraday_item()
