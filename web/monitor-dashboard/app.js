@@ -12,6 +12,7 @@ const state = {
 };
 
 const labels = {
+  market_wait: "等待时段",
   risk_review: "风险处置",
   exit_risk_review: "退出风险",
   risk_reduction_review: "仓位复核",
@@ -82,6 +83,8 @@ function consistencyLabel(quality) {
 }
 
 function qualitySummary(quality) {
+  const session = quality?.market_session || {};
+  if (quality?.quote?.status === "stale" && session.live_quote_required === false) return session.message || "当前不在连续盘中执行窗口。";
   const issues = quality?.source_consistency?.issues || [];
   if (issues.length) return issues[0];
   const messages = [...(quality?.data_trust?.reasons || []), ...(quality?.blockers || []), ...(quality?.warnings || [])];
@@ -225,7 +228,8 @@ function renderSummary() {
   const noAdd = items.filter(item => item.state === "no_add_watch").length;
   const decisionCards = [...state.decisionCards.values()];
   const exitRisk = decisionCards.filter(card => card.state === "exit_risk_review").length;
-  const dataPaused = decisionCards.filter(card => ["data_stale", "data_insufficient"].includes(card.state)).length;
+  const dataPaused = decisionCards.filter(card => ["market_wait", "data_stale", "data_insufficient"].includes(card.state)).length;
+  const marketWait = decisionCards.filter(card => card.state === "market_wait").length;
   const qualityStale = decisionCards.filter(card => card.data_quality?.overall_status === "stale").length;
   const qualityBlocked = decisionCards.filter(card => ["insufficient", "missing"].includes(card.data_quality?.overall_status)).length;
   const trustHigh = decisionCards.filter(card => card.data_quality?.data_trust?.level === "high").length;
@@ -240,7 +244,7 @@ function renderSummary() {
     ["账户总资产", money(state.snapshot?.total_assets), "持仓基准"],
     ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
     ["浮动盈亏", money(pnl), "按最新快照估算"],
-    ["退出风险", `${exitRisk || risk} 只`, `${dataPaused} 只暂停决策`],
+    ["退出风险", `${exitRisk || risk} 只`, `${dataPaused} 只暂停决策 · ${marketWait} 只等待时段`],
     ["数据可信", `${trustHigh} 高 / ${trustLow} 低`, `${qualityStale} 过期 · ${qualityBlocked} 阻断`],
     ["T观察", `${positiveT} 正T / ${reverseTByCard || reverseT} 反T`, `${priceAlerts} 只价格提醒 · ${forecastAlerts} 只概率预警`],
     ["最大延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
@@ -364,6 +368,7 @@ function openDetail(code) {
       ["总状态", qualityLabel(quality)],
       ["可信等级", trustLabel(quality)],
       ["源一致性", consistencyLabel(quality)],
+      ["交易时段", quality.market_session?.label || "--"],
       ["盘中确认", quality.data_trust?.intraday_decision_allowed ? "允许" : "禁止"],
       ["行情延迟", quality.quote?.lag_seconds == null ? "--" : `${Number(quality.quote.lag_seconds).toFixed(1)}s`],
       ["日线最新", quality.daily?.latest_trade_date || "--"],

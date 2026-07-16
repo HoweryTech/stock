@@ -8,6 +8,7 @@ import csv
 import json
 import sys
 from datetime import datetime
+from datetime import time as clock_time
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,59 @@ def load_minute_stats(cache_dir: Path) -> dict[str, dict[str, Any]]:
                 latest_close = as_float(bar.get("close"))
         stats[code] = {"bar_count": len(bars), "latest_timestamp": latest, "latest_close": latest_close, "cache_path": str(path)}
     return stats
+
+
+def classify_market_session(as_of: datetime) -> dict[str, Any]:
+    current = as_of.time()
+    if as_of.weekday() >= 5:
+        phase = "non_trading_day"
+        label = "非交易日"
+        live_required = False
+        execution_window = False
+    elif current < clock_time(9, 15):
+        phase = "pre_market"
+        label = "盘前"
+        live_required = False
+        execution_window = False
+    elif current < clock_time(9, 30):
+        phase = "opening_auction"
+        label = "集合竞价"
+        live_required = True
+        execution_window = False
+    elif current <= clock_time(11, 30):
+        phase = "continuous_trading"
+        label = "连续竞价"
+        live_required = True
+        execution_window = True
+    elif current < clock_time(13, 0):
+        phase = "lunch_break"
+        label = "午间休市"
+        live_required = False
+        execution_window = False
+    elif current < clock_time(14, 57):
+        phase = "continuous_trading"
+        label = "连续竞价"
+        live_required = True
+        execution_window = True
+    elif current <= clock_time(15, 0):
+        phase = "closing_auction"
+        label = "尾盘集合竞价"
+        live_required = True
+        execution_window = True
+    else:
+        phase = "post_market"
+        label = "盘后"
+        live_required = False
+        execution_window = False
+    message = "当前需要秒级行情校验。" if live_required else "当前不在连续盘中执行窗口，行情停留在上一撮合时段通常属于正常等待。"
+    return {
+        "phase": phase,
+        "label": label,
+        "is_trading_day": as_of.weekday() < 5,
+        "live_quote_required": live_required,
+        "intraday_execution_window": execution_window,
+        "message": message,
+    }
 
 
 def age_days(as_of: datetime, date_text: str | None) -> int | None:
@@ -286,6 +340,7 @@ def build_item(
     min_minute_bars: int,
     max_minute_age_hours: float,
     max_consistency_diff_pct: float,
+    market_session: dict[str, Any],
 ) -> dict[str, Any]:
     position = load_yaml(position_path)
     code = str(value_at(position, "stock.code") or "")
@@ -305,6 +360,7 @@ def build_item(
         "overall_status": status,
         "status_label": status_label(status),
         "usable_for_intraday_decision": status == "usable",
+        "market_session": market_session,
         "data_trust": trust,
         "source_consistency": consistency,
         "quote": quote,
@@ -330,6 +386,7 @@ def build_report(
     max_consistency_diff_pct: float = 1.0,
 ) -> dict[str, Any]:
     as_of = as_of or datetime.now().astimezone()
+    market_session = classify_market_session(as_of)
     intraday_by_code = load_intraday_by_code(intraday_snapshot)
     daily_stats = load_daily_stats(daily_bars)
     minute_stats = load_minute_stats(minute_cache_dir)
@@ -346,6 +403,7 @@ def build_report(
             min_minute_bars=min_minute_bars,
             max_minute_age_hours=max_minute_age_hours,
             max_consistency_diff_pct=max_consistency_diff_pct,
+            market_session=market_session,
         )
         for path in position_paths
     ]
@@ -357,6 +415,7 @@ def build_report(
         trust_counts[trust_level] = trust_counts.get(trust_level, 0) + 1
     return {
         "generated_at": as_of.isoformat(timespec="seconds"),
+        "market_session": market_session,
         "thresholds": {
             "max_quote_lag_seconds": max_quote_lag_seconds,
             "min_daily_bars": min_daily_bars,
@@ -378,6 +437,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "# 持仓数据质量快照",
         "",
         f"生成时间：{report['generated_at']}",
+        f"交易时段：{report.get('market_session', {}).get('label', '-')}，{report.get('market_session', {}).get('message', '')}",
         "",
         f"持仓数：{report['position_count']}，可用于盘中判断：{report['usable_count']}，状态分布：{report['status_counts']}，可信等级：{report.get('trust_counts', {})}",
         "",

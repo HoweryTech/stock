@@ -6,7 +6,7 @@ from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
 
-from tools.build_data_quality_snapshot import build_report, render_markdown
+from tools.build_data_quality_snapshot import build_report, classify_market_session, render_markdown
 from tools.new_trade_plan import write_yaml
 
 
@@ -44,6 +44,20 @@ def write_minutes(path: Path, code: str, count: int, latest: str) -> None:
 
 
 class DataQualitySnapshotTest(unittest.TestCase):
+    def test_classifies_market_sessions(self) -> None:
+        pre_market = classify_market_session(datetime(2026, 7, 16, 8, 50, 0))
+        trading = classify_market_session(datetime(2026, 7, 16, 10, 0, 0))
+        lunch = classify_market_session(datetime(2026, 7, 16, 12, 0, 0))
+        weekend = classify_market_session(datetime(2026, 7, 18, 10, 0, 0))
+
+        self.assertEqual(pre_market["phase"], "pre_market")
+        self.assertFalse(pre_market["live_quote_required"])
+        self.assertEqual(trading["phase"], "continuous_trading")
+        self.assertTrue(trading["live_quote_required"])
+        self.assertEqual(lunch["phase"], "lunch_break")
+        self.assertFalse(lunch["intraday_execution_window"])
+        self.assertEqual(weekend["phase"], "non_trading_day")
+
     def test_builds_usable_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
@@ -68,6 +82,7 @@ class DataQualitySnapshotTest(unittest.TestCase):
         self.assertEqual(report["items"][0]["data_trust"]["level"], "high")
         self.assertTrue(report["items"][0]["data_trust"]["intraday_decision_allowed"])
         self.assertEqual(report["items"][0]["source_consistency"]["status"], "pass")
+        self.assertEqual(report["items"][0]["market_session"]["phase"], "continuous_trading")
         self.assertIn("持仓数据质量快照", render_markdown(report))
 
     def test_detects_stale_quote_and_minute_cache(self) -> None:

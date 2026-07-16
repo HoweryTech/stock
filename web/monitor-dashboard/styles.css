@@ -133,6 +133,7 @@ th:nth-child(8) { width: 100px; }
 .state-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
 .state-risk_review { color: var(--red); background: var(--red-bg); }
 .state-exit_risk_review { color: var(--red); background: var(--red-bg); }
+.state-market_wait { color: var(--blue); background: var(--blue-bg); }
 .state-risk_reduction_review { color: var(--amber); background: var(--amber-bg); }
 .state-data_insufficient { color: var(--amber); background: var(--amber-bg); }
 .state-positive_t_watch { color: var(--blue); background: var(--blue-bg); }

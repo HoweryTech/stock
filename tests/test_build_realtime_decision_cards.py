@@ -123,6 +123,50 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIn("实时持仓决策卡", content)
         self.assertIn("行情过期", content)
 
+    def test_off_session_stale_quote_waits_for_market(self) -> None:
+        report = build_report(
+            {"items": [intraday_item(signals=[{"code": "stale_quote", "severity": "block", "message": "行情过期。"}])]},
+            portfolio_result(),
+            t_result(),
+            None,
+            None,
+            None,
+            {
+                "items": [
+                    {
+                        "code": "600000",
+                        "overall_status": "stale",
+                        "status_label": "数据过期",
+                        "market_session": {
+                            "phase": "pre_market",
+                            "label": "盘前",
+                            "live_quote_required": False,
+                            "intraday_execution_window": False,
+                            "message": "当前不在连续盘中执行窗口，行情停留在上一撮合时段通常属于正常等待。",
+                        },
+                        "quote": {"status": "stale"},
+                        "data_trust": {
+                            "level": "low",
+                            "label": "低可信",
+                            "intraday_decision_allowed": False,
+                            "reasons": ["行情: 行情延迟 300.0 秒，超过 60.0 秒阈值。"],
+                        },
+                        "blockers": [],
+                        "warnings": ["行情延迟 300.0 秒，超过 60.0 秒阈值。"],
+                    }
+                ]
+            },
+            generated_at=datetime(2026, 7, 16, 8, 50, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "market_wait")
+        self.assertEqual(card["decision"]["action"], "wait_for_market_session")
+        self.assertEqual(card["market_context"]["market_session_phase"], "pre_market")
+        self.assertFalse(card["market_context"]["live_quote_required"])
+        self.assertIn("[交易时段] 盘前", "\n".join(card["evidence"]))
+
     def test_data_quality_insufficient_blocks_decision(self) -> None:
         report = build_report(
             {"items": [intraday_item()]},

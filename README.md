@@ -583,7 +583,7 @@ python3 tools/build_data_quality_snapshot.py \
   --minute-cache-dir data/processed/minute-bars
 ```
 
-该快照会检查行情延迟、日线样本和分钟线缓存，先判断当前数据是否足够支撑盘中决策，并生成 `高可信`、`中可信`、`低可信` 三档。只有高可信数据才允许进入盘中人工确认；状态为 `stale`、`insufficient` 或 `missing` 时，实时建议只能用于观察或补数据排查。
+该快照会检查交易时段、行情延迟、日线样本和分钟线缓存，先判断当前数据是否足够支撑盘中决策，并生成 `高可信`、`中可信`、`低可信` 三档。只有高可信数据才允许进入盘中人工确认；状态为 `stale`、`insufficient` 或 `missing` 时，实时建议只能用于观察或补数据排查。盘前、午间休市、盘后或非交易日的行情延迟会在决策卡中显示为等待交易时段，不再和盘中行情异常混在一起。
 
 历史数据会纳入本地缓存：5分钟线按股票保存到 `data/processed/minute-bars/{code}.json`，日线统一合并到 `data/processed/daily_bars.csv`。数据质量快照还会检查东方财富现价与分钟线、同日期日线最新价的一致性，默认允许1%以内偏差，可通过 `--max-consistency-diff-pct` 调整。
 

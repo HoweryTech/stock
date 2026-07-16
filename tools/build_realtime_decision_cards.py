@@ -18,6 +18,7 @@ except ModuleNotFoundError:
 
 
 STATE_LABELS = {
+    "market_wait": "非交易时段，等待行情",
     "data_stale": "行情过期，暂停盘中判断",
     "exit_risk_review": "退出风险优先",
     "data_insufficient": "数据不足，暂不决策",
@@ -29,6 +30,7 @@ STATE_LABELS = {
 }
 
 ACTION_LABELS = {
+    "wait_for_market_session": "等待交易时段刷新",
     "pause_intraday_decision": "暂停实时决策，等待行情刷新",
     "create_exit_or_risk_review": "生成退出或风险复核计划",
     "complete_data_before_decision": "补齐行情、止损和样本数据",
@@ -128,10 +130,21 @@ def source_consistency_status(data_quality: dict[str, Any] | None) -> str | None
     return str(value_at(data_quality, "source_consistency.status") or "")
 
 
+def market_session(data_quality: dict[str, Any] | None) -> dict[str, Any]:
+    session = value_at(data_quality or {}, "market_session")
+    return session if isinstance(session, dict) else {}
+
+
+def off_session_quote_wait(data_quality: dict[str, Any] | None) -> bool:
+    session = market_session(data_quality)
+    return bool(session and not session.get("live_quote_required") and value_at(data_quality or {}, "quote.status") == "stale")
+
+
 def decision_priority(state: str) -> int:
     return {
         "exit_risk_review": 90,
         "data_stale": 80,
+        "market_wait": 75,
         "data_insufficient": 70,
         "risk_reduction_review": 60,
         "positive_t_watch": 45,
@@ -153,14 +166,21 @@ def choose_state(
     t_blockers = {item.get("code") for item in (t_check or {}).get("blockers", [])}
     quality_status = data_quality_status(data_quality)
     trust_level = data_trust_level(data_quality)
+    quote_wait = off_session_quote_wait(data_quality)
     states: list[tuple[str, str]] = []
 
     if trust_level == "low":
         states.append(("data_insufficient", "数据可信等级为低，不能验证盘中建议。"))
     if "stale_quote" in signal_codes:
-        states.append(("data_stale", "盘中行情过期，不能给实时执行建议。"))
+        if quote_wait:
+            states.append(("market_wait", "当前不在实时交易窗口，等待下一次行情刷新后再判断。"))
+        else:
+            states.append(("data_stale", "盘中行情过期，不能给实时执行建议。"))
     if quality_status == "stale":
-        states.append(("data_stale", "行情、日线或分钟线存在过期数据，不能给实时执行建议。"))
+        if quote_wait:
+            states.append(("market_wait", "当前不在实时交易窗口，上一撮合时段行情只可观察。"))
+        else:
+            states.append(("data_stale", "行情、日线或分钟线存在过期数据，不能给实时执行建议。"))
     if quality_status in QUALITY_BLOCKER_STATUSES:
         states.append(("data_insufficient", "行情、日线或分钟线数据缺失或样本不足，不能验证盘中建议。"))
     if portfolio_action_codes & {"stop_loss_triggered"} or t_blockers & HARD_T_BLOCKERS:
@@ -228,6 +248,9 @@ def build_evidence(
         trust = data_quality.get("data_trust") or {}
         trust_text = trust.get("label") or trust.get("level") or "-"
         evidence.append(f"[数据质量] {data_quality.get('status_label') or data_quality.get('overall_status')} · {trust_text}")
+        session = market_session(data_quality)
+        if session:
+            evidence.append(f"[交易时段] {session.get('label') or session.get('phase')} · {session.get('message') or '-'}")
         consistency = data_quality.get("source_consistency") or {}
         if consistency:
             evidence.append(f"[数据一致性] {consistency.get('status') or '-'} · 阈值 {consistency.get('max_diff_pct', '-')}%")
@@ -282,6 +305,8 @@ def build_blockers(
 def build_next_step(state: str, action_backtest: dict[str, Any] | None) -> str:
     if state == "data_stale":
         return "先刷新准实时监控快照；行情恢复前不做盘中动作。"
+    if state == "market_wait":
+        return "等待进入连续交易时段后刷新行情；未刷新前只观察，不做盘中动作。"
     if state == "exit_risk_review":
         return "优先生成退出或风险复核计划；未确认前禁止补仓和做T。"
     if state == "data_insufficient":
@@ -300,7 +325,7 @@ def build_next_step(state: str, action_backtest: dict[str, Any] | None) -> str:
 
 
 def confidence_for(state: str, evidence: list[str], blockers: list[str]) -> str:
-    if state in {"exit_risk_review", "data_stale", "data_insufficient"}:
+    if state in {"exit_risk_review", "data_stale", "market_wait", "data_insufficient"}:
         return "high"
     if blockers:
         return "medium"
@@ -322,6 +347,7 @@ def build_card(
     evidence = build_evidence(intraday, portfolio, t_check, action_backtest, reverse_backtest, reverse_forecast, data_quality)
     blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality)
     action_code = {
+        "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
         "exit_risk_review": "create_exit_or_risk_review",
         "data_insufficient": "complete_data_before_decision",
@@ -362,6 +388,9 @@ def build_card(
             "data_quality_status": data_quality_status(data_quality),
             "data_trust_level": data_trust_level(data_quality),
             "source_consistency_status": source_consistency_status(data_quality),
+            "market_session_phase": market_session(data_quality).get("phase"),
+            "market_session_label": market_session(data_quality).get("label"),
+            "live_quote_required": market_session(data_quality).get("live_quote_required"),
         },
         "data_quality": data_quality or {},
         "blockers": blockers,
