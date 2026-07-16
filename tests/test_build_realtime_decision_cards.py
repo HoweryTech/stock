@@ -145,6 +145,11 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
                         },
                         "blockers": ["日线数量 8 少于 20。"],
                         "warnings": [],
+                        "source_consistency": {
+                            "status": "conflict",
+                            "max_diff_pct": 1.0,
+                            "issues": ["东方财富现价与分钟线最新收盘价差 2.00%。"],
+                        },
                     }
                 ]
             },
@@ -158,6 +163,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIn("日线数量 8 少于 20。", card["blockers"])
         self.assertEqual(card["market_context"]["data_quality_status"], "insufficient")
         self.assertEqual(card["market_context"]["data_trust_level"], "low")
+        self.assertEqual(card["market_context"]["source_consistency_status"], "conflict")
+        self.assertIn("[数据一致性] conflict · 阈值 1.0%", card["evidence"])
+        self.assertIn("[数据源冲突] 东方财富现价与分钟线最新收盘价差 2.00%。", card["evidence"])
 
 
 if __name__ == "__main__":

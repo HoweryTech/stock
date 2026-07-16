@@ -181,10 +181,22 @@ th:nth-child(8) { width: 100px; }
 .detail-section { padding: 16px 0; border-bottom: 1px solid var(--line); }
 .detail-section:first-child { padding-top: 0; }
 .detail-section h3 { margin: 0 0 12px; font-size: 14px; }
-.detail-section, .detail-section p, .reason-list li, .signal-list li, .advice, .advice-tag { overflow-wrap: anywhere; }
+.detail-section h4 { margin: 14px 0 8px; font-size: 12px; color: var(--muted); }
+.detail-section, .detail-section p, .reason-list li, .signal-list li, .advice, .advice-tag, .consistency-item { overflow-wrap: anywhere; }
 .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
 .metric dt { color: var(--muted); font-size: 12px; }
 .metric dd { margin: 3px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.consistency-list { display: grid; gap: 8px; margin-top: 10px; }
+.consistency-item { border: 1px solid var(--line); border-radius: 6px; padding: 10px 11px; background: #fbfcfd; }
+.consistency-item > div { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.consistency-item span { flex: 0 0 auto; min-height: 20px; padding: 2px 7px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.consistency-item p { margin: 7px 0; color: var(--muted); font-size: 12px; }
+.consistency-item dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 8px; margin: 0; font-size: 12px; }
+.consistency-item dt { grid-row: 1; color: var(--muted); }
+.consistency-item dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.consistency-pass span { color: var(--green); background: var(--green-bg); }
+.consistency-conflict span { color: var(--red); background: var(--red-bg); }
+.consistency-reference_only span, .consistency-skipped span, .consistency-unknown span { color: var(--muted); background: #eef1f4; }
 .signal-list, .reason-list { margin: 0; padding-left: 18px; line-height: 1.6; }
 .event-list { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
 .event-item { padding: 14px 16px; border-bottom: 1px solid var(--line); }

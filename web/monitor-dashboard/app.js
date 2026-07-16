@@ -68,7 +68,22 @@ function trustLabel(quality) {
   }[trustLevel(quality)] || "可信未知";
 }
 
+function consistencyStatus(quality) {
+  return quality?.source_consistency?.status || "unknown";
+}
+
+function consistencyLabel(quality) {
+  return {
+    pass: "一致",
+    conflict: "源冲突",
+    skipped: "未校验",
+    unknown: "未知",
+  }[consistencyStatus(quality)] || consistencyStatus(quality);
+}
+
 function qualitySummary(quality) {
+  const issues = quality?.source_consistency?.issues || [];
+  if (issues.length) return issues[0];
   const messages = [...(quality?.data_trust?.reasons || []), ...(quality?.blockers || []), ...(quality?.warnings || [])];
   if (messages.length) return messages[0];
   return qualityState(quality) === "usable" ? "行情、日线和分钟线可用于盘中判断。" : "尚未生成数据质量快照。";
@@ -300,6 +315,29 @@ function detailSection(title, body) {
   return `<section class="detail-section"><h3>${title}</h3>${body}</section>`;
 }
 
+function renderConsistencyChecks(quality) {
+  const consistency = quality?.source_consistency || {};
+  const checks = consistency.checks || [];
+  if (!checks.length) return "";
+  return `<div class="consistency-list">${checks.map(check => {
+    const diff = check.diff_pct == null ? "--" : `${Number(check.diff_pct).toFixed(2)}%`;
+    const referenceTime = check.reference_timestamp || check.reference_date || "--";
+    const sourceName = check.source === "minute" ? "分钟线" : check.source === "daily" ? "日线" : check.source || "来源";
+    return `<div class="consistency-item consistency-${escapeHtml(check.status || "unknown")}">
+      <div>
+        <strong>${escapeHtml(sourceName)}</strong>
+        <span>${escapeHtml(check.status || "unknown")}</span>
+      </div>
+      <p>${escapeHtml(check.message || "")}</p>
+      <dl>
+        <dt>参考时间</dt><dd>${escapeHtml(referenceTime)}</dd>
+        <dt>参考价</dt><dd>${check.reference_price == null ? "--" : money(check.reference_price)}</dd>
+        <dt>偏差</dt><dd>${escapeHtml(diff)}</dd>
+      </dl>
+    </div>`;
+  }).join("")}</div>`;
+}
+
 function openDetail(code) {
   const item = state.snapshot?.items.find(entry => entry.code === code);
   if (!item) return;
@@ -325,6 +363,7 @@ function openDetail(code) {
     const qualityMetrics = [
       ["总状态", qualityLabel(quality)],
       ["可信等级", trustLabel(quality)],
+      ["源一致性", consistencyLabel(quality)],
       ["盘中确认", quality.data_trust?.intraday_decision_allowed ? "允许" : "禁止"],
       ["行情延迟", quality.quote?.lag_seconds == null ? "--" : `${Number(quality.quote.lag_seconds).toFixed(1)}s`],
       ["日线最新", quality.daily?.latest_trade_date || "--"],
@@ -333,6 +372,12 @@ function openDetail(code) {
       ["分钟线样本", quality.minute?.bar_count ?? "--"],
     ];
     const qualityMessages = [...(quality.data_trust?.reasons || []), ...(quality.blockers || []), ...(quality.warnings || [])];
+    const consistency = quality.source_consistency || {};
+    const consistencyMetrics = [
+      ["一致性状态", consistencyLabel(quality)],
+      ["最大允许偏差", consistency.max_diff_pct == null ? "--" : `${Number(consistency.max_diff_pct).toFixed(2)}%`],
+      ["冲突数量", String((consistency.issues || []).length)],
+    ];
     const cardMetrics = [
       ["状态", decisionCard.state_label],
       ["建议动作", decision.action_label],
@@ -356,6 +401,9 @@ function openDetail(code) {
       "数据质量",
       `<p>${qualityBadge(item)} <strong>${escapeHtml(qualitySummary(quality))}</strong></p>
       <div class="metric-grid">${qualityMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+      <h4>数据源一致性</h4>
+      <div class="metric-grid">${consistencyMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+      ${renderConsistencyChecks(quality)}
       ${qualityMessages.length ? `<h4>质量问题</h4><ul class="reason-list">${qualityMessages.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`
     );
   }

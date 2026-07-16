@@ -122,6 +122,12 @@ def data_trust_level(data_quality: dict[str, Any] | None) -> str | None:
     return str(value_at(data_quality, "data_trust.level") or "")
 
 
+def source_consistency_status(data_quality: dict[str, Any] | None) -> str | None:
+    if not data_quality:
+        return None
+    return str(value_at(data_quality, "source_consistency.status") or "")
+
+
 def decision_priority(state: str) -> int:
     return {
         "exit_risk_review": 90,
@@ -222,6 +228,11 @@ def build_evidence(
         trust = data_quality.get("data_trust") or {}
         trust_text = trust.get("label") or trust.get("level") or "-"
         evidence.append(f"[数据质量] {data_quality.get('status_label') or data_quality.get('overall_status')} · {trust_text}")
+        consistency = data_quality.get("source_consistency") or {}
+        if consistency:
+            evidence.append(f"[数据一致性] {consistency.get('status') or '-'} · 阈值 {consistency.get('max_diff_pct', '-')}%")
+            for issue in consistency.get("issues", [])[:2]:
+                evidence.append(f"[数据源冲突] {issue}")
         for reason in trust.get("reasons", [])[:2]:
             evidence.append(f"[可信等级] {reason}")
         for message in (data_quality.get("warnings") or [])[:2]:
@@ -350,6 +361,7 @@ def build_card(
             "action_backtest_weak_rule_count": (action_backtest or {}).get("weak_rule_count"),
             "data_quality_status": data_quality_status(data_quality),
             "data_trust_level": data_trust_level(data_quality),
+            "source_consistency_status": source_consistency_status(data_quality),
         },
         "data_quality": data_quality or {},
         "blockers": blockers,
