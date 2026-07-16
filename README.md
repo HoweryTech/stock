@@ -573,6 +573,18 @@ python3 tools/run_intraday_decision_pipeline.py \
 
 该命令会顺序刷新准实时快照、组合日检、做T检查和实时持仓决策卡，避免页面同时读取不同时间点的产物。
 
+生成持仓数据质量快照：
+
+```bash
+python3 tools/build_data_quality_snapshot.py \
+  --positions 'positions/POS-EASTMONEY-*.yaml' \
+  --intraday-snapshot data/metadata/intraday-monitor.latest.json \
+  --daily-bars data/processed/daily_bars.csv \
+  --minute-cache-dir data/processed/minute-bars
+```
+
+该快照会检查行情延迟、日线样本和分钟线缓存，先判断当前数据是否足够支撑盘中决策。状态为 `stale`、`insufficient` 或 `missing` 时，实时建议只能用于观察或补数据排查。
+
 生成统一实时持仓决策卡：
 
 ```bash
