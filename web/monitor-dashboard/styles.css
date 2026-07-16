@@ -164,6 +164,13 @@ th:nth-child(8) { width: 100px; }
 .state-data_stale { color: var(--muted); background: #eceff2; }
 .advice { line-height: 1.45; }
 .advice-tag { margin-top: 4px; color: var(--blue); font-size: 12px; font-weight: 600; }
+.technical-line { display: flex; align-items: center; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 12px; }
+.technical-line span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.technical-badge { display: inline-flex; flex: 0 0 auto; align-items: center; min-height: 22px; padding: 2px 7px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.technical-positive { color: var(--red); background: var(--red-bg); }
+.technical-negative { color: var(--green); background: var(--green-bg); }
+.technical-neutral { color: var(--blue); background: var(--blue-bg); }
+.technical-missing { color: var(--muted); background: #eef1f4; }
 .quality-line { display: flex; align-items: center; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 12px; }
 .quality-line span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .quality-badge, .trust-badge { display: inline-flex; flex: 0 0 auto; align-items: center; min-height: 22px; padding: 2px 7px; border-radius: 4px; font-size: 12px; font-weight: 600; }
@@ -218,6 +225,12 @@ th:nth-child(8) { width: 100px; }
 .consistency-pass span { color: var(--green); background: var(--green-bg); }
 .consistency-conflict span { color: var(--red); background: var(--red-bg); }
 .consistency-reference_only span, .consistency-skipped span, .consistency-unknown span { color: var(--muted); background: #eef1f4; }
+.technical-table-wrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; }
+.technical-table { min-width: 720px; table-layout: fixed; }
+.technical-table th { height: 34px; padding: 0 8px; }
+.technical-table td { height: 38px; padding: 7px 8px; }
+.technical-table th:first-child { width: 70px; }
+.technical-table th:not(:first-child) { width: 86px; }
 .signal-list, .reason-list { margin: 0; padding-left: 18px; line-height: 1.6; }
 .event-list { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
 .event-item { padding: 14px 16px; border-bottom: 1px solid var(--line); }
@@ -249,4 +262,5 @@ th:nth-child(8) { width: 100px; }
   .card-row { margin-top: 10px; color: var(--muted); }
   .card-advice { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); line-height: 1.5; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
+  .technical-line, .quality-line { align-items: flex-start; }
 }

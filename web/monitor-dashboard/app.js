@@ -39,6 +39,21 @@ const compactMoney = value => {
 const tone = value => Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "";
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 
+const technicalLabels = {
+  bullish: "技术偏多",
+  slightly_bullish: "技术略偏多",
+  neutral: "技术中性",
+  slightly_bearish: "技术略偏弱",
+  bearish: "技术偏弱",
+  missing: "技术缺失",
+};
+
+const periodLabels = {
+  daily: "日线",
+  weekly: "周线",
+  monthly: "月线",
+};
+
 function dataQualityFor(item) {
   return decisionCardFor(item)?.data_quality || {};
 }
@@ -106,6 +121,36 @@ function adviceFor(item) {
 
 function decisionCardFor(item) {
   return state.decisionCards.get(item.code);
+}
+
+function technicalAssessmentFor(item) {
+  return decisionCardFor(item)?.technical_assessment || {};
+}
+
+function technicalLabel(assessment) {
+  return technicalLabels[assessment?.label] || assessment?.label || "技术未知";
+}
+
+function technicalToneClass(assessment) {
+  const label = assessment?.label;
+  if (["bullish", "slightly_bullish"].includes(label)) return "technical-positive";
+  if (["bearish", "slightly_bearish"].includes(label)) return "technical-negative";
+  if (label === "neutral") return "technical-neutral";
+  return "technical-missing";
+}
+
+function technicalBadge(itemOrAssessment) {
+  const assessment = itemOrAssessment?.available == null ? technicalAssessmentFor(itemOrAssessment) : itemOrAssessment;
+  if (!assessment.available) return "";
+  const score = assessment.score == null ? "--" : Number(assessment.score).toFixed(1);
+  return `<span class="technical-badge ${technicalToneClass(assessment)}">${escapeHtml(technicalLabel(assessment))} · ${escapeHtml(score)}</span>`;
+}
+
+function technicalSummary(item) {
+  const assessment = technicalAssessmentFor(item);
+  if (!assessment.available) return "";
+  const signals = assessment.signals || [];
+  return signals[0] || "多周期技术指标已纳入决策评分。";
 }
 
 function displayStateFor(item) {
@@ -235,6 +280,8 @@ function renderSummary() {
   const qualityBlocked = decisionCards.filter(card => ["insufficient", "missing"].includes(card.data_quality?.overall_status)).length;
   const trustHigh = decisionCards.filter(card => card.data_quality?.data_trust?.level === "high").length;
   const trustLow = decisionCards.filter(card => card.data_quality?.data_trust?.level === "low").length;
+  const technicalWeak = decisionCards.filter(card => ["bearish", "slightly_bearish"].includes(card.technical_assessment?.label)).length;
+  const technicalStrong = decisionCards.filter(card => ["bullish", "slightly_bullish"].includes(card.technical_assessment?.label)).length;
   const positiveT = decisionCards.filter(card => card.state === "positive_t_watch").length;
   const reverseTByCard = decisionCards.filter(card => card.state === "reverse_t_watch").length;
   const maxLag = Math.max(0, ...items.map(item => Number(item.quote.quote_lag_seconds || 0)));
@@ -247,6 +294,7 @@ function renderSummary() {
     ["浮动盈亏", money(pnl), "按最新快照估算"],
     ["退出风险", `${exitRisk || risk} 只`, `${dataPaused} 只暂停决策 · ${marketWait} 只等待时段`],
     ["数据可信", `${trustHigh} 高 / ${trustLow} 低`, `${qualityStale} 过期 · ${qualityBlocked} 阻断`],
+    ["技术面", `${technicalStrong} 偏多 / ${technicalWeak} 偏弱`, "来自日周月多指标评分"],
     ["T观察", `${positiveT} 正T / ${reverseTByCard || reverseT} 反T`, `${priceAlerts} 只价格提醒 · ${forecastAlerts} 只概率预警`],
     ["最大延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
   ];
@@ -289,6 +337,7 @@ function tableRow(item) {
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
+  const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<tr data-code="${item.code}" tabindex="0">
     <td><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></td>
@@ -296,7 +345,7 @@ function tableRow(item) {
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
     <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span></td>
-    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${dataTag}${reverseTag}</td>
+    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${techTag}${dataTag}${reverseTag}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
@@ -309,6 +358,7 @@ function mobileCard(item) {
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
+  const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
     <div class="card-top">
@@ -318,7 +368,7 @@ function mobileCard(item) {
     <div class="card-row"><span>持仓盈亏</span><span class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)} · ${pct(item.position.return_pct)}</span></div>
     <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
-    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${dataTag}${reverseTag}</div>
+    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${techTag}${dataTag}${reverseTag}</div>
   </article>`;
 }
 
@@ -364,6 +414,37 @@ function renderConsistencyChecks(quality) {
       </dl>
     </div>`;
   }).join("")}</div>`;
+}
+
+function renderTechnicalAssessment(assessment) {
+  if (!assessment?.available) return "";
+  const periodRows = Object.entries(assessment.periods || {}).map(([period, data]) => `
+    <tr>
+      <td>${escapeHtml(periodLabels[period] || period)}</td>
+      <td class="number">${data.score == null ? "--" : Number(data.score).toFixed(1)}</td>
+      <td class="number">${data.macd_histogram == null ? "--" : Number(data.macd_histogram).toFixed(4)}</td>
+      <td class="number">${data.boll_percent_b == null ? "--" : Number(data.boll_percent_b).toFixed(2)}</td>
+      <td class="number">${data.rsi14 == null ? "--" : Number(data.rsi14).toFixed(1)}</td>
+      <td class="number">${data.kdj_j == null ? "--" : Number(data.kdj_j).toFixed(1)}</td>
+      <td class="number">${data.atr_pct == null ? "--" : pct(data.atr_pct)}</td>
+      <td class="number">${data.volume_ratio_20 == null ? "--" : Number(data.volume_ratio_20).toFixed(2)}</td>
+    </tr>`).join("");
+  const signals = assessment.signals || [];
+  return detailSection(
+    "技术指标",
+    `<p>${technicalBadge(assessment)} <strong>${escapeHtml(technicalLabel(assessment))}</strong></p>
+    <div class="metric-grid">
+      <dl class="metric"><dt>综合技术分</dt><dd>${assessment.score == null ? "--" : Number(assessment.score).toFixed(1)}</dd></dl>
+      <dl class="metric"><dt>判断标签</dt><dd>${escapeHtml(technicalLabel(assessment))}</dd></dl>
+    </div>
+    <div class="technical-table-wrap">
+      <table class="technical-table">
+        <thead><tr><th>周期</th><th>分</th><th>MACD柱</th><th>BOLL%b</th><th>RSI14</th><th>KDJ-J</th><th>ATR%</th><th>量比20</th></tr></thead>
+        <tbody>${periodRows}</tbody>
+      </table>
+    </div>
+    ${signals.length ? `<h4>技术证据</h4><ul class="reason-list">${signals.slice(0, 8).map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}`
+  );
 }
 
 function openDetail(code) {
@@ -419,6 +500,7 @@ function openDetail(code) {
     ];
     const blockers = decisionCard.blockers || [];
     const evidence = decisionCard.evidence || [];
+    html += renderTechnicalAssessment(decisionCard.technical_assessment);
     html += detailSection(
       "实时决策卡",
       `<div class="metric-grid">${cardMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
