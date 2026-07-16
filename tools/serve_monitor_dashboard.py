@@ -39,6 +39,10 @@ PID_FILE = ROOT / "data" / "metadata" / "intraday-monitor.pid"
 EVENT_FILE = ROOT / "data" / "metadata" / "intraday-monitor.events.jsonl"
 
 
+def dashboard_position_paths() -> list[str]:
+    return [str(path) for path in sorted((ROOT / "positions").glob("POS-EASTMONEY-*.yaml"))]
+
+
 def load_json(path: Path, *, retries: int = 3, delay: float = 0.05) -> dict[str, object] | None:
     if not path.exists():
         return None
@@ -93,7 +97,7 @@ def market_wait_refresh_status() -> dict[str, object]:
 
 def manual_trade_args(payload: dict[str, object], total_assets: float | None) -> Namespace:
     return Namespace(
-        positions=["positions/POS-EASTMONEY-*.yaml"],
+        positions=dashboard_position_paths(),
         code=str(payload.get("code") or ""),
         side=str(payload.get("side") or ""),
         shares=float(payload.get("shares") or 0),

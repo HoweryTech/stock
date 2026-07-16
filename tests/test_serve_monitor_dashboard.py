@@ -1,8 +1,9 @@
 import json
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from tools.serve_monitor_dashboard import API_FILES, handle_manual_trade, load_json, market_wait_refresh_status, monitor_status, recent_events
+from tools.serve_monitor_dashboard import API_FILES, dashboard_position_paths, handle_manual_trade, load_json, market_wait_refresh_status, monitor_status, recent_events
 
 
 class ServeMonitorDashboardTest(unittest.TestCase):
@@ -71,7 +72,17 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["update"]["trade"]["code"], "000725")
         apply_trade.assert_called_once()
+        called_args = apply_trade.call_args.args[0]
+        self.assertTrue(called_args.positions)
+        self.assertTrue(all(Path(path).is_absolute() for path in called_args.positions))
         refresh.assert_called_once_with(25480.0)
+
+    def test_dashboard_position_paths_are_absolute_files(self) -> None:
+        paths = dashboard_position_paths()
+
+        self.assertTrue(paths)
+        self.assertTrue(all(Path(path).is_absolute() for path in paths))
+        self.assertTrue(any(path.endswith("000725.yaml") for path in paths))
 
     def test_handle_manual_trade_reports_refresh_error_after_saved(self) -> None:
         with (
