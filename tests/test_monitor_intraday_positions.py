@@ -132,6 +132,31 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertIn("费用模型", plan["next_action"])
         self.assertTrue(any("不要提前挂反T回补单" in step for step in plan["execution_steps"]))
 
+    def test_open_reverse_t_leg_triggers_buyback_ready(self) -> None:
+        position = {
+            "stock": {"code": "000725", "name": "京东方A"},
+            "entry": {"shares": 100, "entry_price": 9.115, "position_pct_of_total_assets": 2.48},
+            "manual_trade_history": [
+                {
+                    "id": "MANUAL-OPEN-000725",
+                    "side": "sell",
+                    "trade_intent": "reverse_t_open",
+                    "price": 6.32,
+                    "shares": 100,
+                    "occurred_at": "2026-07-16T09:30:00+08:00",
+                }
+            ],
+        }
+        quote = {"latest_price": 6.04, "open": 6.25, "high": 6.39, "low": 6.02, "change_pct": -5.49}
+
+        plan = build_reverse_t_plan(position, quote, stale=False, costs=self.costs, timeframe={"alignment": "bearish"})
+
+        self.assertEqual(plan["status"], "buyback_ready")
+        self.assertEqual(plan["trade_shares"], 100)
+        self.assertLessEqual(6.04, plan["buyback_max_price"])
+        self.assertEqual(plan["open_reverse_t_leg"]["id"], "MANUAL-OPEN-000725")
+        self.assertTrue(any("买回" in step for step in plan["execution_steps"]))
+
     def test_reduction_plan_rounds_to_board_lots(self) -> None:
         position = {"entry": {"shares": 1000}}
         plan = build_reduction_plan(position, {"latest_price": 3.29}, total_assets=25480)

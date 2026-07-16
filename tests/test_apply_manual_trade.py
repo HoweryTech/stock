@@ -18,6 +18,8 @@ def args(base: Path, **overrides) -> Namespace:
         "total_assets": 25480.0,
         "occurred_at": "2026-07-16T10:00:00+08:00",
         "note": "manual test",
+        "trade_intent": "",
+        "linked_trade_id": "",
         "source": "cli",
         "commission_rate": 0.0003,
         "minimum_commission": 5.0,
@@ -72,6 +74,18 @@ class ApplyManualTradeTest(unittest.TestCase):
         self.assertEqual(updated["entry"]["shares"], 300.0)
         self.assertAlmostEqual(updated["entry"]["entry_price"], 8.13, places=4)
         self.assertEqual(updated["manual_trade_history"][-1]["side"], "buy")
+
+    def test_records_reverse_t_trade_intent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            path = base / "positions/POS-000725.yaml"
+            path.parent.mkdir()
+            write_position(path)
+
+            apply_manual_trade(args(base, trade_intent="reverse_t_open"))
+            updated = load_yaml(path)
+
+        self.assertEqual(updated["manual_trade_history"][-1]["trade_intent"], "reverse_t_open")
 
 
 if __name__ == "__main__":

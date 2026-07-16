@@ -120,6 +120,35 @@ def trade_costs(
     }
 
 
+def latest_open_reverse_t_leg(position: dict[str, Any]) -> dict[str, Any] | None:
+    history = position.get("manual_trade_history") or []
+    if not isinstance(history, list):
+        return None
+    closed_ids = {
+        str(record.get("linked_trade_id"))
+        for record in history
+        if record.get("side") == "buy" and record.get("trade_intent") == "reverse_t_close" and record.get("linked_trade_id")
+    }
+    candidates = [
+        record for record in history
+        if record.get("side") == "sell"
+        and record.get("trade_intent") == "reverse_t_open"
+        and str(record.get("id") or "") not in closed_ids
+    ]
+    return candidates[-1] if candidates else None
+
+
+def fee_aware_buyback_price(sell_price: float, shares: int, costs: dict[str, float], *, max_gap_pct: float = 8.0) -> dict[str, Any] | None:
+    gap_pct = 0.1
+    while gap_pct <= max_gap_pct + 1e-9:
+        buy_price = floor_to_tick(sell_price * (1 - gap_pct / 100))
+        fees = trade_costs(sell_price, buy_price, shares, costs)
+        if fees["net_profit"] >= costs["minimum_net_profit"]:
+            return {"buyback_max_price": buy_price, "required_gap_pct": round((sell_price / buy_price - 1) * 100, 4), "fees": fees}
+        gap_pct += 0.1
+    return None
+
+
 def fee_viable_trade(
     sell_price: float,
     max_shares: int,
@@ -211,6 +240,65 @@ def build_reverse_t_plan(
     def add_blocker(code: str, label: str, current: str, reason: str, next_step: str) -> None:
         blockers.append(reason)
         blocker_details.append(reverse_t_blocker(code, label, current, reason, next_step))
+
+    open_leg = latest_open_reverse_t_leg(position)
+    if open_leg:
+        leg_shares = int(as_float(open_leg.get("shares"), 0.0) or 0.0)
+        sell_price = as_float(open_leg.get("price"))
+        viable = fee_aware_buyback_price(sell_price, leg_shares, costs) if sell_price is not None and leg_shares > 0 else None
+        buyback_max = viable["buyback_max_price"] if viable else None
+        cost_estimate = viable["fees"] if viable else None
+        required_gap_pct = viable["required_gap_pct"] if viable else None
+        if stale:
+            add_blocker("stale_quote", "行情时效", "已过期", "行情过期。", "刷新实时行情；行情恢复前不卖出、不回补。")
+        if buyback_max is None:
+            add_blocker("open_leg_fee_not_viable", "回补费用", "--", "这笔已卖出的反T腿无法在费用模型下给出回补上限。", "不要追价回补；先人工复核成交记录和费用参数。")
+        elif price is not None and price > buyback_max:
+            add_blocker("buyback_price_not_reached", "回补价格", f"{price:.2f} > {buyback_max:.2f}", "现价尚未降至反T回补上限。", "继续等待；高于回补上限不买回。")
+        status = "buyback_ready" if not blockers and price is not None and buyback_max is not None and price <= buyback_max else "buyback_wait"
+        next_action = (
+            f"反T回补触发：上午已按 {sell_price:.2f} 卖出 {leg_shares} 股，现价已不高于回补上限 {buyback_max:.2f}，可买回同等股数。"
+            if status == "buyback_ready" and sell_price is not None and buyback_max is not None
+            else "已有开放中的反T卖出腿；当前只跟踪回补，不再新增反T卖出。"
+        )
+        execution_steps = [
+            f"第1步：确认券商里上午卖出的 {leg_shares} 股已经成交；这是反T卖出腿，不是普通减仓。",
+            f"第2步：只在价格 {buyback_max:.2f} 元及以下买回 {leg_shares} 股；高于该价不追买。" if buyback_max is not None else "第2步：费用模型未给出回补价，暂停回补。",
+            f"第3步：若按 {buyback_max:.2f} 元回补，预计扣费后净收益约 {cost_estimate['net_profit']:.2f} 元；成交后记录为反T回补。" if buyback_max is not None and cost_estimate else "第3步：先人工复核费用和成交记录。",
+            "第4步：回补成交后刷新系统，持仓会恢复，系统重新计算成本和下一步建议。",
+        ]
+        return {
+            "status": status,
+            "trade_shares": leg_shares,
+            "trade_ratio_pct": None if shares in (None, 0) else round(leg_shares / shares * 100, 2),
+            "intraday_range_pct": None if range_pct is None else round(range_pct, 4),
+            "range_position_pct": None if range_position is None else round(range_position * 100, 2),
+            "sell_zone": [sell_price, sell_price] if sell_price is not None else None,
+            "buyback_max_price": buyback_max,
+            "min_gap_pct": min_gap_pct,
+            "required_gap_pct": required_gap_pct,
+            "estimated_cost_reduction_per_share": round(cost_estimate["net_profit"] / (shares + leg_shares), 4) if cost_estimate and shares + leg_shares > 0 else None,
+            "cost_estimate": cost_estimate,
+            "cost_model_verified": bool(costs.get("verified")),
+            "timeframe_alignment": timeframe.get("alignment"),
+            "failure_as_reduction_acceptable": True,
+            "failure_result": "这是已卖出的反T腿；未回补则持仓继续少100股，不能再把它当作新反T卖出。",
+            "high_position_ratio_warning": False,
+            "main_flow_confirmation": "not_required_for_open_buyback",
+            "price_in_sell_zone": False,
+            "open_reverse_t_leg": {
+                "id": open_leg.get("id"),
+                "sell_price": sell_price,
+                "shares": leg_shares,
+                "occurred_at": open_leg.get("occurred_at"),
+                "fees": open_leg.get("fees"),
+            },
+            "blockers": blockers,
+            "blocker_details": blocker_details,
+            "next_action": next_action,
+            "execution_steps": execution_steps,
+            "instructions": execution_steps,
+        }
 
     if stale:
         add_blocker("stale_quote", "行情时效", "已过期", "行情过期。", "刷新实时行情；行情恢复前不卖出、不回补。")
@@ -403,7 +491,13 @@ def build_action_decision(reverse_t_plan: dict[str, Any], reduction_plan: dict[s
 
     status = reverse_t_plan.get("status")
     shares = reverse_t_plan.get("trade_shares") or 100
-    if status == "candidate":
+    if status == "buyback_ready":
+        headline = f"反T回补触发：买回{shares}股"
+        now = f"只在回补上限{reverse_t_plan.get('buyback_max_price'):.2f}元及以下买回{shares}股；高于该价不追。"
+    elif status == "buyback_wait":
+        headline = f"等待反T回补{shares}股"
+        now = "已有开放中的反T卖出腿，当前只等待回补价，不再新增卖出。"
+    elif status == "candidate":
         headline = f"可进入{shares}股反T人工执行候选"
         now = f"只在卖出观察区出现转弱且主力净流入不再偏强时，卖出{shares}股。"
     else:
@@ -431,8 +525,9 @@ def build_action_decision(reverse_t_plan: dict[str, Any], reduction_plan: dict[s
             f"预计净收益{cost_estimate.get('net_profit', 0):.2f}元。"
         )
     effects.append(reverse_t_plan.get("failure_result") or "未按计划回补会改变原持仓规模。")
+    verdict = "buyback_ready" if status == "buyback_ready" else "manual_candidate" if status == "candidate" else "do_not_execute_now"
     return {
-        "verdict": "manual_candidate" if status == "candidate" else "do_not_execute_now",
+        "verdict": verdict,
         "headline": headline,
         "what_to_do_now": now,
         "reduction_decision": reduction_now,

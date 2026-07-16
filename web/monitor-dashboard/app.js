@@ -582,14 +582,23 @@ function reverseTradePresetControls(item) {
   const plan = item.reverse_t_plan || {};
   const sellZone = plan.sell_zone || [];
   const shares = Number(plan.trade_shares || 0);
-  if (plan.status !== "candidate" || sellZone.length < 2 || !shares) return "";
+  if (!shares) return "";
+  if (["buyback_ready", "buyback_wait"].includes(plan.status)) {
+    const buybackPrice = plan.buyback_max_price == null ? null : Number(plan.buyback_max_price);
+    if (buybackPrice == null) return "";
+    const openLegId = plan.open_reverse_t_leg?.id || "";
+    return `<div class="manual-preset"><div class="manual-preset-title">开放反T回补单</div><div class="manual-preset-actions">
+      <button class="secondary-action" type="button" data-manual-preset data-side="buy" data-price="${escapeHtml(buybackPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="reverse_t_close" data-linked-trade-id="${escapeHtml(openLegId)}" data-note="反T回补：关闭开放反T卖出腿">填入反T回补</button>
+    </div></div>`;
+  }
+  if (plan.status !== "candidate" || sellZone.length < 2) return "";
   const sellPrice = Number(sellZone[0]);
   const buybackPrice = plan.buyback_max_price == null ? null : Number(plan.buyback_max_price);
   const buttons = [
-    `<button class="secondary-action" type="button" data-manual-preset data-side="sell" data-price="${escapeHtml(sellPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-note="反T卖出：按系统候选步骤记录">填入反T卖出</button>`,
+    `<button class="secondary-action" type="button" data-manual-preset data-side="sell" data-price="${escapeHtml(sellPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="reverse_t_open" data-note="反T卖出：按系统候选步骤记录">填入反T卖出</button>`,
   ];
   if (buybackPrice != null) {
-    buttons.push(`<button class="secondary-action" type="button" data-manual-preset data-side="buy" data-price="${escapeHtml(buybackPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-note="反T回补：按系统回补上限记录">填入反T回补</button>`);
+    buttons.push(`<button class="secondary-action" type="button" data-manual-preset data-side="buy" data-price="${escapeHtml(buybackPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="reverse_t_close" data-note="反T回补：按系统回补上限记录">填入反T回补</button>`);
   }
   return `<div class="manual-preset"><div class="manual-preset-title">反T快捷填入</div><div class="manual-preset-actions">${buttons.join("")}</div></div>`;
 }
@@ -608,6 +617,8 @@ function manualTradeSection(item) {
         <label><span>价格</span><input name="price" type="number" step="0.01" min="0.01" value="${escapeHtml(currentPrice)}" required></label>
         <label><span>数量</span><input name="shares" type="number" step="100" min="1" value="${escapeHtml(defaultShares)}" required></label>
         <label><span>备注</span><input name="note" type="text" placeholder="可选"></label>
+        <input name="trade_intent" type="hidden" value="">
+        <input name="linked_trade_id" type="hidden" value="">
       </div>
       <div class="manual-trade-impact">${defaultImpact}</div>
       <button class="primary-action" type="submit">记录成交并刷新建议</button>
@@ -960,6 +971,8 @@ document.querySelector("#detailContent").addEventListener("submit", async event 
     price: Number(form.querySelector('[name="price"]')?.value),
     shares: Number(form.querySelector('[name="shares"]')?.value),
     note: form.querySelector('[name="note"]')?.value || "",
+    trade_intent: form.querySelector('[name="trade_intent"]')?.value || "",
+    linked_trade_id: form.querySelector('[name="linked_trade_id"]')?.value || "",
   };
   updateManualTradeImpact(form);
   const item = state.snapshot?.items.find(entry => entry.code === payload.code);
@@ -995,6 +1008,8 @@ document.querySelector("#detailContent").addEventListener("click", event => {
   form.querySelector('[name="price"]').value = button.dataset.price || "";
   form.querySelector('[name="shares"]').value = button.dataset.shares || "";
   form.querySelector('[name="note"]').value = button.dataset.note || "";
+  form.querySelector('[name="trade_intent"]').value = button.dataset.tradeIntent || "";
+  form.querySelector('[name="linked_trade_id"]').value = button.dataset.linkedTradeId || "";
   updateManualTradeImpact(form);
   const status = form.querySelector(".manual-trade-status");
   status.textContent = "已填入系统建议成交参数；确认已真实成交后再点击记录。";

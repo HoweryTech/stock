@@ -127,6 +127,8 @@ def apply_manual_trade(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "occurred_at": occurred_at,
         "code": code,
         "side": side,
+        "trade_intent": getattr(args, "trade_intent", None) or "",
+        "linked_trade_id": getattr(args, "linked_trade_id", None) or "",
         "price": price,
         "shares": shares,
         "amount": trade_amount,
@@ -151,6 +153,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--total-assets", type=float, default=25480.0)
     parser.add_argument("--occurred-at")
     parser.add_argument("--note")
+    parser.add_argument("--trade-intent", choices=["", "reverse_t_open", "reverse_t_close"], default="")
+    parser.add_argument("--linked-trade-id", default="")
     parser.add_argument("--source", choices=["cli", "dashboard"], default="cli")
     parser.add_argument("--commission-rate", type=float, default=0.0003)
     parser.add_argument("--minimum-commission", type=float, default=5.0)

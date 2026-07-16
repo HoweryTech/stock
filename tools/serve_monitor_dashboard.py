@@ -101,6 +101,8 @@ def manual_trade_args(payload: dict[str, object], total_assets: float | None) ->
         total_assets=float(payload.get("total_assets") or total_assets or 25480.0),
         occurred_at=payload.get("occurred_at") or None,
         note=str(payload.get("note") or ""),
+        trade_intent=str(payload.get("trade_intent") or ""),
+        linked_trade_id=str(payload.get("linked_trade_id") or ""),
         source="dashboard",
         commission_rate=0.0003,
         minimum_commission=5.0,
