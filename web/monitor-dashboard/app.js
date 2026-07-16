@@ -782,7 +782,19 @@ function openDetail(code) {
     planMetrics.push(["费用参数", reversePlan.cost_model_verified ? "已按交割单核验" : "保守假设，尚未核验"]);
     if (reversePlan.high_position_ratio_warning) planMetrics.push(["仓位风险", "单次涉及半仓，高风险"]);
     const blockers = reversePlan.blockers || [];
-    html += detailSection("反T降低成本", `<div class="metric-grid">${planMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p>${escapeHtml(reversePlan.failure_result || "")}</p>${blockers.length ? `<ul class="reason-list">${blockers.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<ol class="reason-list">${reversePlan.instructions.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`}`);
+    const blockerDetails = reversePlan.blocker_details || [];
+    const blockerHtml = blockerDetails.length
+      ? `<div class="blocker-list">${blockerDetails.map(blocker => `
+        <div class="blocker-item">
+          <div><strong>${escapeHtml(blocker.label || blocker.code || "阻断项")}</strong><span>${escapeHtml(blocker.current || "--")}</span></div>
+          <p>${escapeHtml(blocker.reason || "")}</p>
+          <p class="secondary">${escapeHtml(blocker.next_step || "")}</p>
+        </div>`).join("")}</div>`
+      : blockers.length ? `<ul class="reason-list">${blockers.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : "";
+    html += detailSection("反T降低成本", `<div class="metric-grid">${planMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>
+      ${reversePlan.next_action ? `<div class="action-panel action-${reversePlan.status === "candidate" ? "reverse_t_watch" : "hold_no_add"}"><div class="action-panel-title">下一步动作</div><p>${escapeHtml(reversePlan.next_action)}</p></div>` : ""}
+      <p>${escapeHtml(reversePlan.failure_result || "")}</p>
+      ${blockerHtml || `<ol class="reason-list">${reversePlan.instructions.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`}`);
   }
   const reductionPlan = item.reduction_plan;
   if (reductionPlan && !["within_limit", "unavailable"].includes(reductionPlan.status)) {

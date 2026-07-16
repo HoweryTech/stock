@@ -140,6 +140,16 @@ def fee_viable_trade(
     return None
 
 
+def reverse_t_blocker(code: str, label: str, current: str, reason: str, next_step: str) -> dict[str, str]:
+    return {
+        "code": code,
+        "label": label,
+        "current": current,
+        "reason": reason,
+        "next_step": next_step,
+    }
+
+
 def build_reverse_t_plan(
     position: dict[str, Any],
     quote: dict[str, Any],
@@ -168,20 +178,26 @@ def build_reverse_t_plan(
     range_pct = (high - low) / low * 100 if high is not None and low not in (None, 0) else None
     range_position = (price - low) / (high - low) if price is not None and high is not None and low is not None and high > low else None
     blockers: list[str] = []
+    blocker_details: list[dict[str, str]] = []
+    def add_blocker(code: str, label: str, current: str, reason: str, next_step: str) -> None:
+        blockers.append(reason)
+        blocker_details.append(reverse_t_blocker(code, label, current, reason, next_step))
+
     if stale:
-        blockers.append("行情过期。")
+        add_blocker("stale_quote", "行情时效", "已过期", "行情过期。", "刷新实时行情；行情恢复前不卖出、不回补。")
     if available < 100:
-        blockers.append("可用股份不足100股。")
+        add_blocker("available_shares_insufficient", "可用股份", f"{available}股", "可用股份不足100股。", "等可卖股份恢复到至少100股，或不要执行反T。")
     if shares < 200:
-        blockers.append("持仓少于200股，卖出100股后无法保留底仓。")
+        add_blocker("base_position_insufficient", "持仓底仓", f"{shares}股", "持仓少于200股，卖出100股后无法保留底仓。", "反T至少需要卖出后仍保留底仓；当前只允许持有观察或按减仓计划卖出。")
     if change_pct is not None and change_pct <= -9.8:
-        blockers.append("接近或达到跌停，不做反T。")
+        add_blocker("limit_down_or_near", "跌停风险", f"{change_pct:.2f}%", "接近或达到跌停，不做反T。", "等待流动性恢复；跌停附近不做卖出后回补的价差交易。")
     if range_pct is None or range_pct < 1.5:
-        blockers.append("当日振幅不足1.5%，价差空间不够。")
+        current_range = "--" if range_pct is None else f"{range_pct:.2f}%"
+        add_blocker("range_too_small", "当日振幅", current_range, "当日振幅不足1.5%，价差空间不够。", "等待振幅扩大并接近卖出观察区；价差不足时扣费后很难降低成本。")
     if timeframe.get("alignment") == "insufficient":
-        blockers.append("周线或月线历史不足，无法完成多周期验证。")
+        add_blocker("timeframe_insufficient", "多周期验证", "历史不足", "周线或月线历史不足，无法完成多周期验证。", "补齐日线历史并重新计算周/月线；未通过前只观察。")
     if timeframe.get("alignment") == "bearish" and not failure_as_reduction_acceptable:
-        blockers.append("周线和月线均偏弱，且该股票没有计划降仓目标，不宜卖出后再回补。")
+        add_blocker("timeframe_bearish_no_reduction_plan", "多周期趋势", "bearish", "周线和月线均偏弱，且该股票没有计划降仓目标，不宜卖出后再回补。", "若趋势偏弱，应先评估减仓；不把反T作为摊低成本工具。")
 
     main_flow_ratio = as_float(quote.get("main_net_inflow_ratio_pct"))
     strong_main_inflow = main_flow_ratio is not None and main_flow_ratio >= 3.0
@@ -221,8 +237,24 @@ def build_reverse_t_plan(
             cost_estimate = viable["fees"]
             estimated_cost_reduction = round(cost_estimate["net_profit"] / shares, 4) if shares else None
         elif not blockers:
-            blockers.append(f"在允许动用的持仓比例和最大3%价差下，扣除估算费用后净收益不足{costs['minimum_net_profit']:.2f}元。")
+            add_blocker(
+                "fee_not_viable",
+                "费用模型",
+                f"最大价差3%，最低净收益{costs['minimum_net_profit']:.2f}元",
+                f"在允许动用的持仓比例和最大3%价差下，扣除估算费用后净收益不足{costs['minimum_net_profit']:.2f}元。",
+                "不执行反T；除非扩大可交易股数、降低最低净收益门槛，或等待更高卖出区间后重新计算回补上限。",
+            )
             status = "fee_blocked"
+
+    if status == "candidate":
+        next_action = f"可以进入反T人工候选：只在价格进入卖出观察区后转弱时卖出{trade_shares}股，随后只在回补上限及以下买回。"
+    elif status == "watch":
+        next_action = "当前不卖出。等待价格进入卖出观察区、分时转弱且主力净流入不再偏强后，再重新判断。"
+    elif status == "fee_blocked":
+        next_action = "当前不执行反T。费用模型下没有满足最低净收益的回补方案。"
+    else:
+        first = blocker_details[0] if blocker_details else None
+        next_action = f"当前不执行反T。先处理阻断项：{first['label']}，{first['next_step']}" if first else "当前不执行反T，只观察。"
 
     return {
         "status": status,
@@ -247,6 +279,8 @@ def build_reverse_t_plan(
             and sell_zone_low <= price <= sell_zone_high
         ),
         "blockers": blockers,
+        "blocker_details": blocker_details,
+        "next_action": next_action,
         "instructions": [
             f"只在价格进入卖出观察区后转弱时卖出{trade_shares}股，不在快速拉升中抢跑。",
             "卖出后仅在价格降至费用模型给出的回补上限且行情未失效时买回同等股数。",

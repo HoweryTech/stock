@@ -82,6 +82,8 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertGreater(plan["required_gap_pct"], 2.0)
         self.assertGreaterEqual(plan["cost_estimate"]["net_profit"], 5.0)
         self.assertTrue(plan["failure_as_reduction_acceptable"])
+        self.assertEqual(plan["blocker_details"], [])
+        self.assertIn("可以进入反T人工候选", plan["next_action"])
 
     def test_small_position_is_not_suitable_for_reverse_t(self) -> None:
         quote = {"latest_price": 6.8, "open": 6.7, "high": 6.9, "low": 6.6, "change_pct": 1.0}
@@ -95,6 +97,8 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         plan = build_reverse_t_plan(position, quote, stale=False, costs=self.costs, timeframe={"alignment": "mixed"})
         self.assertEqual(plan["status"], "not_suitable")
         self.assertTrue(any("无法保留底仓" in blocker for blocker in plan["blockers"]))
+        self.assertTrue(any(blocker["code"] == "base_position_insufficient" for blocker in plan["blocker_details"]))
+        self.assertIn("当前不执行反T", plan["next_action"])
 
     def test_blocked_reverse_t_still_exposes_fee_aware_reference_range(self) -> None:
         quote = {"latest_price": 13.66, "open": 12.96, "high": 13.68, "low": 12.7, "change_pct": 4.59}
@@ -103,6 +107,25 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertEqual(plan["sell_zone"], [13.66, 13.68])
         self.assertIsNotNone(plan["buyback_max_price"])
         self.assertGreaterEqual(plan["cost_estimate"]["net_profit"], 5.0)
+        self.assertTrue(any(blocker["code"] == "timeframe_insufficient" for blocker in plan["blocker_details"]))
+
+    def test_fee_blocked_reverse_t_explains_missing_buyback(self) -> None:
+        quote = {"latest_price": 6.32, "open": 6.2, "high": 6.36, "low": 6.1, "change_pct": 1.5}
+        expensive_costs = dict(self.costs)
+        expensive_costs["minimum_net_profit"] = 100.0
+        plan = build_reverse_t_plan(
+            self.position,
+            quote,
+            stale=False,
+            costs=expensive_costs,
+            timeframe={"alignment": "mixed"},
+            max_trade_ratio_pct=50.0,
+        )
+
+        self.assertEqual(plan["status"], "fee_blocked")
+        self.assertIsNone(plan["buyback_max_price"])
+        self.assertTrue(any(blocker["code"] == "fee_not_viable" for blocker in plan["blocker_details"]))
+        self.assertIn("费用模型", plan["next_action"])
 
     def test_reduction_plan_rounds_to_board_lots(self) -> None:
         position = {"entry": {"shares": 1000}}
