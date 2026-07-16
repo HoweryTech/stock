@@ -37,6 +37,36 @@ const compactMoney = value => {
 const tone = value => Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "";
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 
+function dataQualityFor(item) {
+  return decisionCardFor(item)?.data_quality || {};
+}
+
+function qualityState(quality) {
+  return quality?.overall_status || "unknown";
+}
+
+function qualityLabel(quality) {
+  return quality?.status_label || {
+    usable: "数据可用",
+    stale: "数据过期",
+    insufficient: "样本不足",
+    missing: "数据缺失",
+    unknown: "质量未知",
+  }[qualityState(quality)] || "质量未知";
+}
+
+function qualitySummary(quality) {
+  const messages = [...(quality?.blockers || []), ...(quality?.warnings || [])];
+  if (messages.length) return messages[0];
+  return qualityState(quality) === "usable" ? "行情、日线和分钟线可用于盘中判断。" : "尚未生成数据质量快照。";
+}
+
+function qualityBadge(item) {
+  const quality = dataQualityFor(item);
+  const status = qualityState(quality);
+  return `<span class="quality-badge quality-${status}">${escapeHtml(qualityLabel(quality))}</span>`;
+}
+
 function adviceFor(item) {
   const card = state.decisionCards.get(item.code);
   return card?.decision?.action_label || automaticDecisionFor(item).headline;
@@ -168,6 +198,8 @@ function renderSummary() {
   const decisionCards = [...state.decisionCards.values()];
   const exitRisk = decisionCards.filter(card => card.state === "exit_risk_review").length;
   const dataPaused = decisionCards.filter(card => ["data_stale", "data_insufficient"].includes(card.state)).length;
+  const qualityStale = decisionCards.filter(card => card.data_quality?.overall_status === "stale").length;
+  const qualityBlocked = decisionCards.filter(card => ["insufficient", "missing"].includes(card.data_quality?.overall_status)).length;
   const positiveT = decisionCards.filter(card => card.state === "positive_t_watch").length;
   const reverseTByCard = decisionCards.filter(card => card.state === "reverse_t_watch").length;
   const maxLag = Math.max(0, ...items.map(item => Number(item.quote.quote_lag_seconds || 0)));
@@ -179,8 +211,9 @@ function renderSummary() {
     ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
     ["浮动盈亏", money(pnl), "按最新快照估算"],
     ["退出风险", `${exitRisk || risk} 只`, `${dataPaused} 只暂停决策`],
+    ["数据质量", `${qualityStale} 过期 / ${qualityBlocked} 阻断`, "先补数据再看建议"],
     ["T观察", `${positiveT} 正T / ${reverseTByCard || reverseT} 反T`, `${priceAlerts} 只价格提醒 · ${forecastAlerts} 只概率预警`],
-    ["最大行情延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
+    ["最大延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
   ];
   document.querySelector("#summaryBand").innerHTML = blocks.map(([label, value, sub]) => `
     <div class="summary-item">
@@ -198,13 +231,14 @@ function tableRow(item) {
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
+  const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<tr data-code="${item.code}" tabindex="0">
     <td><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></td>
     <td class="number"><div>${num(item.quote.latest_price)}</div><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></td>
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
     <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span></td>
-    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${reverseTag}</td>
+    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${dataTag}${reverseTag}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
@@ -217,6 +251,7 @@ function mobileCard(item) {
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
+  const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
     <div class="card-top">
       <div><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></div>
@@ -225,7 +260,7 @@ function mobileCard(item) {
     <div class="card-row"><span>持仓盈亏</span><span class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)} · ${pct(item.position.return_pct)}</span></div>
     <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
-    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${reverseTag}</div>
+    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${dataTag}${reverseTag}</div>
   </article>`;
 }
 
@@ -271,6 +306,16 @@ function openDetail(code) {
   if (decisionCard) {
     const levels = decisionCard.price_levels || {};
     const decision = decisionCard.decision || {};
+    const quality = decisionCard.data_quality || {};
+    const qualityMetrics = [
+      ["总状态", qualityLabel(quality)],
+      ["行情延迟", quality.quote?.lag_seconds == null ? "--" : `${Number(quality.quote.lag_seconds).toFixed(1)}s`],
+      ["日线最新", quality.daily?.latest_trade_date || "--"],
+      ["日线样本", quality.daily?.row_count ?? "--"],
+      ["分钟线最新", quality.minute?.latest_timestamp || "--"],
+      ["分钟线样本", quality.minute?.bar_count ?? "--"],
+    ];
+    const qualityMessages = [...(quality.blockers || []), ...(quality.warnings || [])];
     const cardMetrics = [
       ["状态", decisionCard.state_label],
       ["建议动作", decision.action_label],
@@ -289,6 +334,12 @@ function openDetail(code) {
       <p><strong>${escapeHtml(decision.next_step || "")}</strong></p>
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
+    );
+    html += detailSection(
+      "数据质量",
+      `<p>${qualityBadge(item)} <strong>${escapeHtml(qualitySummary(quality))}</strong></p>
+      <div class="metric-grid">${qualityMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+      ${qualityMessages.length ? `<h4>质量问题</h4><ul class="reason-list">${qualityMessages.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`
     );
   }
   const decision = item.action_decision;
