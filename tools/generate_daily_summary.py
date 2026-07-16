@@ -628,9 +628,11 @@ def summarize_realtime_decision_cards(cards_doc: dict[str, Any] | None) -> dict[
             "exit_risk_count": 0,
             "data_insufficient_count": 0,
             "data_stale_count": 0,
+            "market_wait_count": 0,
             "positive_t_watch_count": 0,
             "reverse_t_watch_count": 0,
             "priority_items": [],
+            "market_wait_items": [],
             "t_watch_items": [],
         }
     cards = cards_doc.get("cards", []) or []
@@ -639,6 +641,7 @@ def summarize_realtime_decision_cards(cards_doc: dict[str, Any] | None) -> dict[
         "exit_risk_review": 1,
         "data_insufficient": 2,
         "risk_reduction_review": 3,
+        "market_wait": 4,
         "positive_t_watch": 4,
         "reverse_t_watch": 5,
         "hold_no_add": 6,
@@ -661,6 +664,7 @@ def summarize_realtime_decision_cards(cards_doc: dict[str, Any] | None) -> dict[
             "stop_loss_price": levels.get("stop_loss_price"),
             "near_stop_block_price": levels.get("near_stop_block_price"),
             "reason": card.get("reason"),
+            "market_session_label": value_at(card, "market_context.market_session_label"),
         }
 
     actionable_states = {"exit_risk_review", "data_insufficient", "risk_reduction_review"}
@@ -674,6 +678,11 @@ def summarize_realtime_decision_cards(cards_doc: dict[str, Any] | None) -> dict[
         for card in sorted(cards, key=lambda item: (state_priority.get(item.get("state"), 99), item.get("code") or ""))
         if card.get("state") in {"positive_t_watch", "reverse_t_watch"}
     ][:5]
+    market_wait_items = [
+        compact(card)
+        for card in sorted(cards, key=lambda item: (item.get("code") or ""))
+        if card.get("state") == "market_wait"
+    ][:5]
     return {
         "available": True,
         "card_count": cards_doc.get("card_count", len(cards)),
@@ -681,9 +690,11 @@ def summarize_realtime_decision_cards(cards_doc: dict[str, Any] | None) -> dict[
         "exit_risk_count": state_counts.get("exit_risk_review", 0),
         "data_insufficient_count": state_counts.get("data_insufficient", 0),
         "data_stale_count": state_counts.get("data_stale", 0),
+        "market_wait_count": state_counts.get("market_wait", 0),
         "positive_t_watch_count": state_counts.get("positive_t_watch", 0),
         "reverse_t_watch_count": state_counts.get("reverse_t_watch", 0),
         "priority_items": priority_items,
+        "market_wait_items": market_wait_items,
         "t_watch_items": t_watch_items,
     }
 
@@ -739,6 +750,8 @@ def derive_operating_actions(summary: dict[str, Any]) -> list[str]:
         actions.append(f"优先处理 {realtime_decision_cards['exit_risk_count']} 只实时退出风险持仓。")
     if realtime_decision_cards["data_insufficient_count"]:
         actions.append(f"补齐 {realtime_decision_cards['data_insufficient_count']} 只实时决策数据不足的持仓。")
+    if realtime_decision_cards["market_wait_count"]:
+        actions.append(f"{realtime_decision_cards['market_wait_count']} 只持仓处于非交易时段等待行情，开盘刷新后再判断。")
     t_watch_count = realtime_decision_cards["positive_t_watch_count"] + realtime_decision_cards["reverse_t_watch_count"]
     if t_watch_count:
         actions.append(f"复核 {t_watch_count} 只实时T观察候选，未生成计划前不执行。")
@@ -1087,6 +1100,7 @@ def render_summary(summary: dict[str, Any]) -> str:
         f"- 退出风险：{realtime_decision_cards['exit_risk_count']}",
         f"- 数据不足：{realtime_decision_cards['data_insufficient_count']}",
         f"- 行情过期：{realtime_decision_cards['data_stale_count']}",
+        f"- 等待交易时段：{realtime_decision_cards['market_wait_count']}",
         f"- 正T观察：{realtime_decision_cards['positive_t_watch_count']}",
         f"- 反T观察：{realtime_decision_cards['reverse_t_watch_count']}",
         "",
@@ -1149,6 +1163,14 @@ def render_summary(summary: dict[str, Any]) -> str:
         for item in realtime_decision_cards["t_watch_items"]:
             lines.append(
                 f"- {item['code']} {item['name']} state={item['state_label']} action={item['action_label']} confidence={item['confidence']} next={item['next_step']}"
+            )
+        lines.append("")
+    if realtime_decision_cards["market_wait_items"]:
+        lines.append("等待交易时段持仓：")
+        for item in realtime_decision_cards["market_wait_items"]:
+            session_text = item.get("market_session_label") or "-"
+            lines.append(
+                f"- {item['code']} {item['name']} state={item['state_label']} session={session_text} next={item['next_step']}"
             )
         lines.append("")
 

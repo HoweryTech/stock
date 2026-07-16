@@ -278,8 +278,8 @@ class GenerateDailySummaryTest(unittest.TestCase):
             write_json(
                 base / "realtime-decision-cards.json",
                 {
-                    "card_count": 3,
-                    "state_counts": {"exit_risk_review": 1, "data_insufficient": 1, "positive_t_watch": 1},
+                    "card_count": 4,
+                    "state_counts": {"exit_risk_review": 1, "data_insufficient": 1, "positive_t_watch": 1, "market_wait": 1},
                     "cards": [
                         {
                             "code": "000932",
@@ -318,6 +318,19 @@ class GenerateDailySummaryTest(unittest.TestCase):
                             },
                             "price_levels": {"current_price": 1.89, "stop_loss_price": 1.78},
                         },
+                        {
+                            "code": "601939",
+                            "name": "建设银行",
+                            "state": "market_wait",
+                            "state_label": "非交易时段，等待行情",
+                            "decision": {
+                                "action_label": "等待交易时段刷新",
+                                "confidence": "high",
+                                "next_step": "等待进入连续交易时段后刷新行情。",
+                            },
+                            "market_context": {"market_session_label": "盘前"},
+                            "price_levels": {"current_price": 10.0, "stop_loss_price": 9.7},
+                        },
                     ],
                 },
             )
@@ -327,14 +340,19 @@ class GenerateDailySummaryTest(unittest.TestCase):
 
         self.assertTrue(summary["realtime_decision_cards"]["available"])
         self.assertEqual(summary["realtime_decision_cards"]["exit_risk_count"], 1)
+        self.assertEqual(summary["realtime_decision_cards"]["market_wait_count"], 1)
         self.assertIn("优先处理 1 只实时退出风险持仓。", summary["operating_actions"])
         self.assertIn("补齐 1 只实时决策数据不足的持仓。", summary["operating_actions"])
+        self.assertIn("1 只持仓处于非交易时段等待行情，开盘刷新后再判断。", summary["operating_actions"])
         self.assertIn("复核 1 只实时T观察候选，未生成计划前不执行。", summary["operating_actions"])
         self.assertIn("## 实时决策卡", content)
+        self.assertIn("- 等待交易时段：1", content)
         self.assertIn("实时优先处理持仓", content)
         self.assertIn("000932 华菱钢铁 state=退出风险优先", content)
         self.assertIn("实时T观察候选", content)
         self.assertIn("002321 华英农业 state=正T观察候选", content)
+        self.assertIn("等待交易时段持仓", content)
+        self.assertIn("601939 建设银行 state=非交易时段，等待行情 session=盘前", content)
 
     def test_daily_summary_shows_trade_execution_missing_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
