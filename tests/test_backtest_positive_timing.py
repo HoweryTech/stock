@@ -83,6 +83,31 @@ class BacktestPositiveTimingTest(unittest.TestCase):
 
         self.assertEqual(trades, [])
 
+    def test_simulate_day_blocks_bearish_higher_timeframe_context(self) -> None:
+        trades = simulate_day(
+            "600000",
+            make_day(),
+            threshold=60,
+            horizon_bars=6,
+            target_pct=1.2,
+            stop_pct=1.0,
+            trade_shares=100,
+            costs=self.costs,
+            adaptive_bounds=False,
+            minimum_net_profit=0.0,
+            technical_context_by_day={
+                "2026-07-16": {
+                    "available": True,
+                    "score": -25,
+                    "label": "bearish",
+                    "signals": ["测试用偏空背景"],
+                    "periods": {},
+                }
+            },
+        )
+
+        self.assertEqual(trades, [])
+
     def test_summarize_threshold(self) -> None:
         summary = summarize_threshold(
             [

@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from tools.build_realtime_decision_cards import build_positive_timing, load_minute_bars
+    from tools.build_realtime_decision_cards import build_positive_timing, build_technical_assessment, load_minute_bars
+    from tools.calc_technical_indicators import aggregate_period, calculate_period_indicators, read_daily_bars
     from tools.check_portfolio_positions import expand_position_paths
     from tools.risk_check import as_float, load_yaml, value_at
 except ModuleNotFoundError:
-    from build_realtime_decision_cards import build_positive_timing, load_minute_bars
+    from build_realtime_decision_cards import build_positive_timing, build_technical_assessment, load_minute_bars
+    from calc_technical_indicators import aggregate_period, calculate_period_indicators, read_daily_bars
     from check_portfolio_positions import expand_position_paths
     from risk_check import as_float, load_yaml, value_at
 
@@ -129,14 +131,49 @@ def group_by_day(bars: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     return {day: sorted(items, key=lambda item: str(item.get("timestamp") or "")) for day, items in sorted(grouped.items())}
 
 
-def score_prefix(code: str, prefix: list[dict[str, Any]]) -> dict[str, Any]:
+def build_technical_context(history: list[dict[str, Any]]) -> dict[str, Any]:
+    if len(history) < 20:
+        return {
+            "available": False,
+            "score": None,
+            "label": "missing",
+            "signals": [f"信号日前历史日线数量 {len(history)} 少于20，不能纳入大周期技术过滤。"],
+            "periods": {},
+        }
+    periods = {
+        "daily": calculate_period_indicators(aggregate_period(history, "daily")),
+        "weekly": calculate_period_indicators(aggregate_period(history, "weekly")),
+        "monthly": calculate_period_indicators(aggregate_period(history, "monthly")),
+    }
+    return build_technical_assessment({"periods": periods})
+
+
+def build_technical_contexts(
+    daily_bars_path: Path | None,
+    codes: set[str],
+    trade_days_by_code: dict[str, set[str]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    if daily_bars_path is None or not daily_bars_path.exists():
+        return {}
+    daily_by_code = read_daily_bars(daily_bars_path, codes)
+    contexts: dict[str, dict[str, dict[str, Any]]] = {}
+    for code, trade_days in trade_days_by_code.items():
+        rows = daily_by_code.get(code) or []
+        contexts[code] = {}
+        for trade_day in sorted(trade_days):
+            history = [row for row in rows if str(row.get("trade_date") or "") < trade_day]
+            contexts[code][trade_day] = build_technical_context(history)
+    return contexts
+
+
+def score_prefix(code: str, prefix: list[dict[str, Any]], technical_context: dict[str, Any] | None = None) -> dict[str, Any]:
     current = as_float(prefix[-1].get("close"))
     intraday = {
         "code": code,
         "quote": {"latest_price": current},
         "capital_flow": {"main_net_inflow_ratio_pct": 0.0},
     }
-    return build_positive_timing(intraday, {"conclusion": "positive_t_candidate"}, prefix)
+    return build_positive_timing(intraday, {"conclusion": "positive_t_candidate"}, prefix, technical_context)
 
 
 def simulate_day(
@@ -157,11 +194,14 @@ def simulate_day(
     range_target_multiplier: float = 1.2,
     range_stop_multiplier: float = 0.8,
     minimum_net_profit: float = 5.0,
+    technical_context_by_day: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     trades: list[dict[str, Any]] = []
+    trade_date = str(day_bars[0].get("timestamp") or "")[:10]
+    technical_context = (technical_context_by_day or {}).get(trade_date)
     index = 19
     while index < len(day_bars) - 1:
-        timing = score_prefix(code, day_bars[: index + 1])
+        timing = score_prefix(code, day_bars[: index + 1], technical_context)
         score = as_float(timing.get("score"))
         if score is None or score < threshold or timing.get("status") != "confirmed":
             index += 1
@@ -227,6 +267,8 @@ def simulate_day(
                 "stop_pct": round4(effective_stop_pct),
                 "range_pct": bounds["range_pct"],
                 "adaptive_bounds": adaptive_bounds,
+                "technical_label": (technical_context or {}).get("label"),
+                "technical_score": round4(as_float((technical_context or {}).get("score"))),
                 "exit_price": round4(float(exit_price)),
                 "shares": trade_shares,
                 **fees,
@@ -298,6 +340,7 @@ def summarize_code(
     range_target_multiplier: float,
     range_stop_multiplier: float,
     minimum_net_profit: float,
+    technical_context_by_day: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     grouped = group_by_day(bars)
     threshold_results = []
@@ -322,6 +365,7 @@ def summarize_code(
                     range_target_multiplier=range_target_multiplier,
                     range_stop_multiplier=range_stop_multiplier,
                     minimum_net_profit=minimum_net_profit,
+                    technical_context_by_day=technical_context_by_day,
                 )
             )
         threshold_results.append(summarize_threshold(trades, threshold))
@@ -332,6 +376,7 @@ def summarize_code(
         "trading_days": len(grouped),
         "start": min(grouped) if grouped else None,
         "end": max(grouped) if grouped else None,
+        "technical_context_days": len(technical_context_by_day or {}),
         "recommended": recommend_threshold(threshold_results, min_triggers=min_triggers),
         "thresholds": threshold_results,
     }
@@ -356,8 +401,10 @@ def build_report(
     range_target_multiplier: float = 1.2,
     range_stop_multiplier: float = 0.8,
     minimum_net_profit: float = 5.0,
+    daily_bars_path: Path | None = None,
 ) -> dict[str, Any]:
     minute_by_code = load_minute_bars(cache_dir)
+    position_meta: list[tuple[Path, str, str, list[dict[str, Any]]]] = []
     items = []
     errors = []
     for path in position_paths:
@@ -368,6 +415,10 @@ def build_report(
         if not bars:
             errors.append({"code": code, "message": f"missing minute cache for {code}"})
             continue
+        position_meta.append((path, code, name, bars))
+    trade_days_by_code = {code: set(group_by_day(bars)) for _, code, _, bars in position_meta}
+    technical_contexts = build_technical_contexts(daily_bars_path, set(trade_days_by_code), trade_days_by_code)
+    for _path, code, name, bars in position_meta:
         items.append(
             summarize_code(
                 code,
@@ -388,13 +439,18 @@ def build_report(
                 range_target_multiplier=range_target_multiplier,
                 range_stop_multiplier=range_stop_multiplier,
                 minimum_net_profit=minimum_net_profit,
+                technical_context_by_day=technical_contexts.get(code),
             )
         )
     recommendations = Counter(item["recommended"]["threshold"] for item in items if item["recommended"]["threshold"] is not None)
     portfolio_threshold = recommendations.most_common(1)[0][0] if recommendations else None
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "source": {"minute_cache_dir": str(cache_dir), "position_count": len(position_paths)},
+        "source": {
+            "minute_cache_dir": str(cache_dir),
+            "daily_bars": str(daily_bars_path) if daily_bars_path else None,
+            "position_count": len(position_paths),
+        },
         "policy": {
             "thresholds": thresholds,
             "horizon_bars": horizon_bars,
@@ -412,6 +468,8 @@ def build_report(
             "trade_shares": trade_shares,
             "min_triggers": min_triggers,
             "fees_included": True,
+            "higher_timeframe_context": bool(technical_contexts),
+            "higher_timeframe_context_rule": "每个盘中信号仅使用信号日前一交易日及以前的日线，重算日/周/月技术指标后过滤正T。",
         },
         "portfolio_recommended_threshold": portfolio_threshold,
         "items": items,
@@ -427,6 +485,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Backtest positive-T timing score thresholds with cached 5-minute bars.")
     parser.add_argument("--positions", nargs="+", required=True)
     parser.add_argument("--cache-dir", default="data/processed/minute-bars")
+    parser.add_argument("--daily-bars", default="data/processed/daily_bars.csv")
+    parser.add_argument("--disable-higher-timeframe-context", action="store_true", help="Do not gate positive-T backtest signals with historical daily/weekly/monthly indicators.")
     parser.add_argument("--thresholds", default="60,65,70")
     parser.add_argument("--horizon-bars", type=int, default=6)
     parser.add_argument("--target-pct", type=float, default=1.2)
@@ -476,6 +536,7 @@ def main() -> int:
         range_target_multiplier=args.range_target_multiplier,
         range_stop_multiplier=args.range_stop_multiplier,
         minimum_net_profit=args.minimum_net_profit,
+        daily_bars_path=None if args.disable_higher_timeframe_context else Path(args.daily_bars),
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
