@@ -32,9 +32,9 @@ STATE_LABELS = {
 ACTION_LABELS = {
     "wait_for_market_session": "等待交易时段刷新",
     "pause_intraday_decision": "暂停实时决策，等待行情刷新",
-    "create_exit_or_risk_review": "生成退出或风险复核计划",
+    "create_exit_or_risk_review": "止损风险优先：不补仓、不做T",
     "complete_data_before_decision": "补齐行情、止损和样本数据",
-    "review_position_reduction": "复核是否降仓",
+    "review_position_reduction": "仓位超限：核算减仓",
     "watch_positive_t_only": "只进入正T人工观察",
     "watch_reverse_t_only": "只进入反T人工观察",
     "hold_without_adding": "持有观察，不补仓",
@@ -442,17 +442,25 @@ def build_blockers(
     return [item for item in blockers if item]
 
 
-def build_next_step(state: str, action_backtest: dict[str, Any] | None) -> str:
+def build_next_step(state: str, action_backtest: dict[str, Any] | None, levels: dict[str, Any] | None = None) -> str:
+    levels = levels or {}
     if state == "data_stale":
         return "先刷新准实时监控快照；行情恢复前不做盘中动作。"
     if state == "market_wait":
         return "等待进入连续交易时段后刷新行情；未刷新前只观察，不做盘中动作。"
     if state == "exit_risk_review":
-        return "优先生成退出或风险复核计划；未确认前禁止补仓和做T。"
+        current = as_float(levels.get("current_price"))
+        stop_loss = as_float(levels.get("stop_loss_price"))
+        near_block = as_float(levels.get("near_stop_block_price"))
+        if current is not None and stop_loss is not None and current <= stop_loss:
+            return f"现价 {current:.2f} 已不高于止损价 {stop_loss:.2f}：优先按止损退出处理；禁止补仓、禁止做T摊低成本。"
+        if current is not None and near_block is not None and current <= near_block:
+            return f"现价 {current:.2f} 已进入做T阻断区 {near_block:.2f} 附近：先做退出/减仓复核，不做T；若跌破止损价立即转止损退出。"
+        return "退出风险优先：本轮不买、不做T；先核对止损价、持仓数量和可卖数量，再决定是否生成止损退出或降风险卖出计划。"
     if state == "data_insufficient":
         return "补齐日线、实时价、止损价或样本后重新生成决策卡。"
     if state == "risk_reduction_review":
-        return "计算降仓目标和最小100股影响，确认后再生成退出/降仓计划。"
+        return "仓位风险优先：先计算卖出100股后的仓位和盈亏影响；若仍超限，再按100股整数倍生成降仓计划。"
     if state == "positive_t_watch":
         return "只进入正T人工观察；先定义买入价、卖出价、失败后是否接受加仓和最大新增仓位。"
     if state == "reverse_t_watch":
@@ -462,6 +470,61 @@ def build_next_step(state: str, action_backtest: dict[str, Any] | None) -> str:
             return "动作矩阵存在弱规则，先复核规则和仓位，不新增交易。"
         return "继续持有观察，不补仓；等待趋势或风险信号改变后复核。"
     return "本轮不买不卖，继续监控关键价位。"
+
+
+def build_action_steps(state: str, levels: dict[str, Any], blockers: list[str], action_backtest: dict[str, Any] | None) -> list[str]:
+    current = as_float(levels.get("current_price"))
+    stop_loss = as_float(levels.get("stop_loss_price"))
+    near_block = as_float(levels.get("near_stop_block_price"))
+    if state == "exit_risk_review":
+        steps = ["立即停止买入、补仓和做T；退出风险优先级高于降低成本。"]
+        if current is not None and stop_loss is not None:
+            if current <= stop_loss:
+                steps.append(f"现价 {current:.2f} 已触及/跌破止损价 {stop_loss:.2f}，按止损退出方向处理，先准备卖出计划。")
+            else:
+                steps.append(f"现价 {current:.2f} 尚未跌破止损价 {stop_loss:.2f}，但已进入风险复核；继续盯住止损触发。")
+        elif stop_loss is None:
+            steps.append("缺少止损价时不能判断卖出触发位，先补齐止损价再决策。")
+        if near_block is not None:
+            steps.append(f"做T阻断参考价为 {near_block:.2f}；现价低于或接近该价时，不允许用做T替代止损处理。")
+        steps.append("交易动作只允许二选一：已触发止损则走止损卖出计划；未触发止损则只观察或做减仓复核。")
+        steps.append("下单前必须人工确认卖出数量、限价/市价方式和是否保留底仓；系统不自动下单。")
+        if blockers:
+            steps.append(f"本轮主要阻断：{blockers[0]}")
+        return steps
+    if state == "risk_reduction_review":
+        return [
+            "不新增买入，不做T扩大风险敞口。",
+            "先按100股整数倍计算降仓后仓位是否回到上限内。",
+            "若卖出100股会过度降仓，则只记录复核结论，不强行交易。",
+            "确认正式仓位上限、可卖数量和预估费用后，再生成降仓卖出计划。",
+        ]
+    if state == "data_insufficient":
+        return [
+            "本轮不下单，因为系统不能验证行情、样本、止损或数据一致性。",
+            "先处理阻断原因：补日线、刷新分钟线缓存、补止损价或复核行情源偏差。",
+            "重新生成实时决策卡后，再判断是否进入观察、止损或做T流程。",
+        ]
+    if state == "positive_t_watch":
+        return [
+            "只允许加入人工观察，不直接买入。",
+            "先写清买入价、卖出价、失败后是否接受加仓，以及新增仓位上限。",
+            "价格、数据质量和止损距离同时满足后，才生成做T计划并人工确认。",
+        ]
+    if state == "reverse_t_watch":
+        return [
+            "只允许加入人工观察，不直接卖出。",
+            "必须确认5分钟回测、费用模型、分时转弱和回补上限。",
+            "未到回补价不追买；可能形成实际减仓，必须提前接受这个结果。",
+        ]
+    if state == "hold_no_add":
+        steps = ["持有观察，不补仓，不做T。", "等待技术面、数据质量或风险信号改善后再重新评估。"]
+        if action_backtest and (action_backtest.get("weak_rule_count") or 0) > 0:
+            steps.append("动作矩阵存在弱规则，先复核规则表现，不新增交易。")
+        return steps
+    if state in {"data_stale", "market_wait"}:
+        return ["等待行情刷新到可用状态；刷新前不做盘中交易动作。"]
+    return ["本轮不买不卖，继续监控关键价格、数据质量和技术指标变化。"]
 
 
 def confidence_for(state: str, evidence: list[str], blockers: list[str]) -> str:
@@ -508,6 +571,7 @@ def build_card(
         technical_assessment,
     )
     blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment)
+    levels = price_levels(portfolio, t_check, intraday)
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
@@ -533,9 +597,10 @@ def build_card(
             "action_label": ACTION_LABELS[action_code],
             "execution_allowed": execution_allowed,
             "confidence": confidence_for(state, evidence, blockers),
-            "next_step": build_next_step(state, action_backtest),
+            "next_step": build_next_step(state, action_backtest, levels),
+            "action_steps": build_action_steps(state, levels, blockers, action_backtest),
         },
-        "price_levels": price_levels(portfolio, t_check, intraday),
+        "price_levels": levels,
         "position": intraday.get("position", {}),
         "market_context": {
             "quote_lag_seconds": value_at(intraday, "quote.quote_lag_seconds"),
@@ -663,6 +728,9 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"- 关键价格：当前 {levels.get('current_price') or '-'}，止损 {levels.get('stop_loss_price') or '-'}，做T阻断价 {levels.get('near_stop_block_price') or '-'}，MA20 {levels.get('ma20') or '-'}",
             ]
         )
+        if decision.get("action_steps"):
+            lines.append("- 操作步骤：")
+            lines.extend(f"  - {item}" for item in decision["action_steps"][:6])
         note = technical_decision_note(card.get("technical_assessment") or {})
         if note:
             lines.append(f"- 技术判断：{note}")

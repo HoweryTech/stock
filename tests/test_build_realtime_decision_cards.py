@@ -98,7 +98,11 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
 
         self.assertEqual(card["state"], "exit_risk_review")
         self.assertEqual(card["decision"]["action"], "create_exit_or_risk_review")
+        self.assertEqual(card["decision"]["action_label"], "止损风险优先：不补仓、不做T")
         self.assertFalse(card["decision"]["execution_allowed"])
+        self.assertIn("不做T", card["decision"]["next_step"])
+        self.assertIn("立即停止买入、补仓和做T", card["decision"]["action_steps"][0])
+        self.assertTrue(any("做T阻断参考价" in step for step in card["decision"]["action_steps"]))
         self.assertIn("距离止损不足1%。", card["blockers"])
 
     def test_positive_t_candidate_is_watch_only(self) -> None:

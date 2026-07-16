@@ -500,11 +500,13 @@ function openDetail(code) {
     ];
     const blockers = decisionCard.blockers || [];
     const evidence = decisionCard.evidence || [];
+    const actionSteps = decision.action_steps || [];
     html += renderTechnicalAssessment(decisionCard.technical_assessment);
     html += detailSection(
       "实时决策卡",
       `<div class="metric-grid">${cardMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
       <p><strong>${escapeHtml(decision.next_step || "")}</strong></p>
+      ${actionSteps.length ? `<h4>操作步骤</h4><ol class="reason-list">${actionSteps.slice(0, 6).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
     );
