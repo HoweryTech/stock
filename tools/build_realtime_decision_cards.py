@@ -44,6 +44,15 @@ ACTION_LABELS = {
 HARD_T_BLOCKERS = {"stop_loss_triggered", "near_stop_loss", "limit_down", "stock_suspended"}
 DATA_BLOCKERS = {"insufficient_daily_bars", "missing_price_or_stop_loss"}
 QUALITY_BLOCKER_STATUSES = {"missing", "insufficient"}
+SUPPLEMENTAL_CAPITAL_POLICY = {
+    "supplemental_capital_allowed": True,
+    "account_cash_required": False,
+    "max_single_add_pct_total_assets": 3.0,
+    "max_stock_position_pct_after_add": 12.0,
+    "max_added_risk_pct_total_assets": 0.35,
+    "min_stop_buffer_pct": 3.0,
+    "min_target_gap_pct": 1.2,
+}
 
 
 def load_json_if_exists(path: Path | None) -> dict[str, Any] | None:
@@ -521,6 +530,128 @@ def money_text(value: float | None) -> str:
     return "-" if value is None else f"{value:.2f} 元"
 
 
+def floor_lot_from_cash(cash: float | None, price: float | None) -> int:
+    if cash is None or price in (None, 0):
+        return 0
+    return max(0, int(cash / price // 100 * 100))
+
+
+def build_capital_plan(
+    state: str,
+    levels: dict[str, Any],
+    position: dict[str, Any],
+    *,
+    total_assets: float | None = None,
+) -> dict[str, Any]:
+    policy = dict(SUPPLEMENTAL_CAPITAL_POLICY)
+    current = as_float(levels.get("current_price"))
+    stop_loss = as_float(levels.get("stop_loss_price"))
+    ma5 = as_float(levels.get("ma5"))
+    recent_low = as_float(levels.get("recent_low"))
+    shares = as_float(position.get("shares"), 0.0) or 0.0
+    market_value = as_float(position.get("market_value"))
+    live_pct = as_float(position.get("live_position_pct"))
+    if live_pct is None and total_assets not in (None, 0):
+        value = market_value if market_value is not None else (current * shares if current is not None else None)
+        live_pct = None if value is None else value / float(total_assets) * 100
+
+    plan: dict[str, Any] = {
+        **policy,
+        "applicable": state == "positive_t_watch",
+        "status": "not_applicable",
+        "status_label": "仅正T观察候选才评估追加资金",
+        "max_additional_capital": None,
+        "suggested_buy_shares": 0,
+        "estimated_buy_amount": None,
+        "post_add_position_pct": None,
+        "added_risk_amount": None,
+        "added_risk_pct_total_assets": None,
+        "buy_zone": None,
+        "target_sell_zone": None,
+        "failure_plan": "未触发正T条件时不追加资金；触发后若跌破止损，新增仓位按止损处理。",
+        "steps": [],
+        "reasons": [],
+    }
+    if state != "positive_t_watch":
+        return plan
+    if total_assets in (None, 0) or current in (None, 0):
+        plan.update(
+            {
+                "status": "blocked",
+                "status_label": "缺少总资产或现价，不能计算追加资金上限",
+                "reasons": ["缺少总资产或现价，不能把追加资金转换为100股整数和风险金额。"],
+            }
+        )
+        return plan
+    max_single_cash = float(total_assets) * policy["max_single_add_pct_total_assets"] / 100
+    current_position_pct = live_pct or 0.0
+    capacity_pct = policy["max_stock_position_pct_after_add"] - current_position_pct
+    position_capacity_cash = max(0.0, float(total_assets) * capacity_pct / 100)
+    max_cash = max(0.0, min(max_single_cash, position_capacity_cash))
+    buy_zone_high = min(value for value in [current, ma5] if value is not None) if ma5 is not None else current
+    stop_buffer_price = stop_loss * (1 + policy["min_stop_buffer_pct"] / 100) if stop_loss is not None else None
+    buy_zone_low = buy_zone_high * (1 - policy["min_target_gap_pct"] / 100)
+    if recent_low is not None:
+        buy_zone_low = max(buy_zone_low, recent_low)
+    if stop_buffer_price is not None:
+        buy_zone_low = max(buy_zone_low, stop_buffer_price)
+    buy_zone_low = min(buy_zone_low, buy_zone_high)
+    suggested_shares = floor_lot_from_cash(max_cash, buy_zone_high)
+    estimated_buy_amount = suggested_shares * buy_zone_high if suggested_shares else None
+    added_risk = None
+    added_risk_pct = None
+    if suggested_shares and stop_loss is not None:
+        added_risk = max(0.0, (buy_zone_high - stop_loss) * suggested_shares)
+        added_risk_pct = added_risk / float(total_assets) * 100
+    max_added_risk = float(total_assets) * policy["max_added_risk_pct_total_assets"] / 100
+    if suggested_shares and added_risk is not None and added_risk > max_added_risk:
+        risk_limited_shares = floor_lot_from_cash(max_added_risk / max((buy_zone_high - stop_loss), 0.01), 1.0) if stop_loss is not None else 0
+        suggested_shares = min(suggested_shares, risk_limited_shares)
+        estimated_buy_amount = suggested_shares * buy_zone_high if suggested_shares else None
+        added_risk = max(0.0, (buy_zone_high - stop_loss) * suggested_shares) if suggested_shares and stop_loss is not None else None
+        added_risk_pct = added_risk / float(total_assets) * 100 if added_risk is not None else None
+    post_add_pct = current_position_pct + ((estimated_buy_amount or 0.0) / float(total_assets) * 100)
+    target_low = max(current, buy_zone_high * (1 + policy["min_target_gap_pct"] / 100))
+    target_high = target_low + 0.02
+    plan.update(
+        {
+            "max_additional_capital": rounded(max_cash),
+            "suggested_buy_shares": int(suggested_shares),
+            "estimated_buy_amount": rounded(estimated_buy_amount),
+            "post_add_position_pct": rounded(post_add_pct),
+            "added_risk_amount": rounded(added_risk),
+            "added_risk_pct_total_assets": rounded(added_risk_pct),
+            "buy_zone": [rounded(buy_zone_low), rounded(buy_zone_high)],
+            "target_sell_zone": [rounded(target_low), rounded(target_high)],
+        }
+    )
+    if max_cash < buy_zone_high * 100:
+        plan.update(
+            {
+                "status": "blocked",
+                "status_label": "追加资金上限不足买入100股",
+                "reasons": [f"本次追加资金上限约 {money_text(max_cash)}，低于买入100股所需金额。"],
+            }
+        )
+        return plan
+    if stop_loss is not None and buy_zone_low <= stop_buffer_price:
+        plan["reasons"].append(f"买入观察下沿必须高于止损价至少 {policy['min_stop_buffer_pct']:.1f}%。")
+    plan.update(
+        {
+            "status": "watch",
+            "status_label": "可用追加资金进入正T观察，不要求账户当前现金已足额在场",
+            "steps": [
+                f"最多只准备追加 {money_text(max_cash)}，不是无限补仓；单次追加不超过总资产 {policy['max_single_add_pct_total_assets']:.1f}%。",
+                f"只在价格回落到 {buy_zone_low:.2f}-{buy_zone_high:.2f} 区间且数据质量仍为高/中可信时，才考虑买入 {int(suggested_shares)} 股。",
+                f"买入后目标不是长期摊低成本，而是在 {target_low:.2f}-{target_high:.2f} 区间优先卖出新增的 {int(suggested_shares)} 股完成正T。",
+                f"若买入后跌破止损价 {money_text(stop_loss)}，新增仓位按止损处理；预计新增风险约 {money_text(added_risk)}。",
+                "如果买入区间没有触发，不追价；如果买入后未到卖出目标，当天收盘前重新评估是否转为普通加仓持有。",
+            ],
+        }
+    )
+    return plan
+
+
 def build_action_steps(
     state: str,
     levels: dict[str, Any],
@@ -530,6 +661,7 @@ def build_action_steps(
     code: str | None = None,
     name: str | None = None,
     position: dict[str, Any] | None = None,
+    capital_plan: dict[str, Any] | None = None,
 ) -> list[str]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
@@ -597,11 +729,16 @@ def build_action_steps(
         steps.append("修复后重新运行完整日内决策链，只有状态离开数据不足后才继续判断交易动作。")
         return steps
     if state == "positive_t_watch":
-        return [
+        steps = [
             "只允许加入人工观察，不直接买入。",
-            "先写清买入价、卖出价、失败后是否接受加仓，以及新增仓位上限。",
-            "价格、数据质量和止损距离同时满足后，才生成做T计划并人工确认。",
+            "可追加资金不等于可以无上限补仓；必须先满足买入区间、止损距离、数据质量和技术面条件。",
         ]
+        if capital_plan and capital_plan.get("status") == "watch":
+            steps.extend(capital_plan.get("steps", []))
+        else:
+            steps.append((capital_plan or {}).get("status_label") or "先写清买入价、卖出价、失败后是否接受加仓，以及新增仓位上限。")
+        steps.append("价格、数据质量和止损距离同时满足后，才生成做T计划并人工确认。")
+        return steps
     if state == "reverse_t_watch":
         return [
             "只允许加入人工观察，不直接卖出。",
@@ -648,6 +785,7 @@ def build_card(
     reverse_forecast: dict[str, Any] | None,
     data_quality: dict[str, Any] | None,
     technical_indicators: dict[str, Any] | None = None,
+    total_assets: float | None = None,
 ) -> dict[str, Any]:
     technical_assessment = build_technical_assessment(technical_indicators)
     state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment)
@@ -663,6 +801,7 @@ def build_card(
     )
     blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment)
     levels = price_levels(portfolio, t_check, intraday, reverse_forecast)
+    capital_plan = build_capital_plan(state, levels, intraday.get("position", {}), total_assets=total_assets)
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
@@ -697,9 +836,11 @@ def build_card(
                 code=str(intraday.get("code") or ""),
                 name=str(intraday.get("name") or ""),
                 position=intraday.get("position", {}),
+                capital_plan=capital_plan,
             ),
         },
         "price_levels": levels,
+        "capital_plan": capital_plan,
         "position": intraday.get("position", {}),
         "market_context": {
             "quote_lag_seconds": value_at(intraday, "quote.quote_lag_seconds"),
@@ -751,6 +892,7 @@ def build_report(
     reverse_forecast_by_code = index_simple_items(reverse_t_forecast)
     data_quality_by_code = index_simple_items(data_quality)
     technical_by_code = index_technical_indicators(technical_indicators)
+    total_assets = as_float(intraday_snapshot.get("total_assets"))
     cards = [
         build_card(
             item,
@@ -761,6 +903,7 @@ def build_report(
             reverse_forecast_by_code.get(str(item.get("code"))),
             data_quality_by_code.get(str(item.get("code"))),
             technical_by_code.get(str(item.get("code"))),
+            total_assets,
         )
         for item in intraday_snapshot.get("items", [])
     ]
@@ -827,6 +970,13 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"- 关键价格：当前 {levels.get('current_price') or '-'}，止损 {levels.get('stop_loss_price') or '-'}，做T阻断价 {levels.get('near_stop_block_price') or '-'}，MA20 {levels.get('ma20') or '-'}",
             ]
         )
+        capital_plan = card.get("capital_plan") or {}
+        if capital_plan.get("applicable"):
+            lines.append(
+                f"- 追加资金计划：{capital_plan.get('status_label')}；"
+                f"上限 {capital_plan.get('max_additional_capital') or '-'}，"
+                f"建议 {capital_plan.get('suggested_buy_shares') or 0} 股"
+            )
         if decision.get("action_steps"):
             lines.append("- 操作步骤：")
             lines.extend(f"  - {item}" for item in decision["action_steps"][:6])

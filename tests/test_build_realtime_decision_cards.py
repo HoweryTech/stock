@@ -114,8 +114,12 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIn("距离止损不足1%。", card["blockers"])
 
     def test_positive_t_candidate_is_watch_only(self) -> None:
+        item = intraday_item()
+        item["position"]["shares"] = 100
+        item["position"]["market_value"] = 1000.0
+        item["position"]["live_position_pct"] = 2.0
         report = build_report(
-            {"items": [intraday_item()]},
+            {"total_assets": 50000.0, "items": [item]},
             portfolio_result(),
             t_result(conclusion="positive_t_candidate"),
             {"items": [{"path": "positions/POS-600000.yaml", "stock": {"code": "600000"}, "weak_rule_count": 0}]},
@@ -130,6 +134,12 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["decision"]["action"], "watch_positive_t_only")
         self.assertFalse(card["decision"]["execution_allowed"])
         self.assertEqual(card["price_levels"]["near_stop_block_price"], 9.596)
+        self.assertEqual(card["capital_plan"]["status"], "watch")
+        self.assertFalse(card["capital_plan"]["account_cash_required"])
+        self.assertEqual(card["capital_plan"]["max_single_add_pct_total_assets"], 3.0)
+        self.assertEqual(card["capital_plan"]["suggested_buy_shares"], 100)
+        self.assertTrue(any("最多只准备追加" in step for step in card["decision"]["action_steps"]))
+        self.assertTrue(any("买入后目标不是长期摊低成本" in step for step in card["decision"]["action_steps"]))
 
     def test_reverse_t_price_levels_prefer_indicator_forecast_zone(self) -> None:
         report = build_report(
@@ -325,6 +335,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["decision"]["action"], "hold_without_adding")
         self.assertEqual(card["technical_assessment"]["label"], "bearish")
         self.assertLess(card["technical_assessment"]["score"], -18)
+        self.assertFalse(card["capital_plan"]["applicable"])
         self.assertEqual(card["market_context"]["technical_label"], "bearish")
         self.assertIn("多周期技术指标偏弱，本轮禁止补仓和做T。", card["blockers"])
         self.assertIn("[技术指标] bearish", "\n".join(card["evidence"]))

@@ -447,6 +447,35 @@ function renderTechnicalAssessment(assessment) {
   );
 }
 
+function renderCapitalPlan(plan) {
+  if (!plan?.applicable) return "";
+  const buyZone = plan.buy_zone ? `${num(plan.buy_zone[0])}–${num(plan.buy_zone[1])}元` : "--";
+  const targetZone = plan.target_sell_zone ? `${num(plan.target_sell_zone[0])}–${num(plan.target_sell_zone[1])}元` : "--";
+  const metrics = [
+    ["状态", plan.status_label || "--"],
+    ["账户现金要求", plan.account_cash_required ? "要求已足额" : "可临时补充"],
+    ["单次追加上限", money(plan.max_additional_capital)],
+    ["占总资产上限", pct(plan.max_single_add_pct_total_assets)],
+    ["单票加仓后上限", pct(plan.max_stock_position_pct_after_add)],
+    ["建议买入数量", `${plan.suggested_buy_shares || 0}股`],
+    ["预计买入金额", money(plan.estimated_buy_amount)],
+    ["加仓后单票仓位", pct(plan.post_add_position_pct)],
+    ["新增风险金额", money(plan.added_risk_amount)],
+    ["新增风险占总资产", pct(plan.added_risk_pct_total_assets)],
+    ["买入观察区", buyZone],
+    ["卖出目标区", targetZone],
+  ];
+  const steps = plan.steps || [];
+  const reasons = plan.reasons || [];
+  return detailSection(
+    "追加资金正T计划",
+    `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    <p>${escapeHtml(plan.failure_plan || "")}</p>
+    ${steps.length ? `<h4>操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
+    ${reasons.length ? `<h4>限制原因</h4><ul class="reason-list">${reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`
+  );
+}
+
 function estimateManualTradeFees(side, price, shares) {
   const amount = price * shares;
   const commission = Math.max(amount * 0.0003, 5);
@@ -610,6 +639,7 @@ function openDetail(code) {
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
     );
+    html += renderCapitalPlan(decisionCard.capital_plan);
     html += detailSection(
       "数据质量",
       `<p>${qualityBadge(item)} <strong>${escapeHtml(qualitySummary(quality))}</strong></p>
