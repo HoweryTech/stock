@@ -370,6 +370,22 @@ def handle_stop_loss_confirmation(payload: dict[str, object]) -> dict[str, objec
         return {"ok": True, "update": update, "refresh": [], "refresh_error": str(exc)}
 
 
+def handle_intraday_trigger_refresh(payload: dict[str, object]) -> dict[str, object]:
+    snapshot = load_json(API_FILES["/api/snapshot"]) or {}
+    total_assets_raw = snapshot.get("total_assets")
+    total_assets = float(total_assets_raw) if isinstance(total_assets_raw, (int, float)) else 25480.0
+    triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
+    refresh = run_refresh_commands(total_assets)
+    refreshed_report = load_json(API_FILES["/api/decision-cards"]) or {}
+    return {
+        "ok": True,
+        "trigger_count": len(triggers),
+        "refresh": refresh,
+        "generated_at": refreshed_report.get("generated_at"),
+        "state_counts": refreshed_report.get("state_counts") or {},
+    }
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def send_json(self, data: object, status: int = 200) -> None:
         payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -440,6 +456,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         handlers = {
             "/api/manual-trade": handle_manual_trade,
             "/api/stop-loss-confirmation": handle_stop_loss_confirmation,
+            "/api/intraday-trigger-refresh": handle_intraday_trigger_refresh,
         }
         handler = handlers.get(parsed.path)
         if handler is None:

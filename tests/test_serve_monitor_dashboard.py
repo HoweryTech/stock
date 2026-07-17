@@ -9,6 +9,7 @@ from tools.serve_monitor_dashboard import (
     dashboard_position_paths,
     handle_manual_trade,
     handle_stop_loss_confirmation,
+    handle_intraday_trigger_refresh,
     load_json,
     market_wait_refresh_status,
     monitor_status,
@@ -268,6 +269,25 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         called_args = apply_confirmation.call_args.args[0]
         self.assertTrue(all(Path(path).is_absolute() for path in called_args.positions))
         refresh.assert_called_once_with(25480.0)
+
+    def test_handle_intraday_trigger_refresh_runs_pipeline_with_snapshot_assets(self) -> None:
+        def fake_load_json(path):
+            if path == API_FILES["/api/snapshot"]:
+                return {"total_assets": 30000.0}
+            if path == API_FILES["/api/decision-cards"]:
+                return {"generated_at": "2026-07-17T10:00:00+08:00", "state_counts": {"exit_risk_review": 1}}
+            return None
+
+        with (
+            patch("tools.serve_monitor_dashboard.load_json", side_effect=fake_load_json),
+            patch("tools.serve_monitor_dashboard.run_refresh_commands", return_value=[{"returncode": 0}]) as refresh,
+        ):
+            result = handle_intraday_trigger_refresh({"triggers": [{"code": "000723", "active_path": "path1_break"}]})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["trigger_count"], 1)
+        self.assertEqual(result["state_counts"], {"exit_risk_review": 1})
+        refresh.assert_called_once_with(30000.0)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ const state = {
   manualTradeDrafts: new Map(),
   pendingManualTrade: null,
   pendingStopLossConfirmation: null,
+  triggerRefreshInFlight: false,
+  lastTriggerRefreshKey: "",
 };
 
 const labels = {
@@ -338,6 +340,47 @@ function liveIntradayTriggerAlerts() {
 
 function liveTriggerAlertForCode(code) {
   return liveIntradayTriggerAlerts().find(alert => alert.code === code && alert.active_path) || null;
+}
+
+function triggerRefreshKey(alerts) {
+  return alerts
+    .map(alert => `${alert.code || ""}:${alert.active_path || ""}`)
+    .sort()
+    .join("|");
+}
+
+async function maybeRefreshTriggeredDecisionChain() {
+  const actionable = liveIntradayTriggerAlerts().filter(alert => alert.severity === "action" && alert.active_path);
+  if (!actionable.length || state.triggerRefreshInFlight) return;
+  const key = triggerRefreshKey(actionable);
+  if (!key || key === state.lastTriggerRefreshKey) return;
+  state.triggerRefreshInFlight = true;
+  state.lastTriggerRefreshKey = key;
+  document.querySelector("#monitorStatus").textContent = "触发路径已出现，正在刷新决策链...";
+  try {
+    const response = await fetch("/api/intraday-trigger-refresh", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        snapshot_generated_at: state.snapshot?.generated_at || "",
+        decision_generated_at: state.decisionReport?.generated_at || "",
+        triggers: actionable.map(alert => ({
+          code: alert.code,
+          name: alert.name,
+          active_path: alert.active_path,
+          current_price: alert.current_price,
+          title: alert.title,
+        })),
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    await loadData();
+  } catch (error) {
+    document.querySelector("#monitorStatus").textContent = `触发后刷新失败：${error.message}`;
+  } finally {
+    state.triggerRefreshInFlight = false;
+  }
 }
 
 function technicalUnlockAlertFor(item) {
@@ -2746,6 +2789,7 @@ async function loadData() {
     renderPositions();
     renderEvents();
     if (state.selectedCode && state.snapshot?.generated_at !== state.detailRenderedAt) markDetailDirty();
+    void maybeRefreshTriggeredDecisionChain();
   } catch (error) {
     document.querySelector("#monitorStatus").textContent = "数据连接失败";
     document.querySelector("#statusDot").className = "status-dot offline";
