@@ -993,11 +993,18 @@ function renderDynamicStopLossSection(decisionCard) {
     ["20日均线", money(levels.ma20)],
     ["近期低点", money(levels.recent_low)],
   ];
+  const current = Number(levels.current_price);
+  const reviewNear = confirmed
+    ? false
+    : Number.isFinite(current) && Number.isFinite(selectedPrice) && current <= selectedPrice * 1.03;
+  const title = confirmed || reviewNear ? "动态止损复核" : "风控参考价";
   const message = confirmed
     ? "该止损价已确认；触发后会进入退出风险优先流程。"
-    : "未人工确认前，动态复核价只用于提醒你重新评估风险，不会自动变成卖出指令。";
+    : reviewNear
+      ? "现价接近未确认的动态复核价；只做人工复核，不会自动变成卖出指令。"
+      : "这是未确认的风控参考价；未接近复核区间前，不放入可操作步骤表。";
   return detailSection(
-    "动态止损复核",
+    title,
     `<div class="stop-loss-summary">
       <span>当前复核结论</span>
       <strong>${escapeHtml(message)}</strong>
@@ -1006,7 +1013,8 @@ function renderDynamicStopLossSection(decisionCard) {
     ${metricGrid(metrics)}
     <h4>候选价来源</h4>
     <div class="stop-candidate-list">${candidateRows}</div>`,
-    "dynamic-stop-loss"
+    "dynamic-stop-loss",
+    !confirmed && !reviewNear ? {collapsed: true, summary: "未确认，仅作风险参考"} : {}
   );
 }
 

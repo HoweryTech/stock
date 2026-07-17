@@ -2234,19 +2234,20 @@ def build_price_action_table(
         review_warning_price = review_price * 1.03 if review_price is not None else None
         review_near = current is not None and review_warning_price is not None and current <= review_warning_price
         dynamic_source = levels.get("dynamic_stop_loss_source") or "draft_or_confirmed"
-        rows.append(
-            action_table_row(
-                "止损复核",
-                f"动态复核价 {review_price:.2f} 未确认" if review_price is not None else "止损参考价未确认",
-                f"{review_price:.2f} 元" if review_price is not None else "-",
-                "人工复核，不直接卖出",
-                status="watch",
-                status_label="接近复核" if review_near else "未确认",
-                shares=None,
-                note=f"该价格按{dynamic_source}动态估算；未人工确认前不能作为硬退出触发。",
-                priority=46 if review_near else 18,
+        if review_near:
+            rows.append(
+                action_table_row(
+                    "止损复核",
+                    f"动态复核价 {review_price:.2f} 未确认" if review_price is not None else "止损参考价未确认",
+                    f"{review_price:.2f} 元" if review_price is not None else "-",
+                    "人工复核，不直接卖出",
+                    status="watch",
+                    status_label="接近复核",
+                    shares=None,
+                    note=f"该价格按{dynamic_source}动态估算；未人工确认前不能作为硬退出触发。",
+                    priority=46,
+                )
             )
-        )
 
     if near_block is not None:
         blocked_now = current is not None and current <= near_block
