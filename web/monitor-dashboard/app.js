@@ -615,7 +615,8 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
     ["最紧急", primary.action ? `${primary.action} · ${primary.status_label || primary.status || "--"} · ${primary.price || "--"}` : "--"],
   ];
   const readingOrder = [
-    ["先看结论", "decision-card"],
+    ["先看执行分层", "execution-layers"],
+    ["再看结论", "decision-card"],
     ["再看价格动作表", "price-action-table"],
     ["需要成交才看手工更新", "manual-trade"],
     ["想知道为什么再看技术/数据", "technical-assessment"],
@@ -665,6 +666,52 @@ function renderStickyActionBar(item, decisionCard, automaticDecision) {
     </div>
     <div class="sticky-action-controls">${presetButton || fallbackActions}</div>
   </div>`;
+}
+
+function groupedExecutionRows(table) {
+  const rows = table?.rows || [];
+  return {
+    ready: rows.filter(row => row.status === "ready"),
+    watch: rows.filter(row => row.status === "watch" || row.status === "reference"),
+    blocked: rows.filter(row => row.status === "blocked"),
+  };
+}
+
+function renderExecutionLayerRows(rows, item) {
+  if (!rows.length) return `<p class="secondary">当前没有对应动作。</p>`;
+  return rows.map(row => {
+    const preset = priceActionPresetButton(row, item);
+    return `<div class="execution-row execution-row-${escapeHtml(row.status || "unknown")}">
+      <div>
+        <strong>${escapeHtml(row.action || "--")}</strong>
+        <p>${escapeHtml(row.trigger || row.note || "--")}</p>
+      </div>
+      <dl><dt>价格</dt><dd>${escapeHtml(row.price || "--")}</dd></dl>
+      <dl><dt>数量</dt><dd>${row.shares ? `${escapeHtml(row.shares)}股` : "--"}</dd></dl>
+      <dl><dt>状态</dt><dd>${escapeHtml(row.status_label || row.status || "--")}</dd></dl>
+      <div class="execution-row-action">${preset || `<button class="secondary-action" type="button" data-detail-target="price-action-table">看明细</button>`}</div>
+      ${row.note ? `<p class="execution-note">${escapeHtml(row.note)}</p>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function renderExecutionLayers(item, decisionCard) {
+  const groups = groupedExecutionRows(decisionCard?.price_action_table);
+  const layerDefs = [
+    ["现在可做", "ready", "满足触发条件后，仍需确认券商真实成交，再写入系统。"],
+    ["到价再做", "watch", "价格或条件还未到位，只观察触发线，不提前下单。"],
+    ["禁止做", "blocked", "当前规则明确阻断，先看原因，不做补仓或做T动作。"],
+  ];
+  return detailSection(
+    "执行分层",
+    `<div class="execution-layers">${layerDefs.map(([label, key, hint]) => `
+      <div class="execution-layer execution-layer-${key}">
+        <div class="execution-layer-title"><strong>${label}</strong><span>${groups[key].length}项</span></div>
+        <p class="secondary">${hint}</p>
+        ${renderExecutionLayerRows(groups[key], item)}
+      </div>`).join("")}</div>`,
+    "execution-layers"
+  );
 }
 
 function renderConsistencyChecks(quality) {
@@ -1572,6 +1619,7 @@ function openDetail(code, options = {}) {
   let html = detailRefreshNotice();
   if (decisionCard) {
     html += renderStickyActionBar(item, decisionCard, automaticDecision);
+    html += renderExecutionLayers(item, decisionCard);
     html += renderDecisionBrief(item, decisionCard, automaticDecision);
   }
   html += detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status");
