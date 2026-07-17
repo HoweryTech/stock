@@ -20,6 +20,8 @@ const state = {
   triggerRefreshInFlight: false,
   lastTriggerRefreshKey: "",
   lastTriggerRefresh: null,
+  lastUrgentNotificationKey: "",
+  originalTitle: document.title,
 };
 
 const labels = {
@@ -351,6 +353,10 @@ function triggerRefreshKey(alerts) {
     .join("|");
 }
 
+function actionableTriggerAlerts() {
+  return liveIntradayTriggerAlerts().filter(alert => alert.severity === "action" && alert.active_path);
+}
+
 function triggerRefreshSummary(alerts) {
   return alerts
     .map(alert => `${alert.name || alert.code || "--"} ${alert.active_path || "--"}`)
@@ -358,7 +364,7 @@ function triggerRefreshSummary(alerts) {
 }
 
 async function maybeRefreshTriggeredDecisionChain() {
-  const actionable = liveIntradayTriggerAlerts().filter(alert => alert.severity === "action" && alert.active_path);
+  const actionable = actionableTriggerAlerts();
   if (!actionable.length || state.triggerRefreshInFlight) return;
   const key = triggerRefreshKey(actionable);
   if (!key || key === state.lastTriggerRefreshKey) return;
@@ -417,6 +423,50 @@ async function maybeRefreshTriggeredDecisionChain() {
   } finally {
     state.triggerRefreshInFlight = false;
   }
+}
+
+function notifyUrgentTriggers(alerts) {
+  const key = triggerRefreshKey(alerts);
+  if (!key || key === state.lastUrgentNotificationKey) return;
+  state.lastUrgentNotificationKey = key;
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const first = alerts[0];
+  try {
+    new Notification("持仓盘中触发提醒", {
+      body: `${first.name || first.code || "--"}：${first.title || first.action_label || "路径已触发"}`,
+      tag: key,
+      renotify: true,
+    });
+  } catch (_) {
+    // Browser notification can fail in restricted contexts; the in-page banner remains the source of truth.
+  }
+}
+
+function renderUrgentTriggerAlert() {
+  const container = document.querySelector("#urgentTriggerAlert");
+  const alerts = actionableTriggerAlerts();
+  if (!alerts.length) {
+    container.hidden = true;
+    container.innerHTML = "";
+    document.title = state.originalTitle;
+    return;
+  }
+  notifyUrgentTriggers(alerts);
+  document.title = `(${alerts.length}) 盘中触发 - ${state.originalTitle}`;
+  const first = alerts[0];
+  const notifyButton = "Notification" in window && Notification.permission === "default"
+    ? `<button class="secondary-action" type="button" data-enable-notifications>启用桌面通知</button>`
+    : "";
+  container.hidden = false;
+  container.innerHTML = `
+    <div>
+      <strong>${escapeHtml(alerts.length === 1 ? `${first.name || first.code}：${first.title}` : `${alerts.length} 条盘中路径已触发`)}</strong>
+      <span>${escapeHtml(alerts.map(alert => `${alert.name || alert.code || "--"} ${alert.active_path || ""}`).join("；"))}</span>
+    </div>
+    <div class="urgent-actions">
+      <button class="primary-action" type="button" data-urgent-open="${escapeHtml(first.code || "")}" data-urgent-target="${escapeHtml(triggerAlertTarget(first))}">查看触发计划</button>
+      ${notifyButton}
+    </div>`;
 }
 
 function technicalUnlockAlertFor(item) {
@@ -2845,6 +2895,7 @@ async function loadData() {
       state.flowHistory.set(sample.code, list);
     });
     updateHeader(status);
+    renderUrgentTriggerAlert();
     renderRefreshAlert();
     renderSummary();
     renderPriorityQueue();
@@ -2883,6 +2934,19 @@ document.querySelector("#refreshAlert").addEventListener("click", event => {
   navigator.clipboard?.writeText(button.dataset.command || "");
   button.textContent = "已复制";
   setTimeout(() => { button.textContent = "复制"; }, 1200);
+});
+document.querySelector("#urgentTriggerAlert").addEventListener("click", async event => {
+  const openButton = event.target.closest("[data-urgent-open]");
+  if (openButton) {
+    openDetail(openButton.dataset.urgentOpen, { target: openButton.dataset.urgentTarget });
+    return;
+  }
+  const notifyButton = event.target.closest("[data-enable-notifications]");
+  if (notifyButton && "Notification" in window) {
+    const permission = await Notification.requestPermission();
+    notifyButton.textContent = permission === "granted" ? "桌面通知已启用" : "通知未启用";
+    renderUrgentTriggerAlert();
+  }
 });
 document.querySelector("#priorityQueue").addEventListener("click", event => {
   const item = event.target.closest("[data-queue-code]");

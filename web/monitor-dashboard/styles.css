@@ -72,6 +72,23 @@ button { cursor: pointer; }
 
 main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 
+.urgent-trigger-alert {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  min-height: 60px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid #ef8f86;
+  border-left: 5px solid var(--red);
+  border-radius: 6px;
+  background: #fff3f1;
+}
+.urgent-trigger-alert strong { display: block; margin-bottom: 4px; color: var(--red); font-size: 16px; }
+.urgent-trigger-alert span { color: var(--muted); font-size: 12px; }
+.urgent-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+
 .refresh-alert {
   display: flex;
   justify-content: space-between;
