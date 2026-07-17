@@ -852,6 +852,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["decision"]["action"], "wait_for_market_session")
         self.assertEqual(card["market_context"]["market_session_phase"], "pre_market")
         self.assertFalse(card["market_context"]["live_quote_required"])
+        self.assertEqual(card["decision_mode"]["mode"], "observe_only")
+        self.assertEqual(card["decision_mode"]["label"], "只观察")
         self.assertIn("[交易时段] 盘前", "\n".join(card["evidence"]))
 
     def test_data_quality_insufficient_blocks_decision(self) -> None:
@@ -898,6 +900,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["market_context"]["data_quality_status"], "insufficient")
         self.assertEqual(card["market_context"]["data_trust_level"], "low")
         self.assertEqual(card["market_context"]["source_consistency_status"], "conflict")
+        self.assertEqual(card["decision_mode"]["mode"], "blocked")
+        self.assertEqual(card["decision_mode"]["label"], "禁止决策")
+        self.assertIn("日线数量 8 少于 20", card["decision_mode"]["reason"])
         self.assertIn("[数据一致性] conflict · 阈值 1.0%", card["evidence"])
         self.assertIn("[数据源冲突] 东方财富现价与分钟线最新收盘价差 2.00%。", card["evidence"])
 
@@ -935,6 +940,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertNotEqual(card["state"], "data_insufficient")
         self.assertEqual(card["market_context"]["data_quality_status"], "limited_history")
         self.assertEqual(card["market_context"]["data_trust_level"], "medium")
+        self.assertEqual(card["decision_mode"]["mode"], "tradable")
+        self.assertEqual(card["decision_mode"]["label"], "可人工确认")
         self.assertIn("[数据质量] 新股样本有限 · 中可信", card["evidence"])
 
     def test_bearish_technical_indicators_block_t_watch(self) -> None:

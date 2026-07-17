@@ -197,6 +197,16 @@ function qualityBadge(item) {
   return `<span class="quality-badge quality-${status}">${escapeHtml(qualityLabel(quality))}</span><span class="trust-badge trust-${trustLevel(quality)}">${escapeHtml(trustLabel(quality))}</span>`;
 }
 
+function decisionModeFor(item) {
+  return decisionCardFor(item)?.decision_mode || {mode: "observe_only", label: "只观察", reason: "尚未生成实时决策卡。"};
+}
+
+function decisionModeTag(item) {
+  const mode = decisionModeFor(item);
+  const modeClass = mode.mode || "observe_only";
+  return `<div class="advice-tag decision-mode-tag decision-mode-${escapeHtml(modeClass)}">盘中可信度：${escapeHtml(mode.label || mode.mode || "--")}</div>`;
+}
+
 function adviceFor(item) {
   const card = state.decisionCards.get(item.code);
   return card?.decision?.action_label || automaticDecisionFor(item).headline;
@@ -464,6 +474,7 @@ function renderDecisionSummary(item) {
   const conclusion = card ? uniqueTradeConclusion(item, card, automaticDecision) : automaticDecision.action || adviceFor(item);
   return `<div class="advice-summary">
     <div class="advice-primary advice-unique"><span>唯一结论</span><strong>${escapeHtml(conclusion)}</strong></div>
+    ${decisionModeTag(item)}
     ${stopLossDistanceTag(card)}
   </div>`;
 }
@@ -702,6 +713,7 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
     ["队列", queueItem?.category_label || "未排序"],
     ["状态", decisionCard?.state_label || displayStateLabelFor(item)],
     ["动作等级", actionTierFor(item).label],
+    ["盘中可信度", decisionCard?.decision_mode?.label || "--"],
     ["执行许可", decision.execution_allowed ? "允许人工确认" : "禁止直接执行"],
   ];
   const readingOrder = [
@@ -2249,7 +2261,9 @@ function openDetail(code, options = {}) {
   html += detailSection("持仓与行情", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status", {collapsed: true, summary: "现价、成本、仓位和均线"});
   if (decisionCard) {
     const quality = decisionCard.data_quality || {};
+    const decisionMode = decisionCard.decision_mode || {};
     const qualityMetrics = [
+      ["盘中可信度", decisionMode.label || "--"],
       ["总状态", qualityLabel(quality)],
       ["可信等级", trustLabel(quality)],
       ["源一致性", consistencyLabel(quality)],
@@ -2261,7 +2275,7 @@ function openDetail(code, options = {}) {
       ["分钟线最新", quality.minute?.latest_timestamp || "--"],
       ["分钟线样本", quality.minute?.bar_count ?? "--"],
     ];
-    const qualityMessages = [...(quality.data_trust?.reasons || []), ...(quality.blockers || []), ...(quality.warnings || [])];
+    const qualityMessages = [decisionMode.reason, decisionMode.next_step, ...(quality.data_trust?.reasons || []), ...(quality.blockers || []), ...(quality.warnings || [])].filter(Boolean);
     const consistency = quality.source_consistency || {};
     const consistencyMetrics = [
       ["一致性状态", consistencyLabel(quality)],

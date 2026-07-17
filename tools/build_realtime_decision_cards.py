@@ -264,6 +264,61 @@ def off_session_quote_wait(data_quality: dict[str, Any] | None) -> bool:
     return bool(session and not session.get("live_quote_required") and value_at(data_quality or {}, "quote.status") == "stale")
 
 
+def build_decision_mode(data_quality: dict[str, Any] | None) -> dict[str, Any]:
+    if not data_quality:
+        return {
+            "mode": "observe_only",
+            "label": "只观察",
+            "reason": "未生成数据质量快照，不能支撑盘中交易判断。",
+            "next_step": "先刷新完整日内决策链，再看是否进入人工确认。",
+            "tradable": False,
+        }
+    session = market_session(data_quality)
+    trust = data_quality.get("data_trust") or {}
+    reasons = list(trust.get("reasons") or []) + list(data_quality.get("blockers") or [])
+    consistency = data_quality.get("source_consistency") or {}
+    if session and session.get("live_quote_required") is False:
+        return {
+            "mode": "observe_only",
+            "label": "只观察",
+            "reason": session.get("message") or "当前不在连续盘中执行窗口，行情只用于观察。",
+            "next_step": "等进入交易时段后刷新完整日内决策链。",
+            "tradable": False,
+        }
+    if data_quality_status(data_quality) in QUALITY_BLOCKER_STATUSES or data_trust_level(data_quality) == "low":
+        return {
+            "mode": "blocked",
+            "label": "禁止决策",
+            "reason": reasons[0] if reasons else "数据可信度不足，不能验证盘中建议。",
+            "next_step": "先修复行情、日线、分钟线或价格一致性问题，再重新生成决策卡。",
+            "tradable": False,
+        }
+    if consistency.get("status") == "conflict":
+        issues = consistency.get("issues") or []
+        return {
+            "mode": "blocked",
+            "label": "禁止决策",
+            "reason": issues[0] if issues else "行情源价格存在冲突。",
+            "next_step": "先刷新分钟线和日线缓存，确认东方财富现价与本地缓存一致。",
+            "tradable": False,
+        }
+    if trust.get("intraday_decision_allowed"):
+        return {
+            "mode": "tradable",
+            "label": "可人工确认",
+            "reason": "行情、数据质量和交易时段允许进入盘中人工确认。",
+            "next_step": "仍只按可操作步骤表执行，真实成交后再写入系统。",
+            "tradable": True,
+        }
+    return {
+        "mode": "observe_only",
+        "label": "只观察",
+        "reason": reasons[0] if reasons else "当前数据只能支撑观察，不能支撑盘中交易动作。",
+        "next_step": "等待数据质量提升或重新刷新后再评估。",
+        "tradable": False,
+    }
+
+
 def decision_priority(state: str) -> int:
     return {
         "exit_risk_review": 90,
@@ -2787,6 +2842,7 @@ def build_card(
     technical_assessment = build_technical_assessment(technical_indicators)
     technical_operation = build_technical_operation(technical_assessment)
     technical_operation["post_unlock_checklist"] = technical_post_unlock_checklist(technical_operation)
+    decision_mode = build_decision_mode(data_quality)
     positive_timing = build_positive_timing(intraday, t_check, minute_bars, technical_assessment, technical_operation)
     t_performance_gate = build_t_performance_gate(intraday)
     execution_quality_gate = build_execution_quality_gate(intraday)
@@ -2899,6 +2955,7 @@ def build_card(
         "positive_timing": positive_timing,
         "post_unlock_review_summary": post_unlock_review_summary,
         "manual_execution_plan": manual_execution_plan,
+        "decision_mode": decision_mode,
         "position": intraday.get("position", {}),
         "market_context": {
             "quote_lag_seconds": value_at(intraday, "quote.quote_lag_seconds"),
@@ -2926,6 +2983,8 @@ def build_card(
             "execution_quality_status": execution_quality_gate.get("status"),
             "execution_quality_average_score": execution_quality_gate.get("average_score"),
             "execution_quality_review_count": execution_quality_gate.get("review_count"),
+            "decision_mode": decision_mode.get("mode"),
+            "decision_mode_label": decision_mode.get("label"),
         },
         "technical_assessment": technical_assessment,
         "data_quality": data_quality or {},
