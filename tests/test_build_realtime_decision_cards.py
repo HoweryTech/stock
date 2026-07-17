@@ -665,8 +665,13 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("未给出可执行回补上限" in evidence for evidence in card["evidence"]))
 
     def test_stale_reverse_t_forecast_does_not_use_intraday_zone(self) -> None:
+        item = intraday_item(reverse_status="watch")
+        item["reverse_t_plan"]["current_reference_zone"] = [10.0, 10.02]
+        item["reverse_t_plan"]["current_reference_buyback_max_price"] = 9.82
+        item["reverse_t_plan"]["current_reference_reason"] = "锚定现价10.00生成。"
+        item["reverse_t_plan"]["current_reference_required_gap_pct"] = 1.8
         report = build_report(
-            {"items": [intraday_item(reverse_status="watch")]},
+            {"items": [item]},
             portfolio_result(),
             t_result(),
             None,
@@ -693,6 +698,10 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIsNone(levels["reverse_t_buyback_max_price"])
         self.assertEqual(levels["reverse_t_intraday_reference_zone"], [10.2, 10.3])
         self.assertEqual(levels["reverse_t_intraday_reference_buyback_max_price"], 10.0)
+        self.assertEqual(levels["reverse_t_current_reference_zone"], [10.0, 10.02])
+        self.assertEqual(levels["reverse_t_current_reference_buyback_max_price"], 9.82)
+        self.assertEqual(levels["reverse_t_current_reference_required_gap_pct"], 1.8)
+        self.assertIn("锚定现价", levels["reverse_t_current_reference_reason"])
         self.assertEqual(levels["reverse_t_zone_source"], "forecast_stale")
         self.assertTrue(levels["reverse_t_forecast_stale"])
         self.assertNotIn("反T卖出", actions)

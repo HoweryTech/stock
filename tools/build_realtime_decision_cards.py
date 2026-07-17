@@ -1485,6 +1485,8 @@ def price_levels(
     forecast_stale = bool(forecast_date and decision_date and forecast_date != decision_date)
     intraday_sell_zone = value_at(intraday, "reverse_t_plan.sell_zone")
     intraday_buyback = as_float(value_at(intraday, "reverse_t_plan.buyback_max_price"))
+    current_reference_zone = value_at(intraday, "reverse_t_plan.current_reference_zone")
+    current_reference_buyback = as_float(value_at(intraday, "reverse_t_plan.current_reference_buyback_max_price"))
     has_forecast = reverse_forecast is not None and not forecast_stale
     sell_zone = forecast_sell_zone if has_forecast else None
     buyback = forecast_buyback if has_forecast else None
@@ -1514,6 +1516,12 @@ def price_levels(
         "reverse_t_buyback_max_price": rounded(buyback),
         "reverse_t_intraday_reference_zone": intraday_sell_zone,
         "reverse_t_intraday_reference_buyback_max_price": rounded(intraday_buyback),
+        "reverse_t_current_reference_zone": current_reference_zone,
+        "reverse_t_current_reference_buyback_max_price": rounded(current_reference_buyback),
+        "reverse_t_current_reference_status": value_at(intraday, "reverse_t_plan.current_reference_status"),
+        "reverse_t_current_reference_source": value_at(intraday, "reverse_t_plan.current_reference_source"),
+        "reverse_t_current_reference_reason": value_at(intraday, "reverse_t_plan.current_reference_reason"),
+        "reverse_t_current_reference_required_gap_pct": rounded(as_float(value_at(intraday, "reverse_t_plan.current_reference_required_gap_pct"))),
         "reverse_t_zone_source": zone_source,
         "reverse_t_forecast_as_of": forecast_as_of,
         "reverse_t_forecast_stale": forecast_stale,

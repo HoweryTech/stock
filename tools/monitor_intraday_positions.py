@@ -463,6 +463,61 @@ def reverse_t_blocker(code: str, label: str, current: str, reason: str, next_ste
     }
 
 
+def current_reverse_t_reference_zone(
+    *,
+    price: float | None,
+    open_price: float | None,
+    high: float | None,
+    low: float | None,
+    max_trade_shares: int,
+    costs: dict[str, float],
+    min_gap_pct: float,
+) -> dict[str, Any]:
+    if price is None or high is None or low is None or high <= low:
+        return {"zone": None, "buyback_max_price": None, "status": "unavailable", "reason": "缺少现价或日内高低点，不能生成当前行情参考区。"}
+    range_pct = (high - low) / low * 100 if low else None
+    range_position = (price - low) / (high - low)
+    if open_price is not None and price < open_price:
+        return {
+            "zone": None,
+            "buyback_max_price": None,
+            "status": "below_open",
+            "reason": "现价低于开盘价，当前价位不适合作为反T卖出参考锚点。",
+        }
+    if range_pct is not None and range_pct < 1.0:
+        return {
+            "zone": None,
+            "buyback_max_price": None,
+            "status": "range_too_small",
+            "reason": f"当日振幅仅{range_pct:.2f}%，当前行情价差空间不足。",
+        }
+    if range_position < 0.55:
+        return {
+            "zone": None,
+            "buyback_max_price": None,
+            "status": "not_high_enough",
+            "reason": f"现价只处于日内区间约{range_position * 100:.1f}%位置，尚未到适合反T卖出观察的偏高区域。",
+        }
+
+    width = dynamic_price_zone_width(price)
+    zone_low = max(round(price - width, 2), round(open_price if open_price is not None else low, 2))
+    zone_high = min(round(price + width, 2), round(high, 2))
+    if zone_high < zone_low:
+        zone_high = zone_low
+    viable = fee_viable_trade(zone_low, max_trade_shares, costs, min_gap_pct=min_gap_pct) if max_trade_shares >= 100 else None
+    return {
+        "zone": [zone_low, zone_high],
+        "buyback_max_price": viable["buyback_max_price"] if viable else None,
+        "required_gap_pct": viable["required_gap_pct"] if viable else None,
+        "cost_estimate": viable["fees"] if viable else None,
+        "status": "reference",
+        "source": "current_intraday_momentum",
+        "range_position_pct": round(range_position * 100, 2),
+        "range_pct": None if range_pct is None else round(range_pct, 4),
+        "reason": f"锚定现价{price:.2f}，结合开盘价、日内高低点和当前位置生成；仅作观察参考，不代表可执行反T。",
+    }
+
+
 def build_reverse_t_execution_steps(
     *,
     status: str,
@@ -626,6 +681,15 @@ def build_reverse_t_plan(
     estimated_cost_reduction = None
     cost_estimate = None
     required_gap_pct = None
+    current_reference = current_reverse_t_reference_zone(
+        price=price,
+        open_price=open_price,
+        high=high,
+        low=low,
+        max_trade_shares=max_trade_shares,
+        costs=costs,
+        min_gap_pct=min_gap_pct,
+    )
     if high is not None:
         sell_zone_high = round(high, 2)
         sell_zone_width = dynamic_price_zone_width(high)
@@ -676,6 +740,13 @@ def build_reverse_t_plan(
         "range_position_pct": None if range_position is None else round(range_position * 100, 2),
         "sell_zone": [sell_zone_low, sell_zone_high] if sell_zone_low is not None else None,
         "buyback_max_price": buyback_max,
+        "current_reference_zone": current_reference.get("zone"),
+        "current_reference_buyback_max_price": current_reference.get("buyback_max_price"),
+        "current_reference_required_gap_pct": current_reference.get("required_gap_pct"),
+        "current_reference_status": current_reference.get("status"),
+        "current_reference_source": current_reference.get("source"),
+        "current_reference_reason": current_reference.get("reason"),
+        "current_reference_cost_estimate": current_reference.get("cost_estimate"),
         "min_gap_pct": min_gap_pct,
         "required_gap_pct": required_gap_pct,
         "estimated_cost_reduction_per_share": estimated_cost_reduction,

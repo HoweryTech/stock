@@ -917,10 +917,12 @@ function renderReverseTForecastSection(forecast, decisionCard) {
   const levels = decisionCard?.price_levels || {};
   const currentZone = levels.reverse_t_sell_zone ? `${num(levels.reverse_t_sell_zone[0])}–${num(levels.reverse_t_sell_zone[1])}元` : "--";
   const intradayReferenceZone = levels.reverse_t_intraday_reference_zone ? `${num(levels.reverse_t_intraday_reference_zone[0])}–${num(levels.reverse_t_intraday_reference_zone[1])}元` : "--";
+  const currentReferenceZone = levels.reverse_t_current_reference_zone ? `${num(levels.reverse_t_current_reference_zone[0])}–${num(levels.reverse_t_current_reference_zone[1])}元` : "--";
   const oldZone = forecast.predicted_sell_zone ? `${num(forecast.predicted_sell_zone[0])}–${num(forecast.predicted_sell_zone[1])}元` : "--";
   const metrics = stale
     ? [
       ["当日有效建议区间", currentZone],
+      ["当前行情参考区", currentReferenceZone],
       ["盘中高点参考区", intradayReferenceZone],
       ["当前回补参考", money(levels.reverse_t_buyback_max_price)],
       ["旧预测时间", forecast.as_of || "--"],
@@ -1184,8 +1186,11 @@ function renderReverseTPlanSection(item, decisionCard, technicalOperation) {
   const hasEffectiveForecast = levels.reverse_t_zone_source === "forecast" && Array.isArray(levels.reverse_t_sell_zone);
   const suggestedZone = hasEffectiveForecast ? levels.reverse_t_sell_zone : null;
   const referenceZone = levels.reverse_t_intraday_reference_zone || reversePlan.sell_zone;
+  const currentReferenceZone = levels.reverse_t_current_reference_zone || reversePlan.current_reference_zone;
   const suggestedBuyback = hasEffectiveForecast ? levels.reverse_t_buyback_max_price : null;
   const referenceBuyback = levels.reverse_t_intraday_reference_buyback_max_price ?? reversePlan.buyback_max_price;
+  const currentReferenceBuyback = levels.reverse_t_current_reference_buyback_max_price ?? reversePlan.current_reference_buyback_max_price;
+  const currentReferenceReason = levels.reverse_t_current_reference_reason || reversePlan.current_reference_reason;
   const executableHeadline = hasEffectiveForecast
     ? "有当日有效建议区间；仍需价格、技术和门禁同时通过。"
     : "暂不执行反T；当前没有当日有效的指标预测区间。";
@@ -1198,6 +1203,9 @@ function renderReverseTPlanSection(item, decisionCard, technicalOperation) {
     ["试做数量", `${reversePlan.trade_shares || 100}股`],
   ];
   const referenceMetrics = [
+    ["当前行情参考区", zoneText(currentReferenceZone)],
+    ["当前参考回补上限", money(currentReferenceBuyback)],
+    ["当前参考所需价差", pct(levels.reverse_t_current_reference_required_gap_pct ?? reversePlan.current_reference_required_gap_pct)],
     ["盘中高点参考区", zoneText(referenceZone)],
     ["参考回补上限", money(referenceBuyback)],
     ["实际所需价差", pct(reversePlan.required_gap_pct)],
@@ -1238,7 +1246,8 @@ function renderReverseTPlanSection(item, decisionCard, technicalOperation) {
       <div class="reverse-plan-block reverse-plan-block-reference">
         <h4>参考审计</h4>
         ${metricGrid(referenceMetrics)}
-        <p class="secondary">盘中高点参考区只用于复盘和观察，不等同于系统建议卖出区间。</p>
+        ${currentReferenceReason ? `<p>${escapeHtml(currentReferenceReason)}</p>` : ""}
+        <p class="secondary">当前行情参考区和盘中高点参考区只用于复盘和观察，不等同于系统建议卖出区间。</p>
       </div>
       <div class="reverse-plan-block reverse-plan-block-gate">
         <h4>门禁阻断</h4>
