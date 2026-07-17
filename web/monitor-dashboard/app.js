@@ -8,6 +8,7 @@ const state = {
   refreshCheck: null,
   events: [],
   triggerRefreshEvents: [],
+  triggerReviewQueue: [],
   flowHistory: new Map(),
   filter: "all",
   search: "",
@@ -2891,10 +2892,29 @@ function renderEvents() {
   const technicalAlerts = state.decisionReport?.technical_unlock_alerts || [];
   const reviewAlerts = state.decisionReport?.post_unlock_review_alerts || [];
   const triggerHistory = state.triggerRefreshEvents || [];
-  if (!state.events.length && !triggerHistory.length && !triggerAlerts.length && !technicalAlerts.length && !reviewAlerts.length) {
+  const triggerQueue = state.triggerReviewQueue || [];
+  if (!state.events.length && !triggerQueue.length && !triggerHistory.length && !triggerAlerts.length && !technicalAlerts.length && !reviewAlerts.length) {
     container.innerHTML = '<div class="empty-state">暂无状态变化事件</div>';
     return;
   }
+  const triggerQueueHtml = triggerQueue.map(item => {
+    const statusClass = item.status === "action_required" ? "action" : item.status === "review_required" ? "watch" : "observe";
+    const details = [
+      item.confirmation_window_seconds ? `确认窗口 ${item.confirmation_window_seconds}s` : "",
+      item.confirmed_price == null ? "" : `确认价 ${money(item.confirmed_price)}`,
+      item.after_shares ? `${item.after_shares}股` : "",
+      item.after_price || "",
+    ].filter(Boolean);
+    return `<article class="event-item event-trigger-queue event-clickable" tabindex="0" data-event-code="${escapeHtml(item.code || "")}" data-event-target="${escapeHtml(item.target || "decision-card")}">
+      <div class="event-time">${escapeHtml(item.event_generated_at || item.decision_generated_at || "")}</div>
+      <div class="event-title">${escapeHtml(item.code || "")} ${escapeHtml(item.name || "")} · ${escapeHtml(item.title || "触发后复核")}</div>
+      <div class="event-action event-action-${escapeHtml(statusClass)}">${escapeHtml(item.status_label || "--")} · ${escapeHtml(item.action_label || "--")}</div>
+      <p>${escapeHtml(item.after_label || "查看刷新后的执行计划和阻断原因。")}</p>
+      <div class="event-changes">
+        ${details.map(detail => `<span class="event-tag">${escapeHtml(detail)}</span>`).join("")}
+      </div>
+    </article>`;
+  }).join("");
   const triggerHtml = triggerAlerts.map(alert => {
     const triggerTags = (alert.triggers || []).map(trigger => trigger.condition || trigger.label).filter(Boolean);
     const currentText = alert.current_price == null ? "" : `现价 ${money(alert.current_price)}`;
@@ -2971,7 +2991,7 @@ function renderEvents() {
     const tags = Object.entries(event.signature || {}).map(([code, info]) => `<span class="event-tag">${code} · ${labels[info.state] || info.state}${info.reverse_t_price_alert ? " · 反T价格提醒" : ""}</span>`).join("");
     return `<article class="event-item"><div class="event-time">${escapeHtml(event.generated_at)}</div><div class="event-changes">${tags}</div></article>`;
   }).join("");
-  container.innerHTML = triggerHtml + triggerHistoryHtml + reviewHtml + alertHtml + monitorHtml;
+  container.innerHTML = triggerQueueHtml + triggerHtml + triggerHistoryHtml + reviewHtml + alertHtml + monitorHtml;
 }
 
 function updateHeader(status) {
@@ -2999,7 +3019,7 @@ async function loadData() {
         return fallback;
       }
     };
-    const [snapshot, research, backtests, forecasts, decisionCards, refreshCheck, status, events, triggerRefreshEvents, flowHistory] = await Promise.all([
+    const [snapshot, research, backtests, forecasts, decisionCards, refreshCheck, status, events, triggerRefreshEvents, triggerReviewQueue, flowHistory] = await Promise.all([
       fetchJson("/api/snapshot", null, true),
       fetchJson("/api/research", { items: [] }),
       fetchJson("/api/reverse-t-backtest", { items: [] }),
@@ -3009,6 +3029,7 @@ async function loadData() {
       fetchJson("/api/status", { running: false }),
       fetchJson("/api/events?limit=20", { events: [] }),
       fetchJson("/api/intraday-trigger-refresh-events?limit=20", { events: [] }),
+      fetchJson("/api/intraday-trigger-review-queue?limit=20", { items: [] }),
       fetchJson("/api/flow-history?limit=30", { samples: [] }),
     ]);
     state.snapshot = snapshot;
@@ -3023,6 +3044,7 @@ async function loadData() {
     state.refreshCheck = refreshCheck;
     state.events = events.events || [];
     state.triggerRefreshEvents = triggerRefreshEvents.events || [];
+    state.triggerReviewQueue = triggerReviewQueue.items || [];
     state.flowHistory = new Map();
     (flowHistory.samples || []).forEach(sample => {
       if (!sample.code) return;

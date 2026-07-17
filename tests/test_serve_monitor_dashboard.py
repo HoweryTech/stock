@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from tools.serve_monitor_dashboard import (
     API_FILES,
+    build_trigger_review_queue,
     build_trigger_refresh_diffs,
     build_post_trade_tracking,
     dashboard_position_paths,
@@ -43,6 +44,62 @@ class ServeMonitorDashboardTest(unittest.TestCase):
 
         with patch("tools.serve_monitor_dashboard.TRIGGER_REFRESH_EVENT_FILE", FakePath()):
             self.assertEqual([item["id"] for item in recent_trigger_refresh_events(2)], [3, 2])
+
+    def test_build_trigger_review_queue_dedupes_and_classifies_actions(self) -> None:
+        events = [
+            {
+                "generated_at": "2026-07-17T10:01:00+08:00",
+                "decision_generated_at": "2026-07-17T10:01:01+08:00",
+                "trigger_action_snapshots": [
+                    {
+                        "code": "000723",
+                        "name": "美锦能源",
+                        "active_path": "path1_break",
+                        "title": "路径1已触发",
+                        "current_price": 3.31,
+                        "confirmation": {"window_seconds": 30, "confirmed_price": 3.31},
+                        "after": {
+                            "available": True,
+                            "label": "止损减仓；可执行；500股；3.31 元",
+                            "plan_type": "risk_reduce",
+                            "primary_status": "ready",
+                            "shares": 500,
+                            "price": "3.31 元",
+                        },
+                    },
+                    {
+                        "code": "601939",
+                        "name": "建设银行",
+                        "active_path": "path3_recover",
+                        "title": "路径3已触发",
+                        "current_price": 9.88,
+                        "confirmation": {"window_seconds": 60, "confirmed_price": 9.88},
+                        "after": {"available": True, "label": "风险降级观察", "primary_status": "watch"},
+                    },
+                ],
+            },
+            {
+                "generated_at": "2026-07-17T09:59:00+08:00",
+                "trigger_action_snapshots": [
+                    {
+                        "code": "000723",
+                        "name": "美锦能源",
+                        "active_path": "path1_break",
+                        "title": "旧路径1触发",
+                        "after": {"available": True, "label": "旧结论", "primary_status": "ready"},
+                    }
+                ],
+            },
+        ]
+
+        queue = build_trigger_review_queue(events)
+
+        self.assertEqual([item["code"] for item in queue], ["000723", "601939"])
+        self.assertEqual(queue[0]["status"], "action_required")
+        self.assertEqual(queue[0]["target"], "manual-execution-plan")
+        self.assertEqual(queue[0]["after_shares"], 500)
+        self.assertEqual(queue[1]["status"], "watch_only")
+        self.assertEqual(queue[1]["action_label"], "只观察，不交易")
 
     def test_recent_flow_history_reads_archives_and_latest(self) -> None:
         class FakeArchiveDir:

@@ -819,6 +819,8 @@ th:nth-child(8) { width: 100px; }
 .event-item:last-child { border-bottom: 0; }
 .event-trigger { border-left: 4px solid var(--amber); background: #fffaf0; }
 .event-trigger:has(.event-action-action) { border-left-color: var(--green); background: #f4fbf7; }
+.event-trigger-queue { border-left: 4px solid var(--blue); background: #f4f8ff; }
+.event-trigger-queue:has(.event-action-action) { border-left-color: var(--red); background: var(--red-bg); }
 .event-trigger-history { border-left: 4px solid #8b9bb4; background: #f8fafc; }
 .event-technical { background: #fbfcfd; }
 .event-review { background: #fffdf7; }
@@ -830,6 +832,7 @@ th:nth-child(8) { width: 100px; }
 .event-action { display: inline-flex; min-height: 22px; align-items: center; margin-bottom: 6px; padding: 2px 7px; border-radius: 4px; color: var(--amber); background: var(--amber-bg); font-size: 12px; font-weight: 700; }
 .event-action-action { color: var(--green); background: var(--green-bg); }
 .event-action-watch { color: var(--amber); background: var(--amber-bg); }
+.event-action-observe { color: var(--muted); background: #eef1f4; }
 .event-changes { display: flex; flex-wrap: wrap; gap: 6px; }
 .event-tag { padding: 3px 7px; border-radius: 3px; background: #eef1f4; font-size: 12px; }
 .event-checklist { margin: 8px 0 0; padding-left: 18px; line-height: 1.55; color: var(--muted); }

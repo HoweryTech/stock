@@ -109,6 +109,89 @@ def recent_trigger_refresh_events(limit: int) -> list[dict[str, object]]:
     return list(reversed(events))
 
 
+def classify_trigger_review_item(snapshot: dict[str, Any]) -> dict[str, str]:
+    after = snapshot.get("after") if isinstance(snapshot.get("after"), dict) else {}
+    active_path = str(snapshot.get("active_path") or "")
+    primary_status = str(after.get("primary_status") or "")
+    plan_type = str(after.get("plan_type") or "")
+    trade_intent = str(after.get("manual_plan_trade_intent") or "")
+    if active_path == "path3_recover":
+        return {
+            "status": "watch_only",
+            "status_label": "风险降级观察",
+            "action_label": "只观察，不交易",
+            "target": "manual-execution-plan",
+            "priority": 2,
+        }
+    if primary_status == "ready" or plan_type in {"risk_reduce", "hard_exit"} or trade_intent in {"risk_exit_reduce", "risk_exit_full"}:
+        return {
+            "status": "action_required",
+            "status_label": "需要处理",
+            "action_label": "查看执行计划",
+            "target": "manual-execution-plan",
+            "priority": 0,
+        }
+    if after.get("available"):
+        return {
+            "status": "review_required",
+            "status_label": "需要复核",
+            "action_label": "查看复核结果",
+            "target": "decision-card",
+            "priority": 1,
+        }
+    return {
+        "status": "watch_only",
+        "status_label": "只观察",
+        "action_label": "查看历史",
+        "target": "decision-card",
+        "priority": 2,
+    }
+
+
+def build_trigger_review_queue(events: list[dict[str, object]], *, limit: int = 20) -> list[dict[str, Any]]:
+    queue: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for event in events:
+        snapshots = event.get("trigger_action_snapshots") if isinstance(event.get("trigger_action_snapshots"), list) else []
+        for snapshot in snapshots:
+            if not isinstance(snapshot, dict):
+                continue
+            code = str(snapshot.get("code") or "")
+            active_path = str(snapshot.get("active_path") or "")
+            if not code:
+                continue
+            dedupe_key = f"{code}:{active_path}"
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            classification = classify_trigger_review_item(snapshot)
+            after = snapshot.get("after") if isinstance(snapshot.get("after"), dict) else {}
+            confirmation = snapshot.get("confirmation") if isinstance(snapshot.get("confirmation"), dict) else {}
+            queue.append(
+                {
+                    "code": code,
+                    "name": snapshot.get("name"),
+                    "active_path": active_path,
+                    "title": snapshot.get("title"),
+                    "event_generated_at": event.get("generated_at"),
+                    "decision_generated_at": event.get("decision_generated_at"),
+                    "current_price": snapshot.get("current_price"),
+                    "confirmed_price": confirmation.get("confirmed_price") or snapshot.get("current_price"),
+                    "confirmation_window_seconds": confirmation.get("window_seconds"),
+                    "after_label": after.get("label"),
+                    "after_state_label": after.get("state_label"),
+                    "after_plan_type": after.get("plan_type"),
+                    "after_plan_status": after.get("plan_status"),
+                    "after_primary_status": after.get("primary_status"),
+                    "after_shares": after.get("shares"),
+                    "after_price": after.get("price"),
+                    **classification,
+                }
+            )
+    queue.sort(key=lambda item: int(item.get("priority", 9)))
+    return queue[:limit]
+
+
 def recent_flow_history(limit: int) -> dict[str, object]:
     if FLOW_HISTORY_FILE.exists():
         lines = FLOW_HISTORY_FILE.read_text(encoding="utf-8").splitlines()[-limit:]
@@ -597,6 +680,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except ValueError:
                 limit = 20
             self.send_json({"events": recent_trigger_refresh_events(limit)})
+            return
+        if parsed.path == "/api/intraday-trigger-review-queue":
+            query = parse_qs(parsed.query)
+            try:
+                limit = min(100, max(1, int(query.get("limit", [20])[0])))
+            except ValueError:
+                limit = 20
+            events = recent_trigger_refresh_events(100)
+            self.send_json({"items": build_trigger_review_queue(events, limit=limit)})
             return
         if parsed.path == "/api/flow-history":
             query = parse_qs(parsed.query)
