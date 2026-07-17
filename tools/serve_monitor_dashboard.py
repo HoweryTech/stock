@@ -186,19 +186,31 @@ def stop_loss_confirmation_args(payload: dict[str, object]) -> Namespace:
     )
 
 
+def append_optional_file_arg(command: list[str], option: str, relative_path: str) -> None:
+    path = ROOT / relative_path
+    if path.exists():
+        command.extend([option, relative_path])
+
+
 def run_refresh_commands(total_assets: float) -> list[dict[str, object]]:
+    pipeline_command = [
+        ".venv/bin/python",
+        "tools/run_intraday_decision_pipeline.py",
+        "--positions",
+        "positions/POS-EASTMONEY-*.yaml",
+        "--daily-bars",
+        "data/processed/daily_bars.csv",
+        "--total-assets",
+        str(total_assets),
+    ]
+    append_optional_file_arg(pipeline_command, "--minute-cache-dir", "data/processed/minute-bars")
+    append_optional_file_arg(pipeline_command, "--action-backtests", "data/metadata/portfolio-action-matrix-backtests.after-plan.json")
+    append_optional_file_arg(pipeline_command, "--reverse-t-backtest", "data/metadata/reverse-t-backtest.json")
+    append_optional_file_arg(pipeline_command, "--reverse-t-forecast", "data/metadata/reverse-t-forecast.json")
+    append_optional_file_arg(pipeline_command, "--technical-indicators", "data/metadata/technical-indicators.json")
     commands = [
         [".venv/bin/python", "tools/forecast_reverse_t.py", "--positions", "positions/POS-EASTMONEY-*.yaml", "--output", "data/metadata/reverse-t-forecast.json"],
-        [
-            ".venv/bin/python",
-            "tools/run_intraday_decision_pipeline.py",
-            "--positions",
-            "positions/POS-EASTMONEY-*.yaml",
-            "--daily-bars",
-            "data/processed/daily_bars.csv",
-            "--total-assets",
-            str(total_assets),
-        ],
+        pipeline_command,
     ]
     results: list[dict[str, object]] = []
     for command in commands:
@@ -281,6 +293,16 @@ def build_post_trade_tracking(update: dict[str, Any], snapshot: dict[str, object
     decision = card.get("decision") if isinstance(card, dict) and isinstance(card.get("decision"), dict) else {}
     if decision.get("action_label") or decision.get("next_step"):
         next_steps.append(f"刷新后当前建议：{decision.get('action_label') or '--'}；{decision.get('next_step') or '--'}")
+    minute_confirmation = card.get("minute_confirmation") if isinstance(card, dict) and isinstance(card.get("minute_confirmation"), dict) else {}
+    if minute_confirmation:
+        next_steps.append(
+            "分钟级二次确认："
+            f"{minute_confirmation.get('status_label') or minute_confirmation.get('status') or '--'}，"
+            f"{minute_confirmation.get('summary') or '--'}"
+        )
+    action_arbitration = decision.get("action_arbitration") if isinstance(decision.get("action_arbitration"), dict) else {}
+    if action_arbitration.get("summary"):
+        next_steps.append(f"动作仲裁：{action_arbitration.get('summary')}")
     primary_action = None
     price_table = card.get("price_action_table") if isinstance(card, dict) and isinstance(card.get("price_action_table"), dict) else {}
     if isinstance(price_table.get("primary_action"), dict):
@@ -311,6 +333,8 @@ def build_post_trade_tracking(update: dict[str, Any], snapshot: dict[str, object
         "refreshed_state": card.get("state_label") if isinstance(card, dict) else None,
         "refreshed_action": decision.get("action_label"),
         "primary_action": primary_action,
+        "minute_confirmation": minute_confirmation,
+        "action_arbitration": action_arbitration,
         "closure": reverse_closure or positive_closure,
         "execution_quality_review": trade.get("execution_quality_review") if isinstance(trade.get("execution_quality_review"), dict) else None,
         "warnings": warnings,

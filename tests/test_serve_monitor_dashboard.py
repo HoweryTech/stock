@@ -14,6 +14,7 @@ from tools.serve_monitor_dashboard import (
     monitor_status,
     recent_events,
     recent_flow_history,
+    run_refresh_commands,
 )
 
 
@@ -187,7 +188,12 @@ class ServeMonitorDashboardTest(unittest.TestCase):
                 {
                     "code": "000725",
                     "state_label": "持有观察",
-                    "decision": {"action_label": "不买不卖", "next_step": "等待新信号"},
+                    "decision": {
+                        "action_label": "不买不卖",
+                        "next_step": "等待新信号",
+                        "action_arbitration": {"summary": "反T让位于持有观察。"},
+                    },
+                    "minute_confirmation": {"status": "watch", "status_label": "分钟观察", "summary": "分钟信号不一致。"},
                     "price_action_table": {"primary_action": {"action": "反T卖出", "status_label": "仅观察", "price": "6.10-6.12元"}},
                 }
             ]
@@ -199,7 +205,32 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertEqual(tracking["execution_quality_review"]["score"], 95)
         self.assertTrue(tracking["can_reverse_t"])
         self.assertEqual(tracking["primary_action"]["action"], "反T卖出")
+        self.assertEqual(tracking["minute_confirmation"]["status_label"], "分钟观察")
+        self.assertIn("反T让位", tracking["action_arbitration"]["summary"])
         self.assertTrue(any("刷新后当前建议" in step for step in tracking["next_steps"]))
+        self.assertTrue(any("分钟级二次确认" in step for step in tracking["next_steps"]))
+
+    def test_run_refresh_commands_uses_decision_context_inputs(self) -> None:
+        def fake_run(command, cwd, text, capture_output, timeout):
+            class Completed:
+                returncode = 0
+                stdout = "ok"
+                stderr = ""
+
+            return Completed()
+
+        with (
+            patch("tools.serve_monitor_dashboard.Path.exists", return_value=True),
+            patch("tools.serve_monitor_dashboard.subprocess.run", side_effect=fake_run) as run,
+        ):
+            result = run_refresh_commands(25480.0)
+
+        self.assertEqual(len(result), 2)
+        pipeline_command = run.call_args_list[1].args[0]
+        self.assertIn("--minute-cache-dir", pipeline_command)
+        self.assertIn("data/processed/minute-bars", pipeline_command)
+        self.assertIn("--technical-indicators", pipeline_command)
+        self.assertIn("--reverse-t-forecast", pipeline_command)
 
     def test_dashboard_position_paths_are_absolute_files(self) -> None:
         paths = dashboard_position_paths()

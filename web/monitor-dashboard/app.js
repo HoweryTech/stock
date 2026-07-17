@@ -2040,6 +2040,11 @@ function renderPostTradeResult(result) {
   if (tracking.realized_pnl != null) metrics.push(["实现盈亏", money(tracking.realized_pnl)]);
   if (tracking.entry_price_after != null) metrics.push(["成交后成本", money(tracking.entry_price_after)]);
   if (tracking.fees_total != null) metrics.push(["本次费用", money(tracking.fees_total)]);
+  if (tracking.minute_confirmation?.status_label) {
+    const score = tracking.minute_confirmation.score == null ? "" : ` · ${num(tracking.minute_confirmation.score, 1)}分`;
+    metrics.push(["分钟确认", `${tracking.minute_confirmation.status_label}${score}`]);
+  }
+  if (tracking.action_arbitration?.primary_action) metrics.push(["动作仲裁", tracking.action_arbitration.primary_action]);
   const closure = tracking.closure || {};
   const quality = tracking.execution_quality_review || {};
   const closureHtml = closure.net_profit == null ? "" : `
