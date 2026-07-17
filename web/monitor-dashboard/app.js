@@ -43,6 +43,11 @@ const compactMoney = value => {
 };
 const tone = value => Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "";
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
+const datePart = value => {
+  const text = String(value || "").trim();
+  const match = text.match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : "";
+};
 
 function linearSlope(values) {
   const n = values.length;
@@ -609,7 +614,8 @@ function renderPositions() {
 
 function detailSection(title, body, key = "") {
   const sectionAttr = key ? ` data-detail-section="${escapeHtml(key)}"` : "";
-  return `<section class="detail-section"${sectionAttr}><h3>${title}</h3>${body}</section>`;
+  const keyClass = key ? ` detail-section-${escapeHtml(key)}` : "";
+  return `<section class="detail-section${keyClass}"${sectionAttr}><h3>${title}</h3>${body}</section>`;
 }
 
 function detailRefreshNotice() {
@@ -825,6 +831,50 @@ function renderCapitalPlan(plan) {
     <p>${escapeHtml(plan.failure_plan || "")}</p>
     ${steps.length ? `<h4>操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
     ${reasons.length ? `<h4>限制原因</h4><ul class="reason-list">${reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`
+  );
+}
+
+function forecastIsStale(forecast) {
+  const forecastDate = datePart(forecast?.as_of);
+  const snapshotDate = datePart(state.snapshot?.generated_at);
+  return Boolean(forecastDate && snapshotDate && forecastDate !== snapshotDate);
+}
+
+function renderReverseTForecastSection(forecast, decisionCard) {
+  if (!forecast) return "";
+  const stale = forecastIsStale(forecast);
+  const levels = decisionCard?.price_levels || {};
+  const currentZone = levels.reverse_t_sell_zone ? `${num(levels.reverse_t_sell_zone[0])}–${num(levels.reverse_t_sell_zone[1])}元` : "--";
+  const oldZone = forecast.predicted_sell_zone ? `${num(forecast.predicted_sell_zone[0])}–${num(forecast.predicted_sell_zone[1])}元` : "--";
+  const metrics = stale
+    ? [
+      ["当前有效卖出观察区", currentZone],
+      ["当前回补参考", money(levels.reverse_t_buyback_max_price)],
+      ["旧预测时间", forecast.as_of || "--"],
+      ["旧预测区间", oldZone],
+      ["旧预测回补上限", money(forecast.predicted_buyback_max_price)],
+      ["旧预测样本", forecast.neighbor_count || forecast.sample_count || 0],
+    ]
+    : [
+      ["预测周期", forecast.horizon_minutes ? `未来${forecast.horizon_minutes}分钟` : "--"],
+      ["预测高点区间", oldZone],
+      ["到达概率", pct(forecast.reach_probability_pct)],
+      ["到达后可回补概率", pct(forecast.roundtrip_probability_pct)],
+      ["到达且回补联合概率", pct(forecast.joint_roundtrip_probability_pct)],
+      ["预测回补上限", money(forecast.predicted_buyback_max_price)],
+      ["相似样本", forecast.neighbor_count || forecast.sample_count || 0],
+    ];
+  const title = stale ? "旧反T概率预测（已过期）" : "下一次反T概率预测";
+  const message = stale
+    ? `该预测生成于 ${forecast.as_of || "--"}，不是当前交易日数据；不能作为下一次反T区间。当前详情以决策卡的实时区间为准。`
+    : forecast.note || "预测仅用于提前预警，不代表价格必然到达。";
+  const badge = stale ? '<span class="forecast-stale-badge">已过期</span>' : "";
+  return detailSection(
+    title,
+    `<p>${badge}<strong>${escapeHtml(forecast.status_label || forecast.status || "--")}</strong></p>
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    <p class="secondary">${escapeHtml(message)}</p>`,
+    stale ? "reverse-t-forecast-stale" : "reverse-t-forecast"
   );
 }
 
@@ -1829,17 +1879,7 @@ function openDetail(code, options = {}) {
   if (isReverseTPriceAlert(item)) {
     html += detailSection("反T价格提醒", `<p><strong>实时价格已进入卖出观察区</strong></p><p>这是价格到位提醒，不等待回补价出现，也不代表保证能够低价买回。</p><div class="metric-grid"><dl class="metric"><dt>卖出观察区</dt><dd>${num(item.reverse_t_plan.sell_zone[0])}–${num(item.reverse_t_plan.sell_zone[1])}元</dd></dl><dl class="metric"><dt>回补参考上限</dt><dd>${money(item.reverse_t_plan.buyback_max_price)}</dd></dl></div>`);
   }
-  if (forecast) {
-    const forecastZone = forecast.predicted_sell_zone ? `${num(forecast.predicted_sell_zone[0])}–${num(forecast.predicted_sell_zone[1])}元` : "--";
-    const forecastMetrics = [
-      ["预测周期", forecast.horizon_minutes ? `未来${forecast.horizon_minutes}分钟` : "--"],
-      ["预测高点区间", forecastZone], ["到达概率", pct(forecast.reach_probability_pct)],
-      ["到达后可回补概率", pct(forecast.roundtrip_probability_pct)], ["到达且回补联合概率", pct(forecast.joint_roundtrip_probability_pct)],
-      ["预测回补上限", money(forecast.predicted_buyback_max_price)],
-      ["相似样本", forecast.neighbor_count || forecast.sample_count || 0],
-    ];
-    html += detailSection("下一次反T概率预测", `<p><strong>${escapeHtml(forecast.status_label)}</strong></p><div class="metric-grid">${forecastMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">${escapeHtml(forecast.note || "预测仅用于提前预警，不代表价格必然到达。")}</p>`);
-  }
+  html += renderReverseTForecastSection(forecast, decisionCard);
   const reverseAudit = item.reverse_t_plan;
   if (reverseAudit?.sell_zone && item.quote.high && item.quote.latest_price) {
     const pullbackFromHigh = (Number(item.quote.high) - Number(item.quote.latest_price)) / Number(item.quote.high) * 100;

@@ -369,12 +369,25 @@ th:nth-child(8) { width: 100px; }
 .execution-preview-grid dt { color: var(--muted); font-size: 11px; }
 .execution-preview-grid dd { margin: 2px 0 0; font-weight: 700; font-variant-numeric: tabular-nums; }
 .execution-preview p { margin: 5px 0 0; line-height: 1.5; }
-.detail-section { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.detail-section { padding: 16px 0 16px 12px; border-bottom: 1px solid var(--line); border-left: 4px solid transparent; }
+.detail-section-execution-layers,
+.detail-section-decision-brief,
+.detail-section-decision-card,
+.detail-section-price-action-table { border-left-color: var(--blue); background: linear-gradient(90deg, rgba(231, 240, 255, 0.72), rgba(255, 255, 255, 0)); }
+.detail-section-manual-trade,
+.detail-section-manual-execution-plan,
+.detail-section-reverse-t-plan,
+.detail-section-positive-t-plan { border-left-color: var(--amber); background: linear-gradient(90deg, rgba(255, 248, 230, 0.82), rgba(255, 255, 255, 0)); }
+.detail-section-technical-assessment,
+.detail-section-data-quality,
+.detail-section-realtime-status { border-left-color: var(--green); background: linear-gradient(90deg, rgba(232, 246, 237, 0.72), rgba(255, 255, 255, 0)); }
+.detail-section-reverse-t-forecast-stale { border-left-color: var(--muted); background: linear-gradient(90deg, rgba(238, 241, 244, 0.9), rgba(255, 255, 255, 0)); }
 .detail-focus { outline: 2px solid rgba(23, 92, 211, 0.35); outline-offset: 4px; border-radius: 6px; }
 .detail-section:first-child { padding-top: 0; }
-.detail-section h3 { margin: 0 0 12px; font-size: 14px; }
+.detail-section h3 { margin: 0 0 12px; font-size: 15px; font-weight: 800; }
 .detail-section h4 { margin: 14px 0 8px; font-size: 12px; color: var(--muted); }
 .detail-section, .detail-section p, .reason-list li, .signal-list li, .advice, .advice-tag, .consistency-item { overflow-wrap: anywhere; }
+.forecast-stale-badge { display: inline-flex; align-items: center; min-height: 22px; margin-right: 8px; padding: 2px 7px; border-radius: 4px; color: var(--muted); background: #eef1f4; font-size: 12px; font-weight: 700; }
 .technical-summary { margin: 10px 0 12px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; line-height: 1.55; }
 .decision-brief-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
 .decision-brief-grid dl { margin: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
