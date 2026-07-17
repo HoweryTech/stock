@@ -256,9 +256,13 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("路径2-反抽" in step for step in card["manual_execution_plan"]["steps"]))
         self.assertTrue(any("路径3-站稳" in step for step in card["manual_execution_plan"]["steps"]))
         arbitration = card["decision"]["action_arbitration"]
+        structured = card["decision"]["structured_conclusion"]
         self.assertEqual(arbitration["primary_action"], "止损风险复核")
         self.assertIn("正T、反T和补仓全部让位", arbitration["summary"])
         self.assertTrue(any("T" in item["action"] or "买入" in item["action"] for item in arbitration["suppressed_actions"]))
+        self.assertIn("止损风险复核", structured["current_action"])
+        self.assertIn("三路径", structured["trigger_condition"])
+        self.assertTrue(any("禁止补仓" in item for item in structured["forbidden_actions"]))
 
     def test_unconfirmed_imported_stop_reference_does_not_take_exit_priority(self) -> None:
         portfolio = portfolio_result()
@@ -637,6 +641,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertFalse(card["manual_execution_plan"]["applicable"])
         self.assertEqual(reverse_actions["反T卖出"]["status"], "blocked")
         self.assertEqual(reverse_actions["反T卖出"]["status_label"], "分钟阻断")
+        structured = card["decision"]["structured_conclusion"]
+        self.assertIn("不交易", structured["current_action"])
+        self.assertTrue(any("分钟阻断" in item for item in structured["forbidden_actions"]))
 
     def test_negative_t_performance_blocks_reverse_t_candidate(self) -> None:
         item = intraday_item(reverse_status="candidate")

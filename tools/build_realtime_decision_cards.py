@@ -112,6 +112,18 @@ def rounded(value: float | None) -> float | None:
     return None if value is None else round(value, 4)
 
 
+def dedupe_keep_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
 def dynamic_price_zone_width(anchor_price: float | None, *, ratio_pct: float = 0.18, min_ticks: int = 1, max_ticks: int = 6, tick: float = 0.01) -> float:
     if anchor_price is None or anchor_price <= 0:
         return round(min_ticks * tick, 2)
@@ -3010,6 +3022,72 @@ def build_action_arbitration(
     }
 
 
+def build_structured_conclusion(
+    state: str,
+    price_action_table: dict[str, Any],
+    action_arbitration: dict[str, Any],
+    decision_mode: dict[str, Any],
+    minute_confirmation: dict[str, Any] | None,
+    blockers: list[str],
+    next_step: str,
+    action_steps: list[str],
+    levels: dict[str, Any],
+) -> dict[str, Any]:
+    primary = price_action_table.get("primary_action") or {}
+    primary_action = str(primary.get("action") or action_arbitration.get("primary_action") or "当前动作")
+    primary_status = str(primary.get("status") or "watch")
+    primary_status_label = str(primary.get("status_label") or primary_status)
+    primary_price = str(primary.get("price") or "-")
+    trigger = str(primary.get("trigger") or primary.get("price") or next_step or "等待下一轮实时数据确认")
+    if primary_action == "当前动作" and state in {"market_wait", "data_stale", "data_insufficient"}:
+        trigger = next_step or trigger
+    minute_label = str((minute_confirmation or {}).get("status_label") or "分钟未确认")
+    mode_label = str(decision_mode.get("label") or "只观察")
+    current_action = "只观察，不下单"
+    if primary_status == "ready":
+        current_action = f"人工确认后执行{primary_action}"
+    elif state == "exit_risk_review":
+        current_action = f"先处理{primary_action}，不做其他交易"
+    elif state in {"market_wait", "data_stale", "data_insufficient"}:
+        current_action = "先刷新/修复数据，不交易"
+    elif primary_status == "blocked":
+        current_action = f"不交易，先处理{primary_action}阻断"
+    elif state in {"positive_t_watch", "reverse_t_watch"}:
+        current_action = f"只观察{primary_action}，等待触发和门禁确认"
+
+    forbidden_actions: list[str] = []
+    if state == "exit_risk_review":
+        forbidden_actions.append("禁止补仓、禁止正T、禁止反T，卖出风险优先。")
+    if decision_mode.get("mode") != "tradable":
+        forbidden_actions.append(f"盘中可信度为“{mode_label}”时，禁止人工确认交易。")
+    if (minute_confirmation or {}).get("status") != "confirm":
+        forbidden_actions.append(f"{minute_label}时，禁止正T、反T和放宽止损。")
+    if primary_status == "blocked" and primary.get("note"):
+        forbidden_actions.append(str(primary.get("note")))
+    forbidden_actions.extend(str(item) for item in blockers[:2])
+    if not forbidden_actions:
+        forbidden_actions.append("未到触发条件前不提前下单，不追价，不临时改方向。")
+
+    summary = f"{current_action}；触发条件：{trigger}；禁止动作：{forbidden_actions[0]}"
+    return {
+        "current_action": current_action,
+        "trigger_condition": trigger,
+        "forbidden_actions": dedupe_keep_order(forbidden_actions)[:5],
+        "summary": summary,
+        "primary_action": primary_action,
+        "primary_status": primary_status,
+        "primary_status_label": primary_status_label,
+        "primary_price": primary_price,
+        "primary_shares": primary.get("shares"),
+        "next_step": next_step,
+        "first_step": action_steps[0] if action_steps else "",
+        "minute_confirmation_label": minute_label,
+        "decision_mode_label": mode_label,
+        "dynamic_stop_loss_price": levels.get("dynamic_stop_loss_price"),
+        "stop_loss_confirmed": levels.get("stop_loss_confirmed"),
+    }
+
+
 def confidence_for(state: str, evidence: list[str], blockers: list[str]) -> str:
     if state in {"exit_risk_review", "data_stale", "market_wait", "data_insufficient"}:
         return "high"
@@ -3198,6 +3276,32 @@ def build_card(
         minute_confirmation,
     )
     action_arbitration = build_action_arbitration(state, price_action_table, decision_mode, minute_confirmation)
+    next_step = build_next_step(state, action_backtest, levels)
+    action_steps = build_action_steps(
+        state,
+        levels,
+        blockers,
+        action_backtest,
+        code=str(intraday.get("code") or ""),
+        name=str(intraday.get("name") or ""),
+        position=intraday.get("position", {}),
+        capital_plan=capital_plan,
+        technical_operation=technical_operation,
+        t_performance_gate=t_performance_gate,
+        execution_quality_gate=execution_quality_gate,
+        manual_execution_plan=manual_execution_plan,
+    )
+    structured_conclusion = build_structured_conclusion(
+        state,
+        price_action_table,
+        action_arbitration,
+        decision_mode,
+        minute_confirmation,
+        blockers,
+        next_step,
+        action_steps,
+        levels,
+    )
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
@@ -3223,21 +3327,9 @@ def build_card(
             "action_label": ACTION_LABELS[action_code],
             "execution_allowed": execution_allowed,
             "confidence": confidence_for(state, evidence, blockers),
-            "next_step": build_next_step(state, action_backtest, levels),
-            "action_steps": build_action_steps(
-                state,
-                levels,
-                blockers,
-                action_backtest,
-                code=str(intraday.get("code") or ""),
-                name=str(intraday.get("name") or ""),
-                position=intraday.get("position", {}),
-                capital_plan=capital_plan,
-                technical_operation=technical_operation,
-                t_performance_gate=t_performance_gate,
-                execution_quality_gate=execution_quality_gate,
-                manual_execution_plan=manual_execution_plan,
-            ),
+            "next_step": next_step,
+            "action_steps": action_steps,
+            "structured_conclusion": structured_conclusion,
             "technical_operation": technical_operation,
             "action_arbitration": action_arbitration,
         },

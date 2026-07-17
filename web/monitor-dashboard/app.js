@@ -482,9 +482,14 @@ function compactQualityEvidence(item) {
 function renderDecisionSummary(item) {
   const card = decisionCardFor(item);
   const automaticDecision = automaticDecisionFor(item);
-  const conclusion = card ? uniqueTradeConclusion(item, card, automaticDecision) : automaticDecision.action || adviceFor(item);
+  const structured = card?.decision?.structured_conclusion || null;
+  const conclusion = structured?.current_action || (card ? uniqueTradeConclusion(item, card, automaticDecision) : automaticDecision.action || adviceFor(item));
+  const trigger = structured?.trigger_condition || "";
+  const forbidden = (structured?.forbidden_actions || [])[0] || "";
   return `<div class="advice-summary">
-    <div class="advice-primary advice-unique"><span>唯一结论</span><strong>${escapeHtml(conclusion)}</strong></div>
+    <div class="advice-primary advice-unique"><span>当前动作</span><strong>${escapeHtml(conclusion)}</strong></div>
+    ${trigger ? `<div class="advice-support"><span>触发条件</span><em>${escapeHtml(trigger)}</em></div>` : ""}
+    ${forbidden ? `<div class="advice-support advice-support-block"><span>禁止动作</span><em>${escapeHtml(forbidden)}</em></div>` : ""}
     ${decisionModeTag(item)}
     ${minuteConfirmationTag(item)}
     ${stopLossDistanceTag(card)}
@@ -702,18 +707,22 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
   const blockers = decisionCard?.blockers || [];
   const actionSteps = decisionCard?.decision?.action_steps || [];
   const decision = decisionCard?.decision || {};
+  const structured = decision.structured_conclusion || {};
   const arbitration = decision.action_arbitration || {};
   const minuteConfirmation = decisionCard?.minute_confirmation || {};
   const automatic = item.action_decision || {};
   const watchRows = (decisionCard?.price_action_table?.rows || []).filter(row => row.status === "watch" || row.status === "reference");
   const queueItem = (state.decisionReport?.priority_queue?.items || []).find(entry => entry.code === item.code);
-  const nowText = uniqueTradeConclusion(item, decisionCard, automaticDecision);
+  const nowText = structured.current_action || uniqueTradeConclusion(item, decisionCard, automaticDecision);
+  const structuredForbidden = structured.forbidden_actions || [];
   const triggerItems = [
+    structured.trigger_condition || "",
     primary.trigger ? `${primary.action || "价格动作"}：${primary.trigger}` : "",
     ...watchRows.slice(0, 3).map(row => `${row.action || "观察"}：${row.trigger || row.price || row.note || "--"}`),
     ...(automatic.execute_when || []).slice(0, 3),
   ].filter(Boolean);
   const blockerItems = [
+    ...structuredForbidden,
     primary.status === "blocked" ? primary.note : "",
     ...(blockers || []),
     decision.technical_operation?.reason || "",
@@ -743,16 +752,16 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
       <dl><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     <div class="decision-focus-grid">
       <div class="decision-focus-card decision-focus-now">
-        <span>现在做什么</span>
+        <span>当前动作</span>
         <strong>${escapeHtml(nowText)}</strong>
         ${actionSteps.length ? `<ol class="reason-list">${actionSteps.slice(0, 4).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
       </div>
       <div class="decision-focus-card decision-focus-trigger">
-        <span>什么时候触发</span>
+        <span>触发条件</span>
         ${triggerItems.length ? `<ol class="reason-list">${triggerItems.slice(0, 5).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : `<p class="secondary">当前没有可执行触发线，等待下一轮数据。</p>`}
       </div>
       <div class="decision-focus-card decision-focus-block">
-        <span>为什么不能做</span>
+        <span>禁止动作</span>
         ${blockerItems.length ? `<ul class="reason-list">${blockerItems.slice(0, 5).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<p class="secondary">当前没有额外阻断；仍需按可操作步骤表人工确认。</p>`}
       </div>
       <div class="decision-focus-card decision-focus-effect">
@@ -774,6 +783,8 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
 }
 
 function uniqueTradeConclusion(item, decisionCard, automaticDecision) {
+  const structured = decisionCard?.decision?.structured_conclusion || {};
+  if (structured.summary) return structured.summary;
   const primary = decisionCard?.price_action_table?.primary_action || {};
   const decision = decisionCard?.decision || {};
   const levels = decisionCard?.price_levels || {};
@@ -807,12 +818,13 @@ function renderStickyActionBar(item, decisionCard, automaticDecision) {
   const decision = decisionCard?.decision || {};
   const blockers = decisionCard?.blockers || [];
   const levels = decisionCard?.price_levels || {};
+  const structured = decision.structured_conclusion || {};
   const status = primary.status || (decision.execution_allowed ? "watch" : "blocked");
   const statusText = primary.status_label || (status === "ready" ? "已触发" : status === "blocked" ? "暂不执行" : "等待触发");
   const conclusionText = uniqueTradeConclusion(item, decisionCard, automaticDecision);
-  const priceText = primary.price || money(item.quote?.latest_price);
-  const sharesText = primary.shares ? `${primary.shares}股` : "--";
-  const reasonText = primary.note || blockers[0] || decision.next_step || automaticDecision.action || "";
+  const priceText = structured.primary_price || primary.price || money(item.quote?.latest_price);
+  const sharesText = structured.primary_shares ? `${structured.primary_shares}股` : primary.shares ? `${primary.shares}股` : "--";
+  const reasonText = structured.forbidden_actions?.[0] || primary.note || blockers[0] || decision.next_step || automaticDecision.action || "";
   const presetButton = primary.status === "ready" ? priceActionPresetButton(primary, item, decisionCard) : "";
   const statusClass = status === "ready" ? "ready" : status === "blocked" ? "blocked" : "watch";
   const riskTarget = detailTargetForCard(decisionCard) || "action-step-table";
