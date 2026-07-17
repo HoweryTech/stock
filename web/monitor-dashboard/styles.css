@@ -171,6 +171,7 @@ th:nth-child(8) { width: 100px; }
 .state-data_stale { color: var(--muted); background: #eceff2; }
 .advice { line-height: 1.45; }
 .advice-tag { margin-top: 4px; color: var(--blue); font-size: 12px; font-weight: 600; }
+.unlock-alert-tag { color: var(--amber); }
 .technical-line { display: flex; align-items: center; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 12px; }
 .technical-line span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .technical-badge { display: inline-flex; flex: 0 0 auto; align-items: center; min-height: 22px; padding: 2px 7px; border-radius: 4px; font-size: 12px; font-weight: 600; }

@@ -601,6 +601,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIsNotNone(alert)
         self.assertEqual(alert["type"], "technical_unlock_near")
         self.assertEqual(alert["severity"], "watch")
+        self.assertEqual(alert["min_gap"], 1.0)
         self.assertTrue(any(condition["code"] == "risk_recovered" for condition in alert["matched_conditions"]))
 
 

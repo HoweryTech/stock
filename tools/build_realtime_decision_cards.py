@@ -568,6 +568,9 @@ def build_technical_unlock_alert(card: dict[str, Any]) -> dict[str, Any] | None:
     active_conditions = conditions if all_passed else [condition for condition in conditions if technical_condition_near_unlock(condition)]
     if not active_conditions:
         return None
+    active_gaps = [as_float(condition.get("gap")) for condition in active_conditions]
+    active_gaps = [gap for gap in active_gaps if gap is not None]
+    min_gap = min(active_gaps) if active_gaps else 0.0
     alert_type = "technical_unlocked" if all_passed else "technical_unlock_near"
     title = "技术面已满足解锁条件" if all_passed else "技术面接近解锁条件"
     waiting = [condition for condition in conditions if not condition.get("passed")]
@@ -587,6 +590,7 @@ def build_technical_unlock_alert(card: dict[str, Any]) -> dict[str, Any] | None:
         "message": message,
         "technical_tier": operation.get("tier"),
         "technical_tier_label": operation.get("tier_label"),
+        "min_gap": rounded(min_gap),
         "conditions": conditions,
         "matched_conditions": active_conditions,
     }
@@ -1611,7 +1615,10 @@ def build_report(
     state_counts: dict[str, int] = {}
     for card in cards:
         state_counts[card["state"]] = state_counts.get(card["state"], 0) + 1
-    technical_unlock_alerts = [alert for card in cards if (alert := build_technical_unlock_alert(card))]
+    technical_unlock_alerts = sorted(
+        (alert for card in cards if (alert := build_technical_unlock_alert(card))),
+        key=lambda alert: (0 if alert.get("type") == "technical_unlocked" else 1, as_float(alert.get("min_gap"), 9999.0) or 9999.0, str(alert.get("code") or "")),
+    )
     return {
         "generated_at": (generated_at or datetime.now().astimezone()).isoformat(timespec="seconds"),
         "source": {
