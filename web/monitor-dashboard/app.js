@@ -34,6 +34,7 @@ const labels = {
 const money = value => value == null ? "--" : `¥${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pct = value => value == null ? "--" : `${Number(value).toFixed(2)}%`;
 const num = (value, digits = 2) => value == null ? "--" : Number(value).toFixed(digits);
+const zoneText = zone => Array.isArray(zone) && zone.length >= 2 ? `${num(zone[0])}–${num(zone[1])}元` : "--";
 const compactMoney = value => {
   if (value == null) return "--";
   const amount = Number(value);
@@ -877,6 +878,105 @@ function renderReverseTForecastSection(forecast, decisionCard) {
     <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     <p class="secondary">${escapeHtml(message)}</p>`,
     stale ? "reverse-t-forecast-stale" : "reverse-t-forecast"
+  );
+}
+
+function metricGrid(metrics) {
+  return `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>`;
+}
+
+function renderReverseTPriceAlertSection(item, decisionCard) {
+  if (!isReverseTPriceAlert(item)) return "";
+  const levels = decisionCard?.price_levels || {};
+  const hasEffectiveForecast = levels.reverse_t_zone_source === "forecast";
+  const title = hasEffectiveForecast ? "反T价格提醒" : "反T盘中参考提醒";
+  const headline = hasEffectiveForecast ? "实时价格已进入当日建议卖出区间" : "实时价格触及盘中高点参考区";
+  const note = hasEffectiveForecast
+    ? "这是价格到位提醒，仍要同时满足技术门禁、回测门禁和回补上限。"
+    : "当前没有当日有效的指标预测反T区间；该区间只用于机会审计，不作为直接卖出建议。";
+  const sellZone = hasEffectiveForecast ? levels.reverse_t_sell_zone : levels.reverse_t_intraday_reference_zone || item.reverse_t_plan?.sell_zone;
+  const buyback = hasEffectiveForecast ? levels.reverse_t_buyback_max_price : levels.reverse_t_intraday_reference_buyback_max_price || item.reverse_t_plan?.buyback_max_price;
+  const metrics = [
+    [hasEffectiveForecast ? "建议卖出区间" : "盘中参考区", zoneText(sellZone)],
+    [hasEffectiveForecast ? "建议回补上限" : "参考回补上限", money(buyback)],
+  ];
+  return detailSection(title, `<p><strong>${escapeHtml(headline)}</strong></p><p>${escapeHtml(note)}</p>${metricGrid(metrics)}`);
+}
+
+function renderReverseTPlanSection(item, decisionCard, technicalOperation) {
+  const reversePlan = item.reverse_t_plan;
+  if (!reversePlan) return "";
+  const levels = decisionCard?.price_levels || {};
+  const reverseTechnicalBlock = renderTechnicalOperationBlock(technicalOperation, "reverse_t");
+  const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "仅供观察，不可执行";
+  const hasEffectiveForecast = levels.reverse_t_zone_source === "forecast" && Array.isArray(levels.reverse_t_sell_zone);
+  const suggestedZone = hasEffectiveForecast ? levels.reverse_t_sell_zone : null;
+  const referenceZone = levels.reverse_t_intraday_reference_zone || reversePlan.sell_zone;
+  const suggestedBuyback = hasEffectiveForecast ? levels.reverse_t_buyback_max_price : null;
+  const referenceBuyback = levels.reverse_t_intraday_reference_buyback_max_price ?? reversePlan.buyback_max_price;
+  const executableHeadline = hasEffectiveForecast
+    ? "有当日有效建议区间；仍需价格、技术和门禁同时通过。"
+    : "暂不执行反T；当前没有当日有效的指标预测区间。";
+  const executableTone = hasEffectiveForecast ? "ready" : "blocked";
+  const executableMetrics = [
+    ["执行结论", hasEffectiveForecast ? "可进入反T候选复核" : "不可直接反T"],
+    ["状态", reverseStatus],
+    ["建议卖出区间", zoneText(suggestedZone)],
+    ["建议回补上限", money(suggestedBuyback)],
+    ["试做数量", `${reversePlan.trade_shares || 100}股`],
+  ];
+  const referenceMetrics = [
+    ["盘中高点参考区", zoneText(referenceZone)],
+    ["参考回补上限", money(referenceBuyback)],
+    ["实际所需价差", pct(reversePlan.required_gap_pct)],
+    ["占当前持仓", pct(reversePlan.trade_ratio_pct)],
+    ["未回补后果", reversePlan.failure_as_reduction_acceptable ? "计入计划降仓" : "形成计划外减仓"],
+    ["主力确认", reversePlan.main_flow_confirmation === "wait_for_weakening" ? "净流入偏强，等待转弱" : "未见强净流入阻断"],
+  ];
+  if (reversePlan.cost_estimate) {
+    referenceMetrics.push(["最低达标情景总费用", money(reversePlan.cost_estimate.total_fees)]);
+    referenceMetrics.push(["达到回补价时净收益", money(reversePlan.cost_estimate.net_profit)]);
+    referenceMetrics.push(["收益性质", "最低门槛测算，不是价格预测"]);
+  }
+  referenceMetrics.push(["费用参数", reversePlan.cost_model_verified ? "已按交割单核验" : "保守假设，尚未核验"]);
+  if (reversePlan.high_position_ratio_warning) referenceMetrics.push(["仓位风险", "单次涉及半仓，高风险"]);
+  const blockers = reversePlan.blockers || [];
+  const blockerDetails = reversePlan.blocker_details || [];
+  const blockerHtml = blockerDetails.length
+    ? `<div class="blocker-list">${blockerDetails.map(blocker => `
+      <div class="blocker-item">
+        <div><strong>${escapeHtml(blocker.label || blocker.code || "阻断项")}</strong><span>${escapeHtml(blocker.current || "--")}</span></div>
+        <p>${escapeHtml(blocker.reason || "")}</p>
+        <p class="secondary">${escapeHtml(blocker.next_step || "")}</p>
+      </div>`).join("")}</div>`
+    : blockers.length ? `<ul class="reason-list">${blockers.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<p class="secondary">当前没有额外阻断项。</p>`;
+  const executionSteps = hasEffectiveForecast ? reversePlan.execution_steps || reversePlan.instructions || [] : [];
+  return detailSection("反T降低成本", `
+    <div class="reverse-plan-summary reverse-plan-summary-${executableTone}">
+      <span>当前结论</span>
+      <strong>${escapeHtml(executableHeadline)}</strong>
+      ${reversePlan.next_action ? `<p>${escapeHtml(reversePlan.next_action)}</p>` : ""}
+    </div>
+    <div class="reverse-plan-grid">
+      <div class="reverse-plan-block reverse-plan-block-${executableTone}">
+        <h4>可执行建议</h4>
+        ${metricGrid(executableMetrics)}
+        ${!hasEffectiveForecast ? `<p class="secondary">没有当日有效建议区间时，价格动作表不会给出“反T卖出/反T回补”。</p>` : ""}
+      </div>
+      <div class="reverse-plan-block reverse-plan-block-reference">
+        <h4>参考审计</h4>
+        ${metricGrid(referenceMetrics)}
+        <p class="secondary">盘中高点参考区只用于复盘和观察，不等同于系统建议卖出区间。</p>
+      </div>
+      <div class="reverse-plan-block reverse-plan-block-gate">
+        <h4>门禁阻断</h4>
+        ${reverseTechnicalBlock ? `<div class="blocker-list">${reverseTechnicalBlock}</div>` : ""}
+        <p>${escapeHtml(reversePlan.failure_result || "")}</p>
+        ${blockerHtml}
+      </div>
+    </div>
+    ${executionSteps.length ? `<h4>操作步骤</h4><ol class="reason-list">${executionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}`,
+    "reverse-t-plan"
   );
 }
 
@@ -1878,9 +1978,7 @@ function openDetail(code, options = {}) {
     ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`
     : `<h4>重新开放反T的条件</h4><ol class="reason-list"><li>至少积累30次历史触发。</li><li>回补成功率达到65%以上，且95%成功率下限不低于50%。</li><li>再经过模拟盘验证后，才恢复反T候选。</li></ol>`;
   html += detailSection("自动操作结论", `<p>${actionTierBadge(item)} <span class="state-badge state-${item.state}">${escapeHtml(automaticDecision.level)}</span></p><p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
-  if (isReverseTPriceAlert(item)) {
-    html += detailSection("反T价格提醒", `<p><strong>实时价格已进入卖出观察区</strong></p><p>这是价格到位提醒，不等待回补价出现，也不代表保证能够低价买回。</p><div class="metric-grid"><dl class="metric"><dt>卖出观察区</dt><dd>${num(item.reverse_t_plan.sell_zone[0])}–${num(item.reverse_t_plan.sell_zone[1])}元</dd></dl><dl class="metric"><dt>回补参考上限</dt><dd>${money(item.reverse_t_plan.buyback_max_price)}</dd></dl></div>`);
-  }
+  html += renderReverseTPriceAlertSection(item, decisionCard);
   html += renderReverseTForecastSection(forecast, decisionCard);
   const reverseAudit = item.reverse_t_plan;
   if (reverseAudit?.sell_zone && item.quote.high && item.quote.latest_price) {
@@ -1938,53 +2036,10 @@ function openDetail(code, options = {}) {
     ["中单净额", compactMoney(flow.medium_net_inflow)], ["小单净额", compactMoney(flow.small_net_inflow)],
   ];
   html += detailSection("主力资金流", `<div class="metric-grid">${flowMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">${escapeHtml(flow.interpretation || "")}</p>`);
-  const reversePlan = item.reverse_t_plan;
   html += reverseTClosureSection(item);
   html += positiveTClosureSection(item);
   html += tClosurePerformanceSection(item);
-  if (reversePlan) {
-    const reverseTechnicalBlock = renderTechnicalOperationBlock(technicalOperation, "reverse_t");
-    const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "仅供观察，不可执行";
-    const zone = reversePlan.sell_zone ? `${num(reversePlan.sell_zone[0])}–${num(reversePlan.sell_zone[1])}元` : "--";
-    const reverseZoneSource = decisionCard?.price_levels?.reverse_t_zone_source;
-    const reverseZoneLabel = reverseZoneSource === "forecast" ? "建议卖出观察区" : "盘中高点参考区";
-    const planMetrics = [
-      ["状态", reverseStatus], ["试做数量", `${reversePlan.trade_shares || 100}股`],
-      [reverseZoneLabel, zone], ["参考回补上限", money(reversePlan.buyback_max_price)],
-      ["实际所需价差", pct(reversePlan.required_gap_pct)], ["占当前持仓", pct(reversePlan.trade_ratio_pct)],
-      ["未回补后果", reversePlan.failure_as_reduction_acceptable ? "计入计划降仓" : "形成计划外减仓"],
-      ["主力确认", reversePlan.main_flow_confirmation === "wait_for_weakening" ? "净流入偏强，等待转弱" : "未见强净流入阻断"],
-    ];
-    if (reversePlan.cost_estimate) {
-      planMetrics.push(["最低达标情景总费用", money(reversePlan.cost_estimate.total_fees)]);
-      planMetrics.push(["卖出佣金", money(reversePlan.cost_estimate.sell_commission)]);
-      planMetrics.push(["买入佣金", money(reversePlan.cost_estimate.buy_commission)]);
-      planMetrics.push(["卖出印花税", money(reversePlan.cost_estimate.stamp_duty)]);
-      planMetrics.push(["过户费", money(reversePlan.cost_estimate.transfer_fee)]);
-      planMetrics.push(["达到回补价时净收益", money(reversePlan.cost_estimate.net_profit)]);
-      planMetrics.push(["收益性质", "最低门槛测算，不是价格预测"]);
-    }
-    planMetrics.push(["费用参数", reversePlan.cost_model_verified ? "已按交割单核验" : "保守假设，尚未核验"]);
-    if (reversePlan.high_position_ratio_warning) planMetrics.push(["仓位风险", "单次涉及半仓，高风险"]);
-    const blockers = reversePlan.blockers || [];
-    const blockerDetails = reversePlan.blocker_details || [];
-    const blockerHtml = blockerDetails.length
-      ? `<div class="blocker-list">${blockerDetails.map(blocker => `
-        <div class="blocker-item">
-          <div><strong>${escapeHtml(blocker.label || blocker.code || "阻断项")}</strong><span>${escapeHtml(blocker.current || "--")}</span></div>
-          <p>${escapeHtml(blocker.reason || "")}</p>
-          <p class="secondary">${escapeHtml(blocker.next_step || "")}</p>
-        </div>`).join("")}</div>`
-      : blockers.length ? `<ul class="reason-list">${blockers.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : "";
-    const executionSteps = reversePlan.execution_steps || reversePlan.instructions || [];
-    html += detailSection("反T降低成本", `<div class="metric-grid">${planMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>
-      ${reverseZoneSource !== "forecast" ? `<p class="secondary">当前没有当日有效的指标预测反T区间；这里的区间来自盘中高点审计，只作参考，不作为直接反T建议。</p>` : ""}
-      ${reversePlan.next_action ? `<div class="action-panel action-${reversePlan.status === "candidate" ? "reverse_t_watch" : "hold_no_add"}"><div class="action-panel-title">下一步动作</div><p>${escapeHtml(reversePlan.next_action)}</p></div>` : ""}
-      ${reverseTechnicalBlock ? `<h4>技术面门禁</h4><div class="blocker-list">${reverseTechnicalBlock}</div>` : ""}
-      <p>${escapeHtml(reversePlan.failure_result || "")}</p>
-      ${blockerHtml || ""}
-      ${executionSteps.length ? `<h4>操作步骤</h4><ol class="reason-list">${executionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}`, "reverse-t-plan");
-  }
+  html += renderReverseTPlanSection(item, decisionCard, technicalOperation);
   const reductionPlan = item.reduction_plan;
   if (reductionPlan && !["within_limit", "unavailable"].includes(reductionPlan.status)) {
     const reductionMetrics = [

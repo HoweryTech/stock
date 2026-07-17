@@ -411,6 +411,33 @@ th:nth-child(8) { width: 100px; }
 .action-panel-title { margin-bottom: 7px; font-size: 12px; color: var(--muted); font-weight: 700; }
 .action-panel p { margin: 0 0 8px; }
 .action-panel .reason-list { padding-left: 20px; }
+.reverse-plan-summary {
+  margin-bottom: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.reverse-plan-summary span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.reverse-plan-summary strong { display: block; line-height: 1.4; }
+.reverse-plan-summary p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.reverse-plan-summary-ready { border-left-color: var(--blue); background: var(--blue-bg); }
+.reverse-plan-summary-blocked { border-left-color: var(--amber); background: var(--amber-bg); }
+.reverse-plan-grid { display: grid; gap: 10px; }
+.reverse-plan-block {
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.reverse-plan-block h4 { margin-top: 0; }
+.reverse-plan-block .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.reverse-plan-block-ready { border-left-color: var(--blue); background: rgba(238, 244, 255, 0.62); }
+.reverse-plan-block-blocked { border-left-color: var(--amber); background: rgba(255, 246, 221, 0.66); }
+.reverse-plan-block-reference { border-left-color: var(--muted); background: rgba(244, 246, 248, 0.78); }
+.reverse-plan-block-gate { border-left-color: var(--red); background: rgba(255, 240, 238, 0.48); }
 .manual-trade-form { display: grid; gap: 12px; }
 .manual-trade-lock {
   display: flex;
