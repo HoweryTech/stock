@@ -3,7 +3,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.serve_monitor_dashboard import API_FILES, build_post_trade_tracking, dashboard_position_paths, handle_manual_trade, load_json, market_wait_refresh_status, monitor_status, recent_events, recent_flow_history
+from tools.serve_monitor_dashboard import (
+    API_FILES,
+    build_post_trade_tracking,
+    dashboard_position_paths,
+    handle_manual_trade,
+    handle_stop_loss_confirmation,
+    load_json,
+    market_wait_refresh_status,
+    monitor_status,
+    recent_events,
+    recent_flow_history,
+)
 
 
 class ServeMonitorDashboardTest(unittest.TestCase):
@@ -191,6 +202,24 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["update"]["trade"]["side"], "buy")
         self.assertIn("refresh failed", result["refresh_error"])
+
+    def test_handle_stop_loss_confirmation_updates_position_and_refreshes_outputs(self) -> None:
+        with (
+            patch("tools.serve_monitor_dashboard.load_json", return_value={"total_assets": 25480.0}),
+            patch(
+                "tools.serve_monitor_dashboard.apply_stop_loss_confirmation",
+                return_value=({"confirmation": {"code": "000725", "action": "confirm_hard_stop"}}, None),
+            ) as apply_confirmation,
+            patch("tools.serve_monitor_dashboard.run_refresh_commands", return_value=[{"returncode": 0}]) as refresh,
+        ):
+            result = handle_stop_loss_confirmation({"code": "000725", "action": "confirm_hard_stop", "stop_loss_price": 6.1})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["update"]["confirmation"]["action"], "confirm_hard_stop")
+        apply_confirmation.assert_called_once()
+        called_args = apply_confirmation.call_args.args[0]
+        self.assertTrue(all(Path(path).is_absolute() for path in called_args.positions))
+        refresh.assert_called_once_with(25480.0)
 
 
 if __name__ == "__main__":

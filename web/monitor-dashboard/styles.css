@@ -498,6 +498,18 @@ th:nth-child(8) { width: 100px; }
 .stop-loss-summary span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .stop-loss-summary strong { display: block; line-height: 1.4; }
 .stop-loss-summary p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.stop-loss-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+  margin: 12px 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.stop-loss-actions .stop-loss-status { flex: 1 1 100%; min-height: 18px; margin: 0; }
 .stop-candidate-list { display: grid; gap: 8px; }
 .stop-candidate {
   display: grid;

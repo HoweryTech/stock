@@ -15,6 +15,7 @@ const state = {
   detailRenderedAt: "",
   manualTradeDrafts: new Map(),
   pendingManualTrade: null,
+  pendingStopLossConfirmation: null,
 };
 
 const labels = {
@@ -965,7 +966,7 @@ function stopLossSourceLabel(source) {
   }[source] || source || "--";
 }
 
-function renderDynamicStopLossSection(decisionCard) {
+function renderDynamicStopLossSection(item, decisionCard) {
   const levels = decisionCard?.price_levels || {};
   const candidates = levels.dynamic_stop_loss_candidates || [];
   if (!levels.dynamic_stop_loss_price && !levels.stop_loss_price && !candidates.length) return "";
@@ -1003,6 +1004,33 @@ function renderDynamicStopLossSection(decisionCard) {
     : reviewNear
       ? "现价接近未确认的动态复核价；只做人工复核，不会自动变成卖出指令。"
       : "这是未确认的风控参考价；未接近复核区间前，不放入可操作步骤表。";
+  const currentPrice = levels.current_price ?? item?.quote?.latest_price;
+  const confirmationActions = confirmed || !Number.isFinite(selectedPrice) ? "" : `
+    <div class="stop-loss-actions" data-stop-loss-actions>
+      <button class="primary-action danger-action" type="button"
+        data-stop-loss-confirm
+        data-stop-loss-action="confirm_hard_stop"
+        data-code="${escapeHtml(item?.code || decisionCard?.code || "")}"
+        data-name="${escapeHtml(item?.name || decisionCard?.name || "")}"
+        data-stop-loss-price="${escapeHtml(selectedPrice.toFixed(4))}"
+        data-current-price="${escapeHtml(currentPrice == null ? "" : String(currentPrice))}"
+        data-dynamic-source="${escapeHtml(selectedSource || "")}"
+        data-reason="${escapeHtml(levels.dynamic_stop_loss_reason || "")}">
+        确认为硬止损
+      </button>
+      <button class="secondary-action" type="button"
+        data-stop-loss-confirm
+        data-stop-loss-action="keep_reference"
+        data-code="${escapeHtml(item?.code || decisionCard?.code || "")}"
+        data-name="${escapeHtml(item?.name || decisionCard?.name || "")}"
+        data-stop-loss-price="${escapeHtml(selectedPrice.toFixed(4))}"
+        data-current-price="${escapeHtml(currentPrice == null ? "" : String(currentPrice))}"
+        data-dynamic-source="${escapeHtml(selectedSource || "")}"
+        data-reason="${escapeHtml(levels.dynamic_stop_loss_reason || "")}">
+        仅保留参考
+      </button>
+      <p class="stop-loss-status secondary" aria-live="polite"></p>
+    </div>`;
   return detailSection(
     title,
     `<div class="stop-loss-summary">
@@ -1011,11 +1039,122 @@ function renderDynamicStopLossSection(decisionCard) {
       ${levels.dynamic_stop_loss_reason ? `<p>${escapeHtml(levels.dynamic_stop_loss_reason)}</p>` : ""}
     </div>
     ${metricGrid(metrics)}
+    ${confirmationActions}
     <h4>候选价来源</h4>
     <div class="stop-candidate-list">${candidateRows}</div>`,
     "dynamic-stop-loss",
     !confirmed && !reviewNear ? {collapsed: true, summary: "未确认，仅作风险参考"} : {}
   );
+}
+
+function stopLossConfirmationPayload(button) {
+  return {
+    code: button.dataset.code || "",
+    name: button.dataset.name || "",
+    action: button.dataset.stopLossAction || "",
+    stop_loss_price: Number(button.dataset.stopLossPrice || 0),
+    current_price: button.dataset.currentPrice ? Number(button.dataset.currentPrice) : null,
+    dynamic_source: button.dataset.dynamicSource || "",
+    reason: button.dataset.reason || "",
+    note: button.dataset.stopLossAction === "confirm_hard_stop" ? "页面人工确认为硬止损" : "页面人工选择仅保留参考",
+  };
+}
+
+function renderStopLossConfirmation(payload) {
+  const hardStop = payload.action === "confirm_hard_stop";
+  const priceHit = payload.current_price != null && Number(payload.current_price) <= Number(payload.stop_loss_price);
+  const metrics = [
+    ["证券", `${payload.code} ${payload.name || ""}`.trim()],
+    ["本次选择", hardStop ? "确认为硬止损" : "仅保留参考"],
+    ["止损复核价", `${num(payload.stop_loss_price)}元`],
+    ["当前价", money(payload.current_price)],
+    ["价格来源", stopLossSourceLabel(payload.dynamic_source)],
+  ];
+  const consequence = hardStop
+    ? priceHit
+      ? "确认后该价会成为硬风控线；由于现价已不高于该价，刷新后大概率进入退出风险优先。"
+      : "确认后该价会成为硬风控线；后续现价触及或跌破时，会升级为退出风险优先。"
+    : "确认后该价仍只作为风控参考；不会作为卖出触发线，也不会把列表结论升级为止损退出。";
+  const nextPlan = hardStop
+    ? "下一步：刷新建议后只看页面唯一结论；若触发退出风险，按退出步骤处理，不补仓摊低成本。"
+    : "下一步：继续持有观察；只有再次点击“确认为硬止损”后，系统才把该价用于硬风控。";
+  return `<p><strong>${hardStop ? "这是硬止损确认，会改变后续风控触发规则。" : "这是参考保留，不会触发卖出规则。"}</strong></p>
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    <h4>确认后的后果</h4>
+    <p>${escapeHtml(consequence)}</p>
+    ${payload.reason ? `<h4>系统给出的复核依据</h4><p>${escapeHtml(payload.reason)}</p>` : ""}
+    <h4>下一步计划</h4>
+    <p>${escapeHtml(nextPlan)}</p>`;
+}
+
+function openStopLossConfirmation(button) {
+  const payload = stopLossConfirmationPayload(button);
+  const status = button.closest("[data-stop-loss-actions]")?.querySelector(".stop-loss-status");
+  if (!payload.code || !payload.action || !Number.isFinite(payload.stop_loss_price) || payload.stop_loss_price <= 0) {
+    if (status) status.textContent = "止损确认参数缺失，暂不能提交。";
+    return;
+  }
+  state.pendingStopLossConfirmation = { payload, status };
+  state.pendingManualTrade = null;
+  document.querySelector("#manualTradeConfirmTitle").textContent = payload.action === "confirm_hard_stop" ? `确认硬止损 ${payload.name || payload.code}` : `保留参考 ${payload.name || payload.code}`;
+  document.querySelector("#manualTradeConfirmBody").innerHTML = renderStopLossConfirmation(payload);
+  const confirmButton = document.querySelector("#manualTradeConfirmButton");
+  confirmButton.disabled = false;
+  confirmButton.dataset.mode = "submit";
+  confirmButton.textContent = payload.action === "confirm_hard_stop" ? "确认写入硬止损" : "确认仅保留参考";
+  document.querySelector("#manualTradeCancel").hidden = false;
+  setManualTradeConfirmError("");
+  document.querySelector("#manualTradeConfirm").hidden = false;
+  document.querySelector("#manualTradeConfirm").setAttribute("aria-hidden", "false");
+  if (status) status.textContent = "请在确认弹层核对后果。";
+}
+
+async function submitStopLossConfirmation(pending) {
+  if (pending.status) pending.status.textContent = "正在写入止损复核结果并刷新建议...";
+  try {
+    const response = await fetch("/api/stop-loss-confirmation", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(pending.payload),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    if (pending.status) pending.status.textContent = result.refresh_error ? `已保存，但刷新建议失败：${result.refresh_error}` : "已保存并刷新建议。";
+    showStopLossConfirmationResult(result);
+    await loadData();
+  } catch (error) {
+    if (pending.status) pending.status.textContent = `写入失败：${error.message}`;
+    setManualTradeConfirmError(`写入失败：${error.message}`);
+    throw error;
+  }
+}
+
+function renderStopLossConfirmationResult(result) {
+  const confirmation = result.update?.confirmation || {};
+  const metrics = [
+    ["证券", `${confirmation.code || "--"} ${confirmation.name || ""}`.trim()],
+    ["本次选择", confirmation.action_label || "--"],
+    ["确认状态", confirmation.confirmed ? "硬止损已生效" : "仅保留参考"],
+    ["止损价", money(confirmation.stop_loss_price)],
+    ["当前价", money(confirmation.current_price)],
+  ];
+  return `<p><strong>${confirmation.confirmed ? "硬止损已经写入本地持仓文件。" : "已记录为仅保留参考。"}</strong></p>
+    ${result.refresh_error ? `<p class="negative">刷新建议失败：${escapeHtml(result.refresh_error)}</p>` : `<p class="positive">实时建议已刷新。</p>`}
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    <h4>下一步计划</h4>
+    <p>${escapeHtml(confirmation.next_plan || "刷新详情后查看页面唯一结论。")}</p>`;
+}
+
+function showStopLossConfirmationResult(result) {
+  document.querySelector("#manualTradeConfirmTitle").textContent = "止损复核已记录";
+  document.querySelector("#manualTradeConfirmBody").innerHTML = renderStopLossConfirmationResult(result);
+  const button = document.querySelector("#manualTradeConfirmButton");
+  button.disabled = false;
+  button.dataset.mode = "close";
+  button.textContent = "关闭";
+  document.querySelector("#manualTradeCancel").hidden = true;
+  state.pendingStopLossConfirmation = null;
+  setManualTradeConfirmError("");
 }
 
 function renderReverseTPriceAlertSection(item, decisionCard) {
@@ -1659,6 +1798,7 @@ function openManualTradeConfirm(form, payload, item, impact, checks) {
 
 function closeManualTradeConfirm() {
   state.pendingManualTrade = null;
+  state.pendingStopLossConfirmation = null;
   document.querySelector("#manualTradeConfirm").hidden = true;
   document.querySelector("#manualTradeConfirm").setAttribute("aria-hidden", "true");
   const button = document.querySelector("#manualTradeConfirmButton");
@@ -2019,7 +2159,7 @@ function openDetail(code, options = {}) {
       ["最大允许偏差", consistency.max_diff_pct == null ? "--" : `${Number(consistency.max_diff_pct).toFixed(2)}%`],
       ["冲突数量", String((consistency.issues || []).length)],
     ];
-    html += renderDynamicStopLossSection(decisionCard);
+    html += renderDynamicStopLossSection(item, decisionCard);
     html += manualTradeSection(item);
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
     html += renderPositiveTPlan(item.positive_t_plan);
@@ -2344,6 +2484,12 @@ document.querySelector("#detailContent").addEventListener("click", event => {
     prepareManualTradeConfirmation(submitButton.closest(".manual-trade-form"));
     return;
   }
+  const stopLossButton = event.target.closest("[data-stop-loss-confirm]");
+  if (stopLossButton) {
+    event.preventDefault();
+    openStopLossConfirmation(stopLossButton);
+    return;
+  }
   const button = event.target.closest("[data-manual-preset]");
   if (!button) return;
   const form = button.closest(".manual-trade-form") || document.querySelector(`.manual-trade-form[data-code="${CSS.escape(button.dataset.code || state.selectedCode || "")}"]`);
@@ -2394,11 +2540,16 @@ document.querySelector("#manualTradeConfirmButton").addEventListener("click", as
     return;
   }
   const pending = state.pendingManualTrade;
-  if (!pending) return;
+  const pendingStopLoss = state.pendingStopLossConfirmation;
+  if (!pending && !pendingStopLoss) return;
   const button = event.currentTarget;
   button.disabled = true;
   try {
-    await submitManualTrade(pending.payload, pending.form);
+    if (pendingStopLoss) {
+      await submitStopLossConfirmation(pendingStopLoss);
+    } else {
+      await submitManualTrade(pending.payload, pending.form);
+    }
   } catch (_error) {
     button.disabled = false;
   }

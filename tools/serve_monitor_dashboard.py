@@ -18,10 +18,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 try:
+    from tools.apply_stop_loss_confirmation import apply_stop_loss_confirmation
     from tools.apply_manual_trade import apply_manual_trade
     from tools.check_market_wait_refresh import build_refresh_check
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.apply_stop_loss_confirmation import apply_stop_loss_confirmation
     from tools.apply_manual_trade import apply_manual_trade
     from tools.check_market_wait_refresh import build_refresh_check
 
@@ -168,6 +170,22 @@ def manual_trade_args(payload: dict[str, object], total_assets: float | None) ->
     )
 
 
+def stop_loss_confirmation_args(payload: dict[str, object]) -> Namespace:
+    return Namespace(
+        positions=dashboard_position_paths(),
+        code=str(payload.get("code") or ""),
+        action=str(payload.get("action") or ""),
+        stop_loss_price=float(payload.get("stop_loss_price") or 0),
+        current_price=payload.get("current_price"),
+        dynamic_source=str(payload.get("dynamic_source") or ""),
+        reason=str(payload.get("reason") or ""),
+        note=str(payload.get("note") or ""),
+        source="dashboard",
+        confirmed_at=payload.get("confirmed_at") or None,
+        audit_output=str(ROOT / "data" / "metadata" / "stop-loss-confirmations.jsonl"),
+    )
+
+
 def run_refresh_commands(total_assets: float) -> list[dict[str, object]]:
     commands = [
         [".venv/bin/python", "tools/forecast_reverse_t.py", "--positions", "positions/POS-EASTMONEY-*.yaml", "--output", "data/metadata/reverse-t-forecast.json"],
@@ -309,6 +327,19 @@ def handle_manual_trade(payload: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "update": update, "refresh": [], "refresh_error": str(exc), "post_trade_tracking": tracking}
 
 
+def handle_stop_loss_confirmation(payload: dict[str, object]) -> dict[str, object]:
+    snapshot = load_json(API_FILES["/api/snapshot"]) or {}
+    total_assets_raw = snapshot.get("total_assets")
+    total_assets = float(total_assets_raw) if isinstance(total_assets_raw, (int, float)) else 25480.0
+    args = stop_loss_confirmation_args(payload)
+    update, _ = apply_stop_loss_confirmation(args)
+    try:
+        refresh = run_refresh_commands(total_assets)
+        return {"ok": True, "update": update, "refresh": refresh}
+    except Exception as exc:
+        return {"ok": True, "update": update, "refresh": [], "refresh_error": str(exc)}
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def send_json(self, data: object, status: int = 200) -> None:
         payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -376,7 +407,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path != "/api/manual-trade":
+        handlers = {
+            "/api/manual-trade": handle_manual_trade,
+            "/api/stop-loss-confirmation": handle_stop_loss_confirmation,
+        }
+        handler = handlers.get(parsed.path)
+        if handler is None:
             self.send_error(404)
             return
         try:
@@ -386,9 +422,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("request body must be a JSON object")
-            self.send_json(handle_manual_trade(payload))
+            self.send_json(handler(payload))
         except Exception as exc:
-            print(f"manual trade request failed: {exc}", file=sys.stderr, flush=True)
+            print(f"post request failed for {parsed.path}: {exc}", file=sys.stderr, flush=True)
             self.send_json({"ok": False, "error": str(exc)}, 400)
 
     def log_message(self, format: str, *args: object) -> None:
