@@ -381,6 +381,9 @@ th:nth-child(8) { width: 100px; }
 .review-warn span { color: var(--amber); background: var(--amber-bg); }
 .review-block span { color: var(--red); background: var(--red-bg); }
 .review-item strong { display: block; margin-top: 4px; }
+.manual-plan { padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
+.manual-plan-ready_for_manual_confirm { border-color: rgba(35, 122, 63, 0.28); background: var(--green-bg); }
+.manual-plan-blocked { border-color: rgba(190, 52, 48, 0.28); background: var(--red-bg); }
 .technical-table-wrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; }
 .technical-table { min-width: 720px; table-layout: fixed; }
 .technical-table th { height: 34px; padding: 0 8px; }

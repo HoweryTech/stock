@@ -242,6 +242,10 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["post_unlock_review_summary"]["status"], "manual_candidate")
         self.assertEqual(card["post_unlock_review_summary"]["candidate"], "positive_t")
         self.assertEqual(report["post_unlock_review_alerts"][0]["action_label"], "正T人工候选")
+        self.assertEqual(card["manual_execution_plan"]["status"], "ready_for_manual_confirm")
+        self.assertEqual(card["manual_execution_plan"]["side"], "buy")
+        self.assertEqual(card["manual_execution_plan"]["shares"], 200)
+        self.assertTrue(any("买入价格只填" in step for step in card["manual_execution_plan"]["steps"]))
         self.assertEqual(card["capital_plan"]["single_add_tier"], "strong")
         self.assertEqual(card["capital_plan"]["effective_single_add_pct_total_assets"], 5.0)
         self.assertEqual(card["capital_plan"]["max_additional_capital"], 2500.0)
@@ -340,6 +344,34 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["post_unlock_review_summary"]["status"], "blocked_after_unlock")
         self.assertIn("数据质量", card["post_unlock_review_summary"]["blocking_checks"])
         self.assertEqual(report["post_unlock_review_alerts"][0]["action_label"], "复核阻断，只观察")
+
+    def test_reverse_t_manual_candidate_builds_sell_plan(self) -> None:
+        item = intraday_item(reverse_status="candidate")
+        item["position"]["shares"] = 500
+        item["position"]["entry_price"] = 9.8
+        item["reverse_t_plan"]["trade_shares"] = 100
+        item["reverse_t_plan"]["buyback_max_price"] = 9.95
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(),
+            None,
+            {"items": [{"code": "600000", "verdict": "pass", "verdict_label": "反T回测通过"}]},
+            None,
+            None,
+            bullish_technical_doc(),
+            {},
+            generated_at=datetime(2026, 7, 16, 9, 39, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["post_unlock_review_summary"]["status"], "manual_candidate")
+        self.assertEqual(card["post_unlock_review_summary"]["candidate"], "reverse_t")
+        self.assertEqual(card["manual_execution_plan"]["side"], "sell")
+        self.assertEqual(card["manual_execution_plan"]["trade_intent"], "reverse_t_open")
+        self.assertEqual(card["manual_execution_plan"]["post_trade_shares"], 400)
+        self.assertTrue(any("只有价格不高于" in step for step in card["manual_execution_plan"]["steps"]))
 
     def test_positive_t_candidate_without_intraday_confirmation_waits(self) -> None:
         item = intraday_item()

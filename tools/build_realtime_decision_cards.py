@@ -1373,6 +1373,154 @@ def floor_lot_from_cash(cash: float | None, price: float | None) -> int:
     return max(0, int(cash / price // 100 * 100))
 
 
+def estimate_trade_fees(side: str, price: float | None, shares: int | float | None) -> dict[str, float | None]:
+    if price is None or shares is None or price <= 0 or shares <= 0:
+        return {"commission": None, "stamp_duty": None, "transfer_fee": None, "total_fees": None}
+    amount = float(price) * float(shares)
+    commission = max(amount * 0.0003, 5.0)
+    stamp_duty = amount * 0.0005 if side == "sell" else 0.0
+    transfer_fee = amount * 0.00001
+    return {
+        "commission": rounded(commission),
+        "stamp_duty": rounded(stamp_duty),
+        "transfer_fee": rounded(transfer_fee),
+        "total_fees": rounded(commission + stamp_duty + transfer_fee),
+    }
+
+
+def build_manual_execution_plan(
+    review_summary: dict[str, Any],
+    levels: dict[str, Any],
+    position: dict[str, Any],
+    capital_plan: dict[str, Any],
+    positive_timing: dict[str, Any],
+    intraday: dict[str, Any],
+) -> dict[str, Any]:
+    if review_summary.get("status") != "manual_candidate":
+        return {
+            "applicable": False,
+            "status": "not_applicable",
+            "status_label": "未进入人工候选，不生成交易计划",
+            "steps": [],
+        }
+
+    candidate = review_summary.get("candidate")
+    current = as_float(levels.get("current_price"))
+    current_shares = int(as_float(position.get("shares"), 0.0) or 0)
+    entry_price = as_float(position.get("entry_price"))
+    if candidate == "positive_t":
+        shares = int(capital_plan.get("suggested_buy_shares") or 0)
+        buy_zone = capital_plan.get("buy_zone") or positive_timing.get("buy_zone") or []
+        target_zone = capital_plan.get("target_sell_zone") or positive_timing.get("target_sell_zone") or []
+        buy_high = as_float(buy_zone[1]) if isinstance(buy_zone, list) and len(buy_zone) >= 2 else current
+        target_low = as_float(target_zone[0]) if isinstance(target_zone, list) and len(target_zone) >= 2 else None
+        estimated_amount = buy_high * shares if buy_high is not None and shares else None
+        fees = estimate_trade_fees("buy", buy_high, shares)
+        if not shares or buy_high is None or not isinstance(buy_zone, list) or len(buy_zone) < 2 or not isinstance(target_zone, list) or len(target_zone) < 2:
+            return {
+                "applicable": True,
+                "status": "blocked",
+                "status_label": "正T候选缺少可买数量或价格区间",
+                "candidate": "positive_t",
+                "steps": ["不下单；等待资金计划给出100股整数、买入观察区和目标卖出区后再确认。"],
+            }
+        added_risk = as_float(capital_plan.get("added_risk_amount"))
+        target_profit = None
+        if target_low is not None:
+            target_profit = (target_low - buy_high) * shares - float(fees["total_fees"] or 0.0) - float(estimate_trade_fees("sell", target_low, shares)["total_fees"] or 0.0)
+        return {
+            "applicable": True,
+            "status": "ready_for_manual_confirm",
+            "status_label": "正T人工候选计划",
+            "candidate": "positive_t",
+            "side": "buy",
+            "side_label": "买入",
+            "trade_intent": "positive_t_open",
+            "shares": shares,
+            "price_zone": buy_zone,
+            "target_zone": target_zone,
+            "max_price": rounded(buy_high),
+            "estimated_amount": rounded(estimated_amount),
+            "estimated_fees": fees,
+            "expected_net_profit_at_target": rounded(target_profit),
+            "post_trade_shares": current_shares + shares,
+            "risk_amount": rounded(added_risk),
+            "failure_conditions": [
+                f"价格没有进入 {buy_zone[0]:.2f}-{buy_zone[1]:.2f} 元买入观察区时，不追价。",
+                f"买入后跌破止损价 {money_text(as_float(levels.get('stop_loss_price')))}，新增仓位按止损处理。",
+                "买入后未到目标卖出区，当天收盘前重新评估是否转为普通加仓持有。",
+            ],
+            "steps": [
+                f"打开券商交易软件，选择“买入”，证券代码按当前详情页股票。",
+                f"买入价格只填 {buy_zone[0]:.2f}-{buy_zone[1]:.2f} 元区间内的价格；高于 {buy_high:.2f} 元不买。",
+                f"买入数量填 {shares} 股；本次预计占用资金约 {money_text(estimated_amount)}，预估费用约 {money_text(as_float(fees.get('total_fees')))}。",
+                "提交前核对方向是“买入”、数量和价格无误；未成交不追高改价。",
+                f"成交后立即在本系统写入买入成交；随后只盯 {target_zone[0]:.2f}-{target_zone[1]:.2f} 元卖出新增的 {shares} 股。",
+            ],
+            "post_trade_plan": f"买入成交后，目标是在 {target_zone[0]:.2f}-{target_zone[1]:.2f} 元卖出新增 {shares} 股完成正T；若不到目标，重新评估而不是继续加仓。",
+        }
+
+    if candidate == "reverse_t":
+        reverse_plan = intraday.get("reverse_t_plan") or {}
+        shares = int(reverse_plan.get("trade_shares") or 100)
+        sell_zone = levels.get("reverse_t_sell_zone") or reverse_plan.get("sell_zone") or []
+        buyback_max = as_float(levels.get("reverse_t_buyback_max_price") or reverse_plan.get("buyback_max_price"))
+        sell_low = as_float(sell_zone[0]) if isinstance(sell_zone, list) and len(sell_zone) >= 2 else current
+        sell_high = as_float(sell_zone[1]) if isinstance(sell_zone, list) and len(sell_zone) >= 2 else current
+        fee_price = sell_low or current
+        fees = estimate_trade_fees("sell", fee_price, shares)
+        estimated_cash = fee_price * shares - float(fees["total_fees"] or 0.0) if fee_price is not None else None
+        realized_pnl = None
+        if fee_price is not None and entry_price is not None:
+            realized_pnl = (fee_price - entry_price) * shares - float(fees["total_fees"] or 0.0)
+        if not shares or sell_low is None or sell_high is None:
+            return {
+                "applicable": True,
+                "status": "blocked",
+                "status_label": "反T候选缺少卖出区间或数量",
+                "candidate": "reverse_t",
+                "steps": ["不下单；等待卖出观察区、回补上限和100股整数数量全部生成后再确认。"],
+            }
+        return {
+            "applicable": True,
+            "status": "ready_for_manual_confirm",
+            "status_label": "反T人工候选计划",
+            "candidate": "reverse_t",
+            "side": "sell",
+            "side_label": "卖出",
+            "trade_intent": "reverse_t_open",
+            "shares": shares,
+            "price_zone": sell_zone,
+            "target_zone": [rounded(buyback_max), rounded(buyback_max)] if buyback_max is not None else None,
+            "min_price": rounded(sell_low),
+            "estimated_amount": rounded(estimated_cash),
+            "estimated_fees": fees,
+            "estimated_realized_pnl": rounded(realized_pnl),
+            "post_trade_shares": current_shares - shares,
+            "failure_conditions": [
+                f"价格没有进入 {sell_low:.2f}-{sell_high:.2f} 元卖出观察区时，不卖。",
+                "卖出后没有跌到回补上限，不追买；这笔卖出先按计划外减仓风险管理。",
+                "卖出后若继续上涨，不加倍卖出；等待系统下一轮重新评估。",
+            ],
+            "steps": [
+                "打开券商交易软件，选择“卖出”，证券代码按当前详情页股票。",
+                f"卖出价格只填 {sell_low:.2f}-{sell_high:.2f} 元区间内的价格；低于 {sell_low:.2f} 元不卖。",
+                f"卖出数量填 {shares} 股；预计卖出后剩余 {current_shares - shares} 股，预估费用约 {money_text(as_float(fees.get('total_fees')))}。",
+                "提交前核对方向是“卖出”、数量和价格无误；成交后不要立刻追买。",
+                f"成交后在本系统写入反T卖出腿；只有价格不高于 {money_text(buyback_max)} 才考虑回补同等 {shares} 股。",
+            ],
+            "post_trade_plan": f"卖出成交后等待回补价不高于 {money_text(buyback_max)}；未到回补价不买回，防止反T变追高。",
+        }
+
+    return {
+        "applicable": True,
+        "status": "blocked",
+        "status_label": "未知候选类型，不能生成计划",
+        "candidate": candidate,
+        "steps": ["不下单；等待系统识别为正T或反T候选后再生成计划。"],
+    }
+
+
 def build_capital_plan(
     state: str,
     levels: dict[str, Any],
@@ -1700,6 +1848,14 @@ def build_card(
         technical_assessment=technical_assessment,
         positive_timing=positive_timing,
     )
+    manual_execution_plan = build_manual_execution_plan(
+        post_unlock_review_summary,
+        levels,
+        intraday.get("position", {}),
+        capital_plan,
+        positive_timing,
+        intraday,
+    )
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
@@ -1743,6 +1899,7 @@ def build_card(
         "capital_plan": capital_plan,
         "positive_timing": positive_timing,
         "post_unlock_review_summary": post_unlock_review_summary,
+        "manual_execution_plan": manual_execution_plan,
         "position": intraday.get("position", {}),
         "market_context": {
             "quote_lag_seconds": value_at(intraday, "quote.quote_lag_seconds"),
@@ -1909,6 +2066,12 @@ def render_markdown(report: dict[str, Any]) -> str:
         review_summary = card.get("post_unlock_review_summary") or {}
         if review_summary:
             lines.append(f"- 解锁后复核：{review_summary.get('status_label')}；下一步：{review_summary.get('next_step') or '-'}")
+        manual_plan = card.get("manual_execution_plan") or {}
+        if manual_plan.get("applicable"):
+            lines.append(
+                f"- 人工候选计划：{manual_plan.get('status_label')}；"
+                f"{manual_plan.get('side_label') or '-'} {manual_plan.get('shares') or 0} 股"
+            )
         if card["blockers"]:
             lines.append("- 阻断：")
             lines.extend(f"  - {item}" for item in card["blockers"][:4])

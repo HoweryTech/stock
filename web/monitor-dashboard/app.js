@@ -592,6 +592,44 @@ function renderTechnicalOperationBlock(operation, mode) {
   </div>`;
 }
 
+function renderManualExecutionPlan(plan) {
+  if (!plan?.applicable) return "";
+  const priceZone = Array.isArray(plan.price_zone) && plan.price_zone.length >= 2
+    ? `${num(plan.price_zone[0])}-${num(plan.price_zone[1])}元`
+    : "--";
+  const targetZone = Array.isArray(plan.target_zone) && plan.target_zone.length >= 2
+    ? plan.target_zone[0] === plan.target_zone[1] ? `${num(plan.target_zone[0])}元` : `${num(plan.target_zone[0])}-${num(plan.target_zone[1])}元`
+    : "--";
+  const fees = plan.estimated_fees || {};
+  const metrics = [
+    ["计划状态", plan.status_label || "--"],
+    ["交易方向", plan.side_label || "--"],
+    ["成交意图", plan.trade_intent === "reverse_t_open" ? "反T卖出腿" : plan.trade_intent === "positive_t_open" ? "正T买入腿" : plan.trade_intent || "--"],
+    ["建议数量", plan.shares ? `${plan.shares}股` : "--"],
+    ["价格区间", priceZone],
+    ["目标区间", targetZone],
+    ["预计金额", money(plan.estimated_amount)],
+    ["预估费用", money(fees.total_fees)],
+    ["成交后股数", plan.post_trade_shares == null ? "--" : `${plan.post_trade_shares}股`],
+  ];
+  if (plan.expected_net_profit_at_target != null) metrics.push(["目标价扣费收益", money(plan.expected_net_profit_at_target)]);
+  if (plan.estimated_realized_pnl != null) metrics.push(["预计实现盈亏", money(plan.estimated_realized_pnl)]);
+  if (plan.risk_amount != null) metrics.push(["新增风险金额", money(plan.risk_amount)]);
+  const steps = plan.steps || [];
+  const failures = plan.failure_conditions || [];
+  return detailSection(
+    "人工候选交易计划",
+    `<div class="manual-plan manual-plan-${escapeHtml(plan.status || "watch")}">
+      <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+      ${steps.length ? `<h4>傻瓜式操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
+      ${failures.length ? `<h4>失败条件</h4><ul class="reason-list">${failures.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+      ${plan.post_trade_plan ? `<h4>成交后下一步</h4><p>${escapeHtml(plan.post_trade_plan)}</p>` : ""}
+      <p class="secondary">这是人工确认计划，不会自动下单；只有券商软件真实成交后，才在本系统写入成交。</p>
+    </div>`,
+    "manual-execution-plan"
+  );
+}
+
 function renderPositiveTiming(timing, technicalOperation = null) {
   if (!timing || timing.status === "not_applicable") return "";
   const buyZone = timing.buy_zone ? `${num(timing.buy_zone[0])}–${num(timing.buy_zone[1])}元` : "--";
@@ -1086,6 +1124,7 @@ function openDetail(code, options = {}) {
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
     );
+    html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
     html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);
     html += renderCapitalPlan(decisionCard.capital_plan);
     html += detailSection(
@@ -1275,7 +1314,8 @@ function renderEvents() {
       review.blocked_check_count ? `阻断 ${review.blocked_check_count} 项` : "",
       review.waiting_check_count ? `等待 ${review.waiting_check_count} 项` : "",
     ].filter(Boolean);
-    return `<article class="event-item event-review event-clickable" tabindex="0" data-event-code="${escapeHtml(alert.code || "")}" data-event-target="technical-gate">
+    const target = review.status === "manual_candidate" ? "manual-execution-plan" : "technical-gate";
+    return `<article class="event-item event-review event-clickable" tabindex="0" data-event-code="${escapeHtml(alert.code || "")}" data-event-target="${escapeHtml(target)}">
       <div class="event-time">${escapeHtml(state.decisionReport?.generated_at || "")}</div>
       <div class="event-title">${escapeHtml(alert.code || "")} ${escapeHtml(alert.name || "")} · ${escapeHtml(alert.title || "自动复核提醒")}</div>
       ${alert.action_label ? `<div class="event-action event-action-${escapeHtml(alert.severity || "watch")}">${escapeHtml(alert.action_label)}</div>` : ""}
