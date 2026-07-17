@@ -626,6 +626,103 @@ def technical_post_unlock_checklist(operation: dict[str, Any]) -> list[str]:
     ]
 
 
+def review_check(code: str, label: str, status: str, message: str, next_step: str) -> dict[str, str]:
+    return {"code": code, "label": label, "status": status, "message": message, "next_step": next_step}
+
+
+def build_post_unlock_review(
+    technical_operation: dict[str, Any],
+    state: str,
+    levels: dict[str, Any],
+    data_quality: dict[str, Any] | None,
+    positive_timing: dict[str, Any],
+    reverse_backtest: dict[str, Any] | None,
+    intraday: dict[str, Any],
+) -> dict[str, Any]:
+    checks: list[dict[str, str]] = []
+    if not (technical_operation.get("allow_buy_watch") or technical_operation.get("allow_t_watch")):
+        checks.append(
+            review_check(
+                "technical_gate",
+                "技术门禁",
+                "block",
+                technical_operation.get("next_step") or "技术门禁未解除。",
+                "继续等待解锁条件全部满足；当前不买入、不补仓、不做T。",
+            )
+        )
+        return {
+            "status": "technical_locked",
+            "status_label": "技术未解锁，只观察",
+            "candidate": None,
+            "checks": checks,
+            "next_step": "接近解锁只代表需要重点观察；技术门禁解除前不进入交易候选。",
+        }
+
+    quality_status = data_quality_status(data_quality)
+    trust_level = data_trust_level(data_quality)
+    if quality_status in QUALITY_BLOCKER_STATUSES or trust_level == "low":
+        checks.append(
+            review_check(
+                "data_quality",
+                "数据质量",
+                "block",
+                f"数据状态 {quality_status or '-'}，可信等级 {trust_level or '-'}。",
+                "先修复行情、日线、分钟线或一致性问题，再重新评估。",
+            )
+        )
+    elif data_quality:
+        checks.append(review_check("data_quality", "数据质量", "pass", "数据质量没有硬阻断。", "继续检查止损距离和候选状态。"))
+    else:
+        checks.append(review_check("data_quality", "数据质量", "warn", "未提供数据质量快照。", "刷新完整日内决策链后再进入候选。"))
+
+    current = as_float(levels.get("current_price"))
+    near_block = as_float(levels.get("near_stop_block_price"))
+    stop_loss = as_float(levels.get("stop_loss_price"))
+    if current is not None and stop_loss is not None and current <= stop_loss:
+        checks.append(review_check("stop_loss", "止损距离", "block", f"现价 {current:.2f} 已不高于止损价 {stop_loss:.2f}。", "止损风险优先，不评估买入或做T。"))
+    elif current is not None and near_block is not None and current <= near_block:
+        checks.append(review_check("stop_buffer", "止损距离", "block", f"现价 {current:.2f} 仍在做T阻断价 {near_block:.2f} 附近。", "等待价格离开止损阻断区后再评估。"))
+    else:
+        checks.append(review_check("stop_buffer", "止损距离", "pass", "未触发止损或做T阻断价。", "继续检查正T/反T候选。"))
+
+    positive_status = positive_timing.get("status")
+    if positive_status == "confirmed":
+        checks.append(review_check("positive_timing", "正T分时", "pass", "正T分时评分已确认。", "可进入正T人工候选复核。"))
+    elif positive_timing.get("available"):
+        checks.append(review_check("positive_timing", "正T分时", "warn", f"正T分时状态为 {positive_status or '-'}。", positive_timing.get("next_action") or "继续等待分时确认。"))
+    else:
+        checks.append(review_check("positive_timing", "正T分时", "warn", "当前不是正T分时确认状态。", "没有正T候选时不买入。"))
+
+    reverse_status = value_at(intraday, "reverse_t_plan.status")
+    reverse_verdict = (reverse_backtest or {}).get("verdict")
+    if reverse_status == "candidate" and reverse_verdict in {"pass", "rule_observation_only"}:
+        checks.append(review_check("reverse_t", "反T门禁", "pass", "反T候选和回测门禁同时满足。", "可进入反T人工候选复核。"))
+    elif reverse_status == "candidate":
+        checks.append(review_check("reverse_t", "反T门禁", "block", f"反T候选存在，但回测门禁为 {reverse_verdict or '-'}。", "回测门禁未通过前不执行反T。"))
+    else:
+        checks.append(review_check("reverse_t", "反T门禁", "warn", f"反T状态为 {reverse_status or '-'}。", "未进入反T候选时不卖出做T。"))
+
+    blocking = [item for item in checks if item["status"] == "block"]
+    positive_ready = any(item["code"] == "positive_timing" and item["status"] == "pass" for item in checks)
+    reverse_ready = any(item["code"] == "reverse_t" and item["status"] == "pass" for item in checks)
+    if blocking:
+        status = "blocked_after_unlock"
+        label = "技术已观察，但复核仍阻断"
+        candidate = None
+        next_step = blocking[0]["next_step"]
+    elif positive_ready or reverse_ready:
+        status = "manual_candidate"
+        label = "可进入人工候选复核"
+        candidate = "positive_t" if positive_ready else "reverse_t"
+        next_step = "只生成候选计划，不自动下单；继续人工确认价格、数量、费用和失败后果。"
+    else:
+        status = "watch_only"
+        label = "技术解锁后仍只观察"
+        candidate = None
+        next_step = "技术面改善后，还需要等待正T或反T候选结构出现。"
+    return {"status": status, "status_label": label, "candidate": candidate, "checks": checks, "next_step": next_step}
+
+
 def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> dict[str, Any]:
     if not technical_indicators:
         return {"available": False, "score": None, "label": "missing", "signals": [], "periods": {}, "dimension_scores": {}, "dimension_signals": [], "summary": ""}
@@ -1522,6 +1619,15 @@ def build_card(
     )
     blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment)
     levels = price_levels(portfolio, t_check, intraday, reverse_forecast)
+    technical_operation["post_unlock_review"] = build_post_unlock_review(
+        technical_operation,
+        state,
+        levels,
+        data_quality,
+        positive_timing,
+        reverse_backtest,
+        intraday,
+    )
     capital_plan = build_capital_plan(
         state,
         levels,

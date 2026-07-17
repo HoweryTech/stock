@@ -542,6 +542,7 @@ function renderTechnicalOperationBlock(operation, mode) {
   const label = mode === "positive_t" ? "正T被技术面阻断" : "反T被技术面阻断";
   const unlock = operation.unlock_conditions || [];
   const checklist = operation.post_unlock_checklist || [];
+  const review = operation.post_unlock_review || {};
   const unlockHtml = unlock.length ? `<h4>解锁条件</h4><div class="unlock-list">${unlock.map(condition => `
     <div class="unlock-item ${condition.passed ? "unlock-pass" : "unlock-block"}">
       <span>${condition.passed ? "已满足" : "未满足"}</span>
@@ -551,12 +552,23 @@ function renderTechnicalOperationBlock(operation, mode) {
       ${condition.hint ? `<p class="secondary">${escapeHtml(condition.hint)}</p>` : ""}
     </div>`).join("")}</div>` : "";
   const checklistHtml = checklist.length ? `<h4>解锁后检查清单</h4><ol class="reason-list">${checklist.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : "";
+  const reviewChecks = review.checks || [];
+  const reviewHtml = review.status ? `<h4>自动复核链</h4>
+    <div class="review-status"><strong>${escapeHtml(review.status_label || review.status)}</strong><p>${escapeHtml(review.next_step || "")}</p></div>
+    ${reviewChecks.length ? `<div class="review-list">${reviewChecks.map(check => `
+      <div class="review-item review-${escapeHtml(check.status || "warn")}">
+        <span>${check.status === "pass" ? "通过" : check.status === "block" ? "阻断" : "等待"}</span>
+        <strong>${escapeHtml(check.label || check.code || "检查项")}</strong>
+        <p>${escapeHtml(check.message || "")}</p>
+        <p class="secondary">${escapeHtml(check.next_step || "")}</p>
+      </div>`).join("")}</div>` : ""}` : "";
   return `<div class="blocker-item" data-detail-section="technical-gate">
     <div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(operation.tier_label || "--")}</span></div>
     <p>${escapeHtml(operation.reason || "技术操作档位不支持本轮交易。")}</p>
     <p class="secondary">${escapeHtml(operation.next_step || "等待技术面修复后再重新评估。")}</p>
     ${unlockHtml}
     ${checklistHtml}
+    ${reviewHtml}
   </div>`;
 }
 
