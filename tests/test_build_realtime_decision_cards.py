@@ -162,6 +162,10 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["decision"]["action_label"], "止损风险优先：不补仓、不做T")
         self.assertFalse(card["decision"]["execution_allowed"])
         self.assertIn("禁止做T", card["decision"]["next_step"])
+        exit_actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+        self.assertEqual(exit_actions["止损/退出"]["status"], "ready")
+        self.assertEqual(exit_actions["止损/退出"]["operation"], "卖出风险仓位")
+        self.assertEqual(exit_actions["做T阻断"]["status"], "blocked")
         self.assertIn("禁止买入、补仓、做T", card["decision"]["action_steps"][0])
         self.assertTrue(any("操作后果" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("仓位后果" in step for step in card["decision"]["action_steps"]))
@@ -206,6 +210,11 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["capital_plan"]["effective_single_add_pct_total_assets"], 3.0)
         self.assertEqual(card["capital_plan"]["max_single_add_pct_total_assets"], 5.0)
         self.assertEqual(card["capital_plan"]["suggested_buy_shares"], 100)
+        actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+        self.assertIn("正T买入", actions)
+        self.assertEqual(actions["正T买入"]["shares"], 100)
+        self.assertEqual(actions["正T买入"]["status"], "watch")
+        self.assertIn("禁止追买", actions)
         self.assertTrue(any("最多只准备追加" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("买入后目标不是长期摊低成本" in step for step in card["decision"]["action_steps"]))
 
@@ -381,6 +390,10 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["manual_execution_plan"]["side"], "sell")
         self.assertEqual(card["manual_execution_plan"]["trade_intent"], "reverse_t_open")
         self.assertEqual(card["manual_execution_plan"]["post_trade_shares"], 400)
+        reverse_actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+        self.assertEqual(reverse_actions["反T卖出"]["status"], "ready")
+        self.assertEqual(reverse_actions["反T卖出"]["shares"], 100)
+        self.assertEqual(reverse_actions["反T回补"]["price"], "≤ 9.95 元")
         self.assertTrue(any("只有价格不高于" in step for step in card["manual_execution_plan"]["steps"]))
 
     def test_negative_t_performance_blocks_reverse_t_candidate(self) -> None:
@@ -419,6 +432,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["post_unlock_review_summary"]["status"], "blocked_after_unlock")
         self.assertIn("做T实盘绩效", card["post_unlock_review_summary"]["blocking_checks"])
         self.assertTrue(any("累计净收益 -6.50 元" in blocker for blocker in card["blockers"]))
+        blocked_actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+        self.assertEqual(blocked_actions["反T卖出"]["status"], "blocked")
+        self.assertEqual(blocked_actions["反T卖出"]["status_label"], "绩效阻断")
         self.assertTrue(any("做T实盘绩效阻断" in step for step in card["decision"]["action_steps"]))
         self.assertFalse(card["manual_execution_plan"]["applicable"])
 

@@ -578,6 +578,37 @@ function renderCapitalPlan(plan) {
   );
 }
 
+function renderPriceActionTable(table) {
+  const rows = table?.rows || [];
+  if (!rows.length) return "";
+  const statusClass = status => ({
+    ready: "positive",
+    watch: "positive-t-wait",
+    blocked: "negative",
+    reference: "secondary",
+  }[status] || "secondary");
+  return detailSection(
+    "价格动作表",
+    `<p class="secondary">${escapeHtml(table.summary || "按触发价执行；未触发前只观察。")}</p>
+    <div class="action-table-wrap">
+      <table class="action-table">
+        <thead><tr><th>动作</th><th>触发条件</th><th>价格</th><th>操作</th><th>状态</th><th>数量</th></tr></thead>
+        <tbody>${rows.map(row => `
+          <tr>
+            <td><strong>${escapeHtml(row.action || "--")}</strong></td>
+            <td>${escapeHtml(row.trigger || "--")}</td>
+            <td class="number">${escapeHtml(row.price || "--")}</td>
+            <td>${escapeHtml(row.operation || "--")}</td>
+            <td class="${statusClass(row.status)}">${escapeHtml(row.status_label || row.status || "--")}</td>
+            <td class="number">${row.shares ? `${escapeHtml(row.shares)}股` : "--"}</td>
+          </tr>
+          ${row.note ? `<tr class="action-note"><td></td><td colspan="5">${escapeHtml(row.note)}</td></tr>` : ""}`
+        ).join("")}</tbody>
+      </table>
+    </div>`
+  );
+}
+
 function renderTechnicalOperationBlock(operation, mode) {
   if (!operation?.tier) return "";
   const allowed = mode === "positive_t" ? operation.allow_buy_watch : operation.allow_t_watch;
@@ -1292,6 +1323,7 @@ function openDetail(code, options = {}) {
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
     );
+    html += renderPriceActionTable(decisionCard.price_action_table);
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
     html += renderPositiveTPlan(item.positive_t_plan);
     html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);

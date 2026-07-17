@@ -1887,6 +1887,195 @@ def build_action_steps(
     return ["本轮不买不卖，继续监控关键价格、数据质量和技术指标变化。"]
 
 
+def format_price_zone(zone: Any) -> str:
+    if isinstance(zone, list) and len(zone) >= 2:
+        low = as_float(zone[0])
+        high = as_float(zone[1])
+        if low is not None and high is not None:
+            return f"{low:.2f}-{high:.2f} 元"
+    value = as_float(zone)
+    return "-" if value is None else f"{value:.2f} 元"
+
+
+def action_table_row(
+    action: str,
+    trigger: str,
+    price: str,
+    operation: str,
+    *,
+    status: str,
+    status_label: str,
+    shares: int | None = None,
+    note: str = "",
+) -> dict[str, Any]:
+    return {
+        "action": action,
+        "trigger": trigger,
+        "price": price,
+        "operation": operation,
+        "shares": shares,
+        "status": status,
+        "status_label": status_label,
+        "note": note,
+    }
+
+
+def build_price_action_table(
+    state: str,
+    levels: dict[str, Any],
+    intraday: dict[str, Any],
+    capital_plan: dict[str, Any],
+    positive_timing: dict[str, Any],
+    manual_execution_plan: dict[str, Any],
+    t_performance_gate: dict[str, Any],
+    data_quality: dict[str, Any] | None,
+) -> dict[str, Any]:
+    current = as_float(levels.get("current_price"))
+    stop_loss = as_float(levels.get("stop_loss_price"))
+    near_block = as_float(levels.get("near_stop_block_price"))
+    position = intraday.get("position") or {}
+    shares = whole_lot_shares(position.get("shares"))
+    reverse_plan = intraday.get("reverse_t_plan") or {}
+    positive_plan = intraday.get("positive_t_plan") or {}
+    data_allowed = data_quality is None or bool(value_at(data_quality or {}, "data_trust.intraday_decision_allowed"))
+    rows: list[dict[str, Any]] = []
+
+    rows.append(
+        action_table_row(
+            "当前动作",
+            "现在",
+            money_text(current),
+            "不直接下单",
+            status="blocked" if state in {"data_stale", "market_wait", "data_insufficient"} else "watch",
+            status_label="等待数据" if state in {"data_stale", "market_wait", "data_insufficient"} else "观察",
+            shares=None,
+            note="先看本表价格触发条件；没有进入触发价前不操作。",
+        )
+    )
+
+    if stop_loss is not None:
+        stop_ready = current is not None and current <= stop_loss
+        rows.append(
+            action_table_row(
+                "止损/退出",
+                f"价格小于等于 {stop_loss:.2f} 元",
+                f"≤ {stop_loss:.2f} 元",
+                "卖出风险仓位",
+                status="ready" if stop_ready else "watch",
+                status_label="已触发" if stop_ready else "未触发",
+                shares=shares,
+                note="触发后优先处理退出风险；禁止补仓、禁止做T摊低成本。",
+            )
+        )
+
+    if near_block is not None:
+        blocked_now = current is not None and current <= near_block
+        rows.append(
+            action_table_row(
+                "做T阻断",
+                f"价格小于等于 {near_block:.2f} 元",
+                f"≤ {near_block:.2f} 元",
+                "禁止买入/补仓/做T",
+                status="blocked" if blocked_now else "watch",
+                status_label="阻断中" if blocked_now else "未进入",
+                note="离止损太近时，不允许用正T或反T扩大风险。",
+            )
+        )
+
+    buy_zone = capital_plan.get("buy_zone") or positive_timing.get("buy_zone")
+    target_zone = capital_plan.get("target_sell_zone") or positive_timing.get("target_sell_zone") or positive_plan.get("target_sell_zone")
+    suggested_buy_shares = int(capital_plan.get("suggested_buy_shares") or 0)
+    if buy_zone:
+        buy_high = as_float(buy_zone[1]) if isinstance(buy_zone, list) and len(buy_zone) >= 2 else None
+        buy_ready = state == "positive_t_watch" and data_allowed and current is not None and buy_high is not None and current <= buy_high
+        buy_blocked = state not in {"positive_t_watch"} or t_performance_gate.get("status") == "blocked" or not data_allowed
+        rows.append(
+            action_table_row(
+                "正T买入",
+                f"价格进入 {format_price_zone(buy_zone)} 且分时/数据仍确认",
+                format_price_zone(buy_zone),
+                "买入新增仓位",
+                status="blocked" if buy_blocked else "ready" if buy_ready else "watch",
+                status_label="禁止" if buy_blocked else "可确认" if buy_ready else "等待",
+                shares=suggested_buy_shares or None,
+                note="高于买入上限不追；买入后目标是卖出新增仓位，不是长期补仓。",
+            )
+        )
+
+    if target_zone:
+        close_shares = int(positive_plan.get("trade_shares") or suggested_buy_shares or 0)
+        target_low = as_float(target_zone[0]) if isinstance(target_zone, list) and len(target_zone) >= 2 else None
+        target_ready = current is not None and target_low is not None and current >= target_low and positive_plan.get("status") == "target_sell_ready"
+        rows.append(
+            action_table_row(
+                "正T目标卖出",
+                f"已买入正T腿后，价格进入 {format_price_zone(target_zone)}",
+                format_price_zone(target_zone),
+                "卖出新增仓位",
+                status="ready" if target_ready else "watch",
+                status_label="已触发" if target_ready else "等待",
+                shares=close_shares or None,
+                note="只卖新增股数完成闭环；未到目标不急卖。",
+            )
+        )
+
+    reverse_zone = levels.get("reverse_t_sell_zone") or reverse_plan.get("sell_zone")
+    reverse_shares = int(reverse_plan.get("trade_shares") or 0)
+    if reverse_zone:
+        reverse_candidate = state == "reverse_t_watch" and reverse_plan.get("status") == "candidate" and t_performance_gate.get("status") != "blocked"
+        rows.append(
+            action_table_row(
+                "反T卖出",
+                f"价格进入 {format_price_zone(reverse_zone)} 且分时转弱",
+                format_price_zone(reverse_zone),
+                "卖出计划股数",
+                status="ready" if reverse_candidate else "blocked" if t_performance_gate.get("status") == "blocked" else "watch",
+                status_label="可确认" if reverse_candidate else "绩效阻断" if t_performance_gate.get("status") == "blocked" else "仅观察",
+                shares=reverse_shares or None,
+                note="没有回补上限或未接受卖出后果时，不执行反T卖出。",
+            )
+        )
+
+    buyback = as_float(levels.get("reverse_t_buyback_max_price") or reverse_plan.get("buyback_max_price"))
+    if buyback is not None:
+        open_leg = reverse_plan.get("open_reverse_t_leg") or {}
+        buyback_ready = reverse_plan.get("status") == "buyback_ready"
+        buyback_shares = int(as_float(open_leg.get("shares"), 0.0) or reverse_shares or 0)
+        rows.append(
+            action_table_row(
+                "反T回补",
+                f"已有反T卖出腿成交后，价格小于等于 {buyback:.2f} 元",
+                f"≤ {buyback:.2f} 元",
+                "买回同等股数",
+                status="ready" if buyback_ready else "watch",
+                status_label="已触发" if buyback_ready else "等待",
+                shares=buyback_shares or None,
+                note="高于回补上限不追买；未回补要按减仓后果管理。",
+            )
+        )
+
+    if buy_zone:
+        buy_high = as_float(buy_zone[1]) if isinstance(buy_zone, list) and len(buy_zone) >= 2 else None
+        rows.append(
+            action_table_row(
+                "禁止追买",
+                "价格高于买入观察上限，或数据/止损/绩效门禁未通过",
+                f"> {buy_high:.2f} 元" if buy_high is not None else "-",
+                "不买入",
+                status="blocked",
+                status_label="硬限制",
+                note="宁可错过，不在计划外提高买入价。",
+            )
+        )
+
+    return {
+        "status": state,
+        "status_label": STATE_LABELS.get(state, state),
+        "rows": rows,
+        "summary": "按触发价执行；未进入对应价格区间时只观察，不提前操作。",
+    }
+
+
 def confidence_for(state: str, evidence: list[str], blockers: list[str]) -> str:
     if state in {"exit_risk_review", "data_stale", "market_wait", "data_insufficient"}:
         return "high"
@@ -1967,6 +2156,16 @@ def build_card(
         positive_timing,
         intraday,
     )
+    price_action_table = build_price_action_table(
+        state,
+        levels,
+        intraday,
+        capital_plan,
+        positive_timing,
+        manual_execution_plan,
+        t_performance_gate,
+        data_quality,
+    )
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
@@ -2008,6 +2207,7 @@ def build_card(
             "technical_operation": technical_operation,
         },
         "price_levels": levels,
+        "price_action_table": price_action_table,
         "capital_plan": capital_plan,
         "t_performance_gate": t_performance_gate,
         "t_closure_performance": intraday.get("t_closure_performance") or {},
@@ -2172,6 +2372,16 @@ def render_markdown(report: dict[str, Any]) -> str:
         if decision.get("action_steps"):
             lines.append("- 操作步骤：")
             lines.extend(f"  - {item}" for item in decision["action_steps"][:6])
+        action_table = card.get("price_action_table") or {}
+        action_rows = action_table.get("rows") or []
+        if action_rows:
+            lines.append("- 价格动作表：")
+            for row in action_rows[:6]:
+                shares_text = f"，{row.get('shares')}股" if row.get("shares") else ""
+                lines.append(
+                    f"  - {row.get('action')}：{row.get('trigger')} -> {row.get('operation')}，"
+                    f"{row.get('status_label')}{shares_text}。{row.get('note') or ''}"
+                )
         positive_timing = card.get("positive_timing") or {}
         if positive_timing.get("available"):
             lines.append(
