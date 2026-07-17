@@ -336,6 +336,10 @@ function liveIntradayTriggerAlerts() {
     });
 }
 
+function liveTriggerAlertForCode(code) {
+  return liveIntradayTriggerAlerts().find(alert => alert.code === code && alert.active_path) || null;
+}
+
 function technicalUnlockAlertFor(item) {
   return (state.decisionReport?.technical_unlock_alerts || []).find(alert => alert.code === item.code);
 }
@@ -544,6 +548,8 @@ function detailTargetForCard(card) {
 
 function detailTargetForCode(code) {
   if (!code) return "";
+  const trigger = liveTriggerAlertForCode(code);
+  if (trigger) return triggerAlertTarget(trigger);
   return detailTargetForCard(state.decisionCards.get(code));
 }
 
@@ -564,8 +570,11 @@ function renderDecisionSummary(item) {
   const card = decisionCardFor(item);
   const automaticDecision = automaticDecisionFor(item);
   const structured = card?.decision?.structured_conclusion || null;
-  const conclusion = structured?.current_action || (card ? uniqueTradeConclusion(item, card, automaticDecision) : automaticDecision.action || adviceFor(item));
-  const trigger = structured?.trigger_condition || "";
+  const liveTrigger = liveTriggerAlertForCode(item.code);
+  const conclusion = liveTrigger
+    ? uniqueTradeConclusion(item, card, automaticDecision)
+    : structured?.current_action || (card ? uniqueTradeConclusion(item, card, automaticDecision) : automaticDecision.action || adviceFor(item));
+  const trigger = liveTrigger?.message || structured?.trigger_condition || "";
   const forbidden = (structured?.forbidden_actions || [])[0] || "";
   return `<div class="advice-summary">
     <div class="advice-primary advice-unique"><span>当前动作</span><strong>${escapeHtml(conclusion)}</strong></div>
@@ -786,6 +795,7 @@ function detailRefreshNotice() {
 }
 
 function renderDecisionBrief(item, decisionCard, automaticDecision) {
+  const liveTrigger = liveTriggerAlertForCode(item.code);
   const primary = decisionCard?.price_action_table?.primary_action || {};
   const blockers = decisionCard?.blockers || [];
   const actionSteps = decisionCard?.decision?.action_steps || [];
@@ -796,9 +806,12 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
   const automatic = item.action_decision || {};
   const watchRows = (decisionCard?.price_action_table?.rows || []).filter(row => row.status === "watch" || row.status === "reference");
   const queueItem = (state.decisionReport?.priority_queue?.items || []).find(entry => entry.code === item.code);
-  const nowText = structured.current_action || uniqueTradeConclusion(item, decisionCard, automaticDecision);
+  const nowText = liveTrigger
+    ? `${liveTrigger.title}：${liveTrigger.action_label || "按触发路径处理"}`
+    : structured.current_action || uniqueTradeConclusion(item, decisionCard, automaticDecision);
   const structuredForbidden = structured.forbidden_actions || [];
   const triggerItems = [
+    liveTrigger ? liveTrigger.message : "",
     structured.trigger_condition || "",
     primary.trigger ? `${primary.action || "价格动作"}：${primary.trigger}` : "",
     ...watchRows.slice(0, 3).map(row => `${row.action || "观察"}：${row.trigger || row.price || row.note || "--"}`),
@@ -866,6 +879,11 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
 }
 
 function uniqueTradeConclusion(item, decisionCard, automaticDecision) {
+  const liveTrigger = liveTriggerAlertForCode(item.code);
+  if (liveTrigger) {
+    const currentText = liveTrigger.current_price == null ? "" : `；现价 ${money(liveTrigger.current_price)}`;
+    return `${liveTrigger.title}：${liveTrigger.action_label || "按触发路径处理"}${currentText}。`;
+  }
   const structured = decisionCard?.decision?.structured_conclusion || {};
   if (structured.summary) return structured.summary;
   const primary = decisionCard?.price_action_table?.primary_action || {};
@@ -897,20 +915,22 @@ function uniqueTradeConclusion(item, decisionCard, automaticDecision) {
 }
 
 function renderStickyActionBar(item, decisionCard, automaticDecision) {
+  const liveTrigger = liveTriggerAlertForCode(item.code);
   const primary = decisionCard?.price_action_table?.primary_action || {};
   const decision = decisionCard?.decision || {};
   const blockers = decisionCard?.blockers || [];
   const levels = decisionCard?.price_levels || {};
   const structured = decision.structured_conclusion || {};
-  const status = primary.status || (decision.execution_allowed ? "watch" : "blocked");
-  const statusText = primary.status_label || (status === "ready" ? "已触发" : status === "blocked" ? "暂不执行" : "等待触发");
+  const status = liveTrigger ? (liveTrigger.severity === "action" ? "ready" : "watch") : primary.status || (decision.execution_allowed ? "watch" : "blocked");
+  const statusText = liveTrigger ? (liveTrigger.severity === "action" ? "已触发" : "风险降级") : primary.status_label || (status === "ready" ? "已触发" : status === "blocked" ? "暂不执行" : "等待触发");
   const conclusionText = uniqueTradeConclusion(item, decisionCard, automaticDecision);
-  const priceText = structured.primary_price || primary.price || money(item.quote?.latest_price);
-  const sharesText = structured.primary_shares ? `${structured.primary_shares}股` : primary.shares ? `${primary.shares}股` : "--";
-  const reasonText = structured.forbidden_actions?.[0] || primary.note || blockers[0] || decision.next_step || automaticDecision.action || "";
-  const presetButton = primary.status === "ready" ? priceActionPresetButton(primary, item, decisionCard) : "";
+  const priceText = liveTrigger?.current_price == null ? structured.primary_price || primary.price || money(item.quote?.latest_price) : money(liveTrigger.current_price);
+  const liveShares = liveTrigger?.active_path === "path2_rebound" ? decisionCard?.manual_execution_plan?.shares : null;
+  const sharesText = liveShares ? `${liveShares}股` : structured.primary_shares ? `${structured.primary_shares}股` : primary.shares ? `${primary.shares}股` : "--";
+  const reasonText = liveTrigger?.message || structured.forbidden_actions?.[0] || primary.note || blockers[0] || decision.next_step || automaticDecision.action || "";
+  const presetButton = !liveTrigger && primary.status === "ready" ? priceActionPresetButton(primary, item, decisionCard) : "";
   const statusClass = status === "ready" ? "ready" : status === "blocked" ? "blocked" : "watch";
-  const riskTarget = detailTargetForCard(decisionCard) || "action-step-table";
+  const riskTarget = liveTrigger ? triggerAlertTarget(liveTrigger) : detailTargetForCard(decisionCard) || "action-step-table";
   const riskButtonLabel = decisionCard?.state === "exit_risk_review" ? "看止损风险步骤" : "看可操作步骤";
   const fallbackActions = `
     <button class="secondary-action" type="button" data-detail-target="${escapeHtml(riskTarget)}">${escapeHtml(riskButtonLabel)}</button>
@@ -1579,10 +1599,11 @@ function renderTechnicalOperationBlock(operation, mode) {
   </div>`;
 }
 
-function renderManualExecutionPlan(plan) {
+function renderManualExecutionPlan(plan, liveTrigger = null) {
   if (!plan?.applicable) return "";
   const isRiskExit = plan.candidate === "risk_exit";
   const isNearStopPlaybook = plan.plan_type === "near_stop_playbook";
+  const triggeredNearStop = isNearStopPlaybook && liveTrigger?.active_path;
   const priceZone = Array.isArray(plan.price_zone) && plan.price_zone.length >= 2
     ? `${num(plan.price_zone[0])}-${num(plan.price_zone[1])}元`
     : "--";
@@ -1606,6 +1627,12 @@ function renderManualExecutionPlan(plan) {
   if (plan.estimated_realized_pnl != null) metrics.push(["预计实现盈亏", money(plan.estimated_realized_pnl)]);
   if (plan.risk_amount != null) metrics.push(["新增风险金额", money(plan.risk_amount)]);
   const steps = plan.steps || [];
+  const liveSteps = triggeredNearStop ? [
+    liveTrigger.message,
+    liveTrigger.active_path === "path1_break" ? "本轮不再等待正T或反T信号；先进入止损减仓/硬退出复核，刷新后按新计划处理。" : "",
+    liveTrigger.active_path === "path2_rebound" ? `若技术仍未修复，复核卖出 ${plan.shares || "--"} 股风控减仓；成交后再写入系统刷新建议。` : "",
+    liveTrigger.active_path === "path3_recover" ? "本轮退出风险降级为观察复核；不主动卖出，也不追买，等待下一轮决策卡确认。" : "",
+  ].filter(Boolean) : [];
   const failures = plan.failure_conditions || [];
   const impactItems = [
     plan.post_trade_shares == null ? "" : `成交后剩余 ${num(plan.post_trade_shares, 0)} 股。`,
@@ -1621,17 +1648,26 @@ function renderManualExecutionPlan(plan) {
       </div>`
     : "";
   const sectionTitle = isRiskExit ? "退出风控执行计划" : "人工候选交易计划";
+  const riskConclusion = triggeredNearStop ? liveTrigger.title : plan.action_label || plan.status_label || "--";
+  const riskReason = triggeredNearStop ? liveTrigger.message : plan.reason || "触发风控后先降低风险，不用补仓或做T替代止损复核。";
+  const riskNow = triggeredNearStop
+    ? liveTrigger.active_path === "path1_break" ? "进入止损减仓/硬退出复核"
+      : liveTrigger.active_path === "path2_rebound" ? `复核风控减仓 ${plan.shares || "--"} 股`
+      : liveTrigger.active_path === "path3_recover" ? "风险降级观察"
+      : liveTrigger.action_label || "按触发路径处理"
+    : plan.status === "near_stop_review" ? "等待三路径触发" : plan.status === "wait_rebound_reduce" ? `等 ${priceZone}` : `${plan.side_label || "卖出"} ${plan.shares || "--"} 股`;
+  const displayedSteps = liveSteps.length ? liveSteps : steps;
   const body = isRiskExit ? `
       <div class="risk-exit-brief">
         <section class="risk-exit-block risk-exit-decision">
           <span>当前结论</span>
-          <strong>${escapeHtml(plan.action_label || plan.status_label || "--")}</strong>
-          <p>${escapeHtml(plan.reason || "触发风控后先降低风险，不用补仓或做T替代止损复核。")}</p>
+          <strong>${escapeHtml(riskConclusion)}</strong>
+          <p>${escapeHtml(riskReason)}</p>
         </section>
         <section class="risk-exit-block risk-exit-steps">
           <span>现在怎么做</span>
-          <strong>${escapeHtml(plan.status === "near_stop_review" ? "等待三路径触发" : plan.status === "wait_rebound_reduce" ? `等 ${priceZone}` : `${plan.side_label || "卖出"} ${plan.shares || "--"} 股`)}</strong>
-          ${steps.length ? `<ol>${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : `<p>等待系统给出可执行步骤。</p>`}
+          <strong>${escapeHtml(riskNow)}</strong>
+          ${displayedSteps.length ? `<ol>${displayedSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : `<p>等待系统给出可执行步骤。</p>`}
         </section>
         <section class="risk-exit-block risk-exit-impact">
           <span>做完会怎样</span>
@@ -2409,6 +2445,7 @@ function openDetail(code, options = {}) {
   const backtest = state.backtests.get(code);
   const forecast = state.forecasts.get(code);
   const decisionCard = state.decisionCards.get(code);
+  const liveTrigger = liveTriggerAlertForCode(code);
   const technicalOperation = decisionCard?.decision?.technical_operation || {};
   const automaticDecision = automaticDecisionFor(item);
   document.querySelector("#detailCode").textContent = code;
@@ -2428,7 +2465,7 @@ function openDetail(code, options = {}) {
     html += renderActionStepTable(decisionCard.price_action_table, item, decisionCard);
     html += renderMinuteConfirmation(decisionCard.minute_confirmation);
     html += renderDynamicStopLossSection(item, decisionCard);
-    html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
+    html += renderManualExecutionPlan(decisionCard.manual_execution_plan, liveTrigger);
   }
   html += detailSection("持仓与行情", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status", {collapsed: true, summary: "现价、成本、仓位和均线"});
   if (decisionCard) {
