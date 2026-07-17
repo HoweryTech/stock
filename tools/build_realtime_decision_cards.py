@@ -45,6 +45,7 @@ ACTION_LABELS = {
 HARD_T_BLOCKERS = {"stop_loss_triggered", "near_stop_loss", "limit_down", "stock_suspended"}
 DATA_BLOCKERS = {"insufficient_daily_bars", "missing_price_or_stop_loss"}
 QUALITY_BLOCKER_STATUSES = {"missing", "insufficient"}
+LIMITED_HISTORY_STATUS = "limited_history"
 POSITIVE_T_SCORE_THRESHOLD = 65.0
 SUPPLEMENTAL_CAPITAL_POLICY = {
     "supplemental_capital_allowed": True,
@@ -1342,7 +1343,10 @@ def choose_state(
         states.append(("data_insufficient", "行情、日线或分钟线数据缺失或样本不足，不能验证盘中建议。"))
     if portfolio_action_codes & {"stop_loss_triggered"} or t_blockers & HARD_T_BLOCKERS:
         states.append(("exit_risk_review", "触发或逼近硬风控，退出风险优先于做T。"))
-    if t_blockers & DATA_BLOCKERS:
+    hard_data_blockers = t_blockers & DATA_BLOCKERS
+    if quality_status == LIMITED_HISTORY_STATUS:
+        hard_data_blockers.discard("insufficient_daily_bars")
+    if hard_data_blockers:
         states.append(("data_insufficient", "日线、止损或样本不足，不能验证交易环境。"))
     if portfolio_action_codes & {"stock_position_limit_exceeded", "industry_position_limit_exceeded", "total_position_limit_exceeded"}:
         states.append(("risk_reduction_review", "持仓或组合仓位超限，需要先复核降仓。"))
@@ -1524,7 +1528,10 @@ def build_blockers(
     if source_consistency_status(data_quality) == "conflict":
         blockers.extend((data_quality or {}).get("source_consistency", {}).get("issues") or [])
     blockers.extend(signal.get("message") for signal in intraday.get("signals", []) if signal.get("severity") in {"block", "risk"})
-    blockers.extend(item.get("message") for item in (t_check or {}).get("blockers", []))
+    for item in (t_check or {}).get("blockers", []):
+        if data_quality_status(data_quality) == LIMITED_HISTORY_STATUS and item.get("code") == "insufficient_daily_bars":
+            continue
+        blockers.append(item.get("message"))
     if (technical_assessment or {}).get("label") == "bearish":
         blockers.append("多周期技术指标偏弱，本轮禁止补仓和做T。")
     if (t_performance_gate or {}).get("status") == "blocked":

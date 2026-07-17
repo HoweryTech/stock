@@ -724,6 +724,42 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIn("[数据一致性] conflict · 阈值 1.0%", card["evidence"])
         self.assertIn("[数据源冲突] 东方财富现价与分钟线最新收盘价差 2.00%。", card["evidence"])
 
+    def test_new_listing_limited_history_allows_conservative_analysis(self) -> None:
+        report = build_report(
+            {"items": [intraday_item(code="001248")]},
+            portfolio_result(code="001248"),
+            t_result(code="001248", warnings=[{"code": "limited_history_new_listing", "message": "日线数量 11 少于中期窗口 20，按新股有限样本模式分析。"}]),
+            None,
+            None,
+            None,
+            {
+                "items": [
+                    {
+                        "code": "001248",
+                        "overall_status": "limited_history",
+                        "status_label": "新股样本有限",
+                        "data_trust": {
+                            "level": "medium",
+                            "label": "中可信",
+                            "intraday_decision_allowed": True,
+                            "reasons": ["日线: 新股日线数量 11 少于 20，趋势/回测降级为有限样本分析。"],
+                        },
+                        "blockers": [],
+                        "warnings": ["新股日线数量 11 少于 20，趋势/回测降级为有限样本分析。"],
+                        "source_consistency": {"status": "pass", "max_diff_pct": 1.0, "issues": []},
+                    }
+                ]
+            },
+            generated_at=datetime(2026, 7, 16, 9, 33, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertNotEqual(card["state"], "data_insufficient")
+        self.assertEqual(card["market_context"]["data_quality_status"], "limited_history")
+        self.assertEqual(card["market_context"]["data_trust_level"], "medium")
+        self.assertIn("[数据质量] 新股样本有限 · 中可信", card["evidence"])
+
     def test_bearish_technical_indicators_block_t_watch(self) -> None:
         report = build_report(
             {"items": [intraday_item()]},

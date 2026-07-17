@@ -155,6 +155,7 @@ def age_hours(as_of: datetime, timestamp_text: str | None) -> float | None:
 def status_label(status: str) -> str:
     return {
         "usable": "可用于盘中判断",
+        "limited_history": "新股样本有限",
         "stale": "数据过期",
         "missing": "数据缺失",
         "insufficient": "样本不足",
@@ -190,12 +191,21 @@ def classify_daily(stats: dict[str, Any] | None, as_of: datetime, min_bars: int,
     latest = stats.get("latest_trade_date")
     latest_close = as_float(stats.get("latest_close"))
     days = age_days(as_of, latest)
-    if row_count < min_bars:
-        return {"status": "insufficient", "row_count": row_count, "latest_trade_date": latest, "latest_close": latest_close, "age_days": days, "message": f"日线数量 {row_count} 少于 {min_bars}。"}
     if days is None:
         return {"status": "missing", "row_count": row_count, "latest_trade_date": latest, "latest_close": latest_close, "age_days": None, "message": "日线最新日期无法解析。"}
     if days > max_age_days:
         return {"status": "stale", "row_count": row_count, "latest_trade_date": latest, "latest_close": latest_close, "age_days": days, "message": f"日线距当前 {days} 天，超过 {max_age_days} 天阈值。"}
+    if row_count < min_bars:
+        if row_count >= 5:
+            return {
+                "status": "limited_history",
+                "row_count": row_count,
+                "latest_trade_date": latest,
+                "latest_close": latest_close,
+                "age_days": days,
+                "message": f"新股日线数量 {row_count} 少于 {min_bars}，趋势/回测降级为有限样本分析。",
+            }
+        return {"status": "insufficient", "row_count": row_count, "latest_trade_date": latest, "latest_close": latest_close, "age_days": days, "message": f"日线数量 {row_count} 少于 {min_bars}。"}
     return {"status": "usable", "row_count": row_count, "latest_trade_date": latest, "latest_close": latest_close, "age_days": days, "message": "日线样本和新鲜度可用。"}
 
 
@@ -240,6 +250,8 @@ def overall_status(quote: dict[str, Any], daily: dict[str, Any], minute: dict[st
         return "insufficient"
     if "stale" in statuses:
         return "stale"
+    if "limited_history" in statuses:
+        return "limited_history"
     return "usable"
 
 
@@ -280,7 +292,7 @@ def source_consistency(quote: dict[str, Any], daily: dict[str, Any], minute: dic
     minute_diff = price_diff_pct(minute_close, quote_price)
     if quote_price is None or minute_close is None:
         checks.append({"source": "minute", "status": "skipped", "message": "缺少行情现价或分钟线最新收盘价。"})
-    elif minute.get("status") == "stale":
+    elif minute.get("status") == "stale" or (as_float(minute.get("age_hours")) is not None and (as_float(minute.get("age_hours")) or 0) > 0.25):
         checks.append(
             {
                 "source": "minute",
@@ -289,7 +301,7 @@ def source_consistency(quote: dict[str, Any], daily: dict[str, Any], minute: dic
                 "reference_price": minute_close,
                 "reference_timestamp": minute.get("latest_timestamp"),
                 "diff_pct": round(minute_diff or 0.0, 4),
-                "message": f"分钟线已过期，仅作参考，不参与实时一致性阻断；价差 {minute_diff:.2f}%。",
+                "message": f"分钟线不是最新实时参考，仅作背景，不参与实时一致性阻断；价差 {minute_diff:.2f}%。",
             }
         )
     else:
@@ -360,12 +372,16 @@ def data_trust(quote: dict[str, Any], daily: dict[str, Any], minute: dict[str, A
     sections = {"行情": quote, "日线": daily, "分钟线": minute}
     blocking = [f"{name}: {section['message']}" for name, section in sections.items() if section["status"] in {"missing", "insufficient"}]
     stale = [f"{name}: {section['message']}" for name, section in sections.items() if section["status"] == "stale"]
+    limited = [f"{name}: {section['message']}" for name, section in sections.items() if section["status"] == "limited_history"]
     consistency_issues = [f"一致性: {message}" for message in consistency.get("issues", [])]
     if blocking or quote["status"] == "stale" or consistency_issues:
         level = "low"
         reasons = blocking or consistency_issues or [f"行情: {quote['message']}"]
         if stale and not blocking and not consistency_issues:
             reasons = stale
+    elif limited:
+        level = "medium"
+        reasons = limited
     elif stale:
         level = "medium"
         reasons = stale
@@ -375,7 +391,7 @@ def data_trust(quote: dict[str, Any], daily: dict[str, Any], minute: dict[str, A
     return {
         "level": level,
         "label": trust_label(level),
-        "intraday_decision_allowed": level == "high",
+        "intraday_decision_allowed": level == "high" or (level == "medium" and bool(limited) and not stale),
         "reasons": reasons,
     }
 
@@ -411,14 +427,14 @@ def build_item(
     consistency = source_consistency(quote, daily, minute, max_consistency_diff_pct)
     trust = data_trust(quote, daily, minute, consistency)
     blockers = [section["message"] for section in (quote, daily, minute) if section["status"] in {"missing", "insufficient"}]
-    warnings = [section["message"] for section in (quote, daily, minute) if section["status"] == "stale"]
+    warnings = [section["message"] for section in (quote, daily, minute) if section["status"] in {"stale", "limited_history"}]
     return {
         "code": code,
         "name": name,
         "position_path": str(position_path),
         "overall_status": status,
         "status_label": status_label(status),
-        "usable_for_intraday_decision": status == "usable",
+        "usable_for_intraday_decision": status in {"usable", "limited_history"},
         "market_session": market_session,
         "data_trust": trust,
         "source_consistency": consistency,

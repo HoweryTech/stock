@@ -139,7 +139,7 @@ class DataQualitySnapshotTest(unittest.TestCase):
         self.assertEqual(minute_check["status"], "reference_only")
         self.assertEqual(item["source_consistency"]["status"], "skipped")
 
-    def test_detects_insufficient_daily_bars(self) -> None:
+    def test_marks_new_listing_daily_bars_as_limited_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
             position = base / "positions/POS-001248.yaml"
@@ -151,8 +151,26 @@ class DataQualitySnapshotTest(unittest.TestCase):
             report = build_report([position], snapshot, base / "daily.csv", base / "minutes", as_of=datetime(2026, 7, 16, 10, 5, 0))
 
         item = report["items"][0]
+        self.assertEqual(item["overall_status"], "limited_history")
+        self.assertEqual(item["data_trust"]["level"], "medium")
+        self.assertTrue(item["data_trust"]["intraday_decision_allowed"])
+        self.assertEqual(item["daily"]["status"], "limited_history")
+        self.assertFalse(item["blockers"])
+        self.assertTrue(item["warnings"])
+
+    def test_detects_too_few_daily_bars_as_insufficient(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            position = base / "positions/POS-001248.yaml"
+            write_position(position, "001248")
+            write_daily(base / "daily.csv", {"001248": ["2026-07-15"] * 4})
+            write_minutes(base / "minutes/001248.json", "001248", 130, "2026-07-16 10:00")
+            snapshot = {"items": [{"code": "001248", "quote": {"quote_lag_seconds": 3.0, "latest_price": 10.0}}]}
+
+            report = build_report([position], snapshot, base / "daily.csv", base / "minutes", as_of=datetime(2026, 7, 16, 10, 5, 0))
+
+        item = report["items"][0]
         self.assertEqual(item["overall_status"], "insufficient")
-        self.assertEqual(item["data_trust"]["level"], "low")
         self.assertEqual(item["daily"]["status"], "insufficient")
         self.assertTrue(item["blockers"])
 

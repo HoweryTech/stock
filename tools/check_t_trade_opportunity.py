@@ -135,11 +135,21 @@ def check_t_opportunity(
     positive_t_evidence: list[CheckItem] = []
     reverse_t_evidence: list[CheckItem] = []
 
-    if len(bars) < mid_window:
-        blockers.append(CheckItem("insufficient_daily_bars", f"日线数量 {len(bars)} 少于中期窗口 {mid_window}，无法验证做T环境。"))
+    limited_history_mode = 5 <= len(bars) < mid_window
+    if len(bars) < 5:
+        blockers.append(CheckItem("insufficient_daily_bars", f"日线数量 {len(bars)} 少于最小分析窗口 5，无法验证做T环境。"))
         metrics: dict[str, Any] = {"bars_count": len(bars)}
+    elif limited_history_mode:
+        effective_short_window = min(short_window, len(bars))
+        effective_mid_window = len(bars)
+        warnings.append(CheckItem("limited_history_new_listing", f"日线数量 {len(bars)} 少于中期窗口 {mid_window}，按新股有限样本模式分析。"))
+        metrics = latest_metrics(bars, effective_short_window, effective_mid_window)
+        metrics["limited_history_mode"] = True
+        metrics["effective_short_window"] = effective_short_window
+        metrics["effective_mid_window"] = effective_mid_window
     else:
         metrics = latest_metrics(bars, short_window, mid_window)
+        metrics["limited_history_mode"] = False
 
     latest_close = as_float(metrics.get("latest_close"))
     stop_loss_price = as_float(value_at(position, "risk.stop_loss_price"))
@@ -190,10 +200,11 @@ def check_t_opportunity(
     latest_range = as_float(metrics.get("latest_range_pct"))
     avg_range = as_float(metrics.get("avg_range_pct"))
 
+    range_window_label = metrics.get("effective_mid_window") or mid_window
     if avg_range is not None and avg_range < min_spread_pct:
-        warnings.append(CheckItem("spread_too_small", f"近 {mid_window} 日平均振幅 {avg_range:.2f}% 低于默认价差要求 {min_spread_pct:.2f}%。"))
+        warnings.append(CheckItem("spread_too_small", f"近 {range_window_label} 日平均振幅 {avg_range:.2f}% 低于默认价差要求 {min_spread_pct:.2f}%。"))
     elif avg_range is not None:
-        info.append(CheckItem("spread_available", f"近 {mid_window} 日平均振幅 {avg_range:.2f}%，具备人工观察价差的基础。"))
+        info.append(CheckItem("spread_available", f"近 {range_window_label} 日平均振幅 {avg_range:.2f}%，具备人工观察价差的基础。"))
 
     trend_intact = return_mid is not None and return_mid > 0 and distance_to_ma_mid is not None and distance_to_ma_mid >= 0
     pulled_back = drawdown is not None and drawdown <= -pullback_pct
@@ -229,6 +240,9 @@ def check_t_opportunity(
         action = "no_t_trade"
         positive_t_evidence = []
         reverse_t_evidence = []
+    elif limited_history_mode and (positive_t_evidence or reverse_t_evidence):
+        conclusion = "needs_manual_review"
+        action = "limited_history_watch_only"
     elif reverse_t_evidence and positive_t_evidence:
         conclusion = "needs_manual_review"
         action = "both_setups_watch_only"

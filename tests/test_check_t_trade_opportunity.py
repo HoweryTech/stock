@@ -163,6 +163,20 @@ class CheckTTradeOpportunityTest(unittest.TestCase):
         self.assertEqual(result["conclusion"], "blocked")
         self.assertTrue(any(item["code"] == "near_stop_loss" for item in result["blockers"]))
 
+    def test_new_listing_limited_history_still_produces_analysis(self) -> None:
+        position = copy.deepcopy(self.position)
+        position["stock"]["code"] = "001248"
+        position["risk"]["stop_loss_price"] = None
+        closes = [13.8, 13.6, 13.4, 13.2, 13.0, 12.8, 13.1, 13.3, 13.0, 12.9, 12.7]
+
+        result = check_t_opportunity(self.profile, position, read_bars(self.write_bars(closes, "001248"), "001248"))
+        warning_codes = {item["code"] for item in result["warnings"]}
+        blocker_codes = {item["code"] for item in result["blockers"]}
+
+        self.assertIn("limited_history_new_listing", warning_codes)
+        self.assertNotIn("insufficient_daily_bars", blocker_codes)
+        self.assertTrue(result["calculations"]["limited_history_mode"])
+
     def test_unconfirmed_imported_stop_loss_is_warning_not_hard_blocker(self) -> None:
         position = copy.deepcopy(self.position)
         position["strategy"]["source"] = "imported_holding"
