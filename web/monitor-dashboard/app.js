@@ -11,6 +11,8 @@ const state = {
   filter: "all",
   search: "",
   selectedCode: null,
+  detailDirty: false,
+  detailRenderedAt: "",
   pendingManualTrade: null,
 };
 
@@ -594,6 +596,48 @@ function detailSection(title, body, key = "") {
   return `<section class="detail-section"${sectionAttr}><h3>${title}</h3>${body}</section>`;
 }
 
+function detailRefreshNotice() {
+  return `<div class="detail-refresh-notice" id="detailRefreshNotice" hidden>
+    <span>后台数据已刷新，当前详情保持不变，避免打断阅读。</span>
+    <button class="secondary-action" type="button" data-detail-refresh>刷新本详情</button>
+  </div>`;
+}
+
+function renderDecisionBrief(item, decisionCard, automaticDecision) {
+  const primary = decisionCard?.price_action_table?.primary_action || {};
+  const blockers = decisionCard?.blockers || [];
+  const actionSteps = decisionCard?.decision?.action_steps || [];
+  const queueItem = (state.decisionReport?.priority_queue?.items || []).find(entry => entry.code === item.code);
+  const chips = [
+    ["队列", queueItem?.category_label || "未排序"],
+    ["状态", decisionCard?.state_label || displayStateLabelFor(item)],
+    ["动作", decisionCard?.decision?.action_label || automaticDecision.headline],
+    ["最紧急", primary.action ? `${primary.action} · ${primary.status_label || primary.status || "--"} · ${primary.price || "--"}` : "--"],
+  ];
+  const readingOrder = [
+    ["先看结论", "decision-card"],
+    ["再看价格动作表", "price-action-table"],
+    ["需要成交才看手工更新", "manual-trade"],
+    ["想知道为什么再看技术/数据", "technical-assessment"],
+    ["反T细节最后看", "reverse-t-plan"],
+  ];
+  return detailSection(
+    "决策摘要",
+    `<div class="decision-brief-grid">${chips.map(([key, value]) => `
+      <dl><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    <div class="action-panel action-${escapeHtml(decisionCard?.state || item.state || "observe")}">
+      <div class="action-panel-title">现在只看这一句</div>
+      <p><strong>${escapeHtml(decisionCard?.decision?.next_step || automaticDecision.action || "")}</strong></p>
+      ${actionSteps.length ? `<ol class="reason-list">${actionSteps.slice(0, 3).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
+    </div>
+    ${blockers.length ? `<h4>当前最主要阻断</h4><ul class="reason-list">${blockers.slice(0, 3).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
+    <h4>阅读顺序</h4>
+    <div class="detail-nav">${readingOrder.map(([label, target], index) => `
+      <button class="secondary-action" type="button" data-detail-target="${escapeHtml(target)}">${index + 1}. ${escapeHtml(label)}</button>`).join("")}</div>`,
+    "decision-brief"
+  );
+}
+
 function renderConsistencyChecks(quality) {
   const consistency = quality?.source_consistency || {};
   const checks = consistency.checks || [];
@@ -656,7 +700,8 @@ function renderTechnicalAssessment(assessment) {
         <tbody>${periodRows}</tbody>
       </table>
     </div>
-    ${signals.length ? `<h4>技术证据</h4><ul class="reason-list">${signals.slice(0, 8).map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}`
+    ${signals.length ? `<h4>技术证据</h4><ul class="reason-list">${signals.slice(0, 8).map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}`,
+    "technical-assessment"
   );
 }
 
@@ -744,7 +789,8 @@ function renderPriceActionTable(table, item) {
           ${row.note ? `<tr class="action-note"><td></td><td colspan="6">${escapeHtml(row.note)}</td></tr>` : ""}`
         ).join("")}</tbody>
       </table>
-    </div>`
+    </div>`,
+    "price-action-table"
   );
 }
 
@@ -1331,7 +1377,8 @@ function manualTradeSection(item) {
       <div class="manual-trade-impact">${defaultImpact}</div>
       <button class="primary-action" type="submit">记录成交并刷新建议</button>
       <p class="manual-trade-status secondary" aria-live="polite"></p>
-    </form>`
+    </form>`,
+    "manual-trade"
   );
 }
 
@@ -1452,6 +1499,27 @@ function focusDetailTarget(target) {
   });
 }
 
+function detailPanelOpen() {
+  return document.querySelector("#detailPanel")?.classList.contains("open");
+}
+
+function updateDetailRefreshNotice() {
+  const notice = document.querySelector("#detailRefreshNotice");
+  if (!notice) return;
+  notice.hidden = !state.detailDirty;
+}
+
+function markDetailDirty() {
+  if (!detailPanelOpen()) return;
+  state.detailDirty = true;
+  updateDetailRefreshNotice();
+}
+
+function refreshCurrentDetail() {
+  if (!state.selectedCode) return;
+  openDetail(state.selectedCode);
+}
+
 function openDetail(code, options = {}) {
   const item = state.snapshot?.items.find(entry => entry.code === code);
   if (!item) return;
@@ -1470,8 +1538,13 @@ function openDetail(code, options = {}) {
     ["持仓市值", money(item.position.market_value)], ["浮动盈亏", money(item.position.unrealized_pnl)],
     ["5日均线", money(item.technicals.ma5)], ["20日均线", money(item.technicals.ma20)],
   ];
-  let html = detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
-  html += manualTradeSection(item);
+  state.detailDirty = false;
+  state.detailRenderedAt = state.snapshot?.generated_at || "";
+  let html = detailRefreshNotice();
+  if (decisionCard) {
+    html += renderDecisionBrief(item, decisionCard, automaticDecision);
+  }
+  html += detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status");
   if (decisionCard) {
     const levels = decisionCard.price_levels || {};
     const decision = decisionCard.decision || {};
@@ -1513,7 +1586,6 @@ function openDetail(code, options = {}) {
     const blockers = decisionCard.blockers || [];
     const evidence = decisionCard.evidence || [];
     const actionSteps = decision.action_steps || [];
-    html += renderTechnicalAssessment(decisionCard.technical_assessment);
     html += detailSection(
       "实时决策卡",
       `<div class="metric-grid">${cardMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
@@ -1525,13 +1597,16 @@ function openDetail(code, options = {}) {
         ${actionSteps.length ? `<ol class="reason-list">${actionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
       </div>
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
-      <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
+      <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`,
+      "decision-card"
     );
     html += renderPriceActionTable(decisionCard.price_action_table, item);
+    html += manualTradeSection(item);
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
     html += renderPositiveTPlan(item.positive_t_plan);
     html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);
     html += renderCapitalPlan(decisionCard.capital_plan);
+    html += renderTechnicalAssessment(decisionCard.technical_assessment);
     html += detailSection(
       "数据质量",
       `<p>${qualityBadge(item)} <strong>${escapeHtml(qualitySummary(quality))}</strong></p>
@@ -1539,8 +1614,11 @@ function openDetail(code, options = {}) {
       <h4>数据源一致性</h4>
       <div class="metric-grid">${consistencyMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
       ${renderConsistencyChecks(quality)}
-      ${qualityMessages.length ? `<h4>质量问题</h4><ul class="reason-list">${qualityMessages.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`
+      ${qualityMessages.length ? `<h4>质量问题</h4><ul class="reason-list">${qualityMessages.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`,
+      "data-quality"
     );
+  } else {
+    html += manualTradeSection(item);
   }
   const decision = item.action_decision;
   const decisionDetails = item.reduction_plan?.status === "actionable" ? "" : backtest?.verdict === "rule_observation_only" && decision
@@ -1659,7 +1737,7 @@ function openDetail(code, options = {}) {
       ${reverseTechnicalBlock ? `<h4>技术面门禁</h4><div class="blocker-list">${reverseTechnicalBlock}</div>` : ""}
       <p>${escapeHtml(reversePlan.failure_result || "")}</p>
       ${blockerHtml || ""}
-      ${executionSteps.length ? `<h4>操作步骤</h4><ol class="reason-list">${executionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}`);
+      ${executionSteps.length ? `<h4>操作步骤</h4><ol class="reason-list">${executionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}`, "reverse-t-plan");
   }
   const reductionPlan = item.reduction_plan;
   if (reductionPlan && !["within_limit", "unavailable"].includes(reductionPlan.status)) {
@@ -1689,11 +1767,14 @@ function openDetail(code, options = {}) {
   document.querySelector("#detailPanel").classList.add("open");
   document.querySelector("#detailPanel").setAttribute("aria-hidden", "false");
   document.querySelector("#scrim").hidden = false;
+  updateDetailRefreshNotice();
   focusDetailTarget(options.target);
 }
 
 function closeDetail() {
   state.selectedCode = null;
+  state.detailDirty = false;
+  state.detailRenderedAt = "";
   document.querySelector("#detailPanel").classList.remove("open");
   document.querySelector("#detailPanel").setAttribute("aria-hidden", "true");
   document.querySelector("#scrim").hidden = true;
@@ -1755,13 +1836,6 @@ function updateHeader(status) {
   document.querySelector("#latencyText").textContent = `最大延迟 ${maxLag.toFixed(1)}秒`;
 }
 
-function manualTradeInteractionActive() {
-  const modal = document.querySelector("#manualTradeConfirm");
-  if (modal && !modal.hidden) return true;
-  const active = document.activeElement;
-  return Boolean(active && active.closest && active.closest(".manual-trade-form"));
-}
-
 async function loadData() {
   try {
     const fetchJson = async (url, fallback = null, required = false) => {
@@ -1809,7 +1883,7 @@ async function loadData() {
     renderPriorityQueue();
     renderPositions();
     renderEvents();
-    if (state.selectedCode && !manualTradeInteractionActive()) openDetail(state.selectedCode);
+    if (state.selectedCode && state.snapshot?.generated_at !== state.detailRenderedAt) markDetailDirty();
   } catch (error) {
     document.querySelector("#monitorStatus").textContent = "数据连接失败";
     document.querySelector("#statusDot").className = "status-dot offline";
@@ -1866,6 +1940,18 @@ document.querySelector("#detailContent").addEventListener("submit", async event 
   prepareManualTradeConfirmation(form);
 });
 document.querySelector("#detailContent").addEventListener("click", event => {
+  const refreshButton = event.target.closest("[data-detail-refresh]");
+  if (refreshButton) {
+    event.preventDefault();
+    refreshCurrentDetail();
+    return;
+  }
+  const targetButton = event.target.closest("[data-detail-target]");
+  if (targetButton) {
+    event.preventDefault();
+    focusDetailTarget(targetButton.dataset.detailTarget);
+    return;
+  }
   const submitButton = event.target.closest(".manual-trade-form button[type='submit']");
   if (submitButton) {
     event.preventDefault();
