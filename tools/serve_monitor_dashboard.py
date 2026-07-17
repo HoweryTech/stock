@@ -40,6 +40,7 @@ API_FILES = {
 }
 PID_FILE = ROOT / "data" / "metadata" / "intraday-monitor.pid"
 EVENT_FILE = ROOT / "data" / "metadata" / "intraday-monitor.events.jsonl"
+TRIGGER_REFRESH_EVENT_FILE = ROOT / "data" / "metadata" / "intraday-trigger-refresh.events.jsonl"
 FLOW_HISTORY_FILE = ROOT / "data" / "metadata" / "intraday-flow-history.jsonl"
 ARCHIVE_DIR = ROOT / "data" / "metadata" / "intraday-archive"
 
@@ -84,6 +85,27 @@ def recent_events(limit: int) -> list[dict[str, object]]:
             events.append(json.loads(line))
         except json.JSONDecodeError:
             continue
+    return list(reversed(events))
+
+
+def append_jsonl(path: Path, item: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+
+def recent_trigger_refresh_events(limit: int) -> list[dict[str, object]]:
+    if not TRIGGER_REFRESH_EVENT_FILE.exists():
+        return []
+    lines = TRIGGER_REFRESH_EVENT_FILE.read_text(encoding="utf-8").splitlines()
+    events: list[dict[str, object]] = []
+    for line in lines[-limit:]:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
     return list(reversed(events))
 
 
@@ -452,12 +474,23 @@ def handle_stop_loss_confirmation(payload: dict[str, object]) -> dict[str, objec
 def handle_intraday_trigger_refresh(payload: dict[str, object]) -> dict[str, object]:
     snapshot = load_json(API_FILES["/api/snapshot"]) or {}
     before_report = load_json(API_FILES["/api/decision-cards"]) or {}
+    requested_at = datetime.now().astimezone().isoformat(timespec="seconds")
     total_assets_raw = snapshot.get("total_assets")
     total_assets = float(total_assets_raw) if isinstance(total_assets_raw, (int, float)) else 25480.0
     triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
     refresh = run_refresh_commands(total_assets)
     refreshed_report = load_json(API_FILES["/api/decision-cards"]) or {}
     diffs = build_trigger_refresh_diffs(triggers, before_report, refreshed_report)
+    event = {
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "requested_at": requested_at,
+        "trigger_count": len(triggers),
+        "triggers": triggers,
+        "decision_generated_at": refreshed_report.get("generated_at"),
+        "state_counts": refreshed_report.get("state_counts") or {},
+        "diffs": diffs,
+    }
+    append_jsonl(TRIGGER_REFRESH_EVENT_FILE, event)
     return {
         "ok": True,
         "trigger_count": len(triggers),
@@ -465,6 +498,7 @@ def handle_intraday_trigger_refresh(payload: dict[str, object]) -> dict[str, obj
         "generated_at": refreshed_report.get("generated_at"),
         "state_counts": refreshed_report.get("state_counts") or {},
         "diffs": diffs,
+        "event": event,
     }
 
 
@@ -504,6 +538,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except ValueError:
                 limit = 20
             self.send_json({"events": recent_events(limit)})
+            return
+        if parsed.path == "/api/intraday-trigger-refresh-events":
+            query = parse_qs(parsed.query)
+            try:
+                limit = min(100, max(1, int(query.get("limit", [20])[0])))
+            except ValueError:
+                limit = 20
+            self.send_json({"events": recent_trigger_refresh_events(limit)})
             return
         if parsed.path == "/api/flow-history":
             query = parse_qs(parsed.query)

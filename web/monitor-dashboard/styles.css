@@ -799,6 +799,7 @@ th:nth-child(8) { width: 100px; }
 .event-item:last-child { border-bottom: 0; }
 .event-trigger { border-left: 4px solid var(--amber); background: #fffaf0; }
 .event-trigger:has(.event-action-action) { border-left-color: var(--green); background: #f4fbf7; }
+.event-trigger-history { border-left: 4px solid #8b9bb4; background: #f8fafc; }
 .event-technical { background: #fbfcfd; }
 .event-review { background: #fffdf7; }
 .event-clickable { cursor: pointer; }

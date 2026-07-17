@@ -16,6 +16,7 @@ from tools.serve_monitor_dashboard import (
     monitor_status,
     recent_events,
     recent_flow_history,
+    recent_trigger_refresh_events,
     run_refresh_commands,
 )
 
@@ -31,6 +32,17 @@ class ServeMonitorDashboardTest(unittest.TestCase):
 
         with patch("tools.serve_monitor_dashboard.EVENT_FILE", FakePath()):
             self.assertEqual([item["id"] for item in recent_events(2)], [2, 1])
+
+    def test_recent_trigger_refresh_events_returns_newest_first(self) -> None:
+        class FakePath:
+            def exists(self):
+                return True
+
+            def read_text(self, encoding):
+                return '\n'.join(json.dumps({"id": value}) for value in range(4))
+
+        with patch("tools.serve_monitor_dashboard.TRIGGER_REFRESH_EVENT_FILE", FakePath()):
+            self.assertEqual([item["id"] for item in recent_trigger_refresh_events(2)], [3, 2])
 
     def test_recent_flow_history_reads_archives_and_latest(self) -> None:
         class FakeArchiveDir:
@@ -311,6 +323,7 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         with (
             patch("tools.serve_monitor_dashboard.load_json", side_effect=fake_load_json),
             patch("tools.serve_monitor_dashboard.run_refresh_commands", return_value=[{"returncode": 0}]) as refresh,
+            patch("tools.serve_monitor_dashboard.append_jsonl") as append_event,
         ):
             result = handle_intraday_trigger_refresh({"triggers": [{"code": "000723", "active_path": "path1_break"}]})
 
@@ -320,6 +333,8 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertTrue(result["diffs"][0]["changed"])
         self.assertIn("刷新前", result["diffs"][0]["message"])
         self.assertIn("止损减仓", result["diffs"][0]["message"])
+        self.assertEqual(result["event"]["trigger_count"], 1)
+        append_event.assert_called_once()
         refresh.assert_called_once_with(30000.0)
 
     def test_build_trigger_refresh_diffs_reports_no_change(self) -> None:
