@@ -541,6 +541,7 @@ function renderTechnicalOperationBlock(operation, mode) {
   if (allowed || operation.tier === "not_available") return "";
   const label = mode === "positive_t" ? "正T被技术面阻断" : "反T被技术面阻断";
   const unlock = operation.unlock_conditions || [];
+  const checklist = operation.post_unlock_checklist || [];
   const unlockHtml = unlock.length ? `<h4>解锁条件</h4><div class="unlock-list">${unlock.map(condition => `
     <div class="unlock-item ${condition.passed ? "unlock-pass" : "unlock-block"}">
       <span>${condition.passed ? "已满足" : "未满足"}</span>
@@ -549,11 +550,13 @@ function renderTechnicalOperationBlock(operation, mode) {
       ${condition.gap_text ? `<p class="unlock-gap">${escapeHtml(condition.gap_text)}</p>` : ""}
       ${condition.hint ? `<p class="secondary">${escapeHtml(condition.hint)}</p>` : ""}
     </div>`).join("")}</div>` : "";
+  const checklistHtml = checklist.length ? `<h4>解锁后检查清单</h4><ol class="reason-list">${checklist.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : "";
   return `<div class="blocker-item" data-detail-section="technical-gate">
     <div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(operation.tier_label || "--")}</span></div>
     <p>${escapeHtml(operation.reason || "技术操作档位不支持本轮交易。")}</p>
     <p class="secondary">${escapeHtml(operation.next_step || "等待技术面修复后再重新评估。")}</p>
     ${unlockHtml}
+    ${checklistHtml}
   </div>`;
 }
 
@@ -1221,11 +1224,14 @@ function renderEvents() {
   const alertHtml = technicalAlerts.map(alert => {
     const conditions = alert.matched_conditions || [];
     const conditionText = conditions.map(condition => `${condition.label || condition.code}: ${condition.current ?? "--"} / ${condition.target || "--"}`).join("；");
+    const checklist = alert.checklist || [];
     return `<article class="event-item event-technical event-clickable" tabindex="0" data-event-code="${escapeHtml(alert.code || "")}" data-event-target="technical-gate">
       <div class="event-time">${escapeHtml(state.decisionReport?.generated_at || "")}</div>
       <div class="event-title">${escapeHtml(alert.code || "")} ${escapeHtml(alert.name || "")} · ${escapeHtml(alert.title || "技术解锁提醒")}</div>
+      ${alert.action_label ? `<div class="event-action">${escapeHtml(alert.action_label)}</div>` : ""}
       <p>${escapeHtml(alert.message || "")}</p>
       ${conditionText ? `<div class="event-changes"><span class="event-tag">${escapeHtml(conditionText)}</span></div>` : ""}
+      ${checklist.length ? `<ol class="event-checklist">${checklist.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : ""}
     </article>`;
   }).join("");
   const monitorHtml = state.events.map(event => {

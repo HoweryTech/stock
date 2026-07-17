@@ -602,6 +602,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(alert["type"], "technical_unlock_near")
         self.assertEqual(alert["severity"], "watch")
         self.assertEqual(alert["min_gap"], 1.0)
+        self.assertEqual(alert["action_label"], "接近解锁，只观察")
+        self.assertTrue(any("不买入、不补仓、不做T" in item for item in alert["checklist"]))
         self.assertTrue(any(condition["code"] == "risk_recovered" for condition in alert["matched_conditions"]))
 
 

@@ -577,10 +577,24 @@ def build_technical_unlock_alert(card: dict[str, Any]) -> dict[str, Any] | None:
     next_condition = waiting[0] if waiting else None
     if all_passed:
         message = "技术门禁条件已全部满足，可重新评估正T/反T观察，但仍需通过实时价格、数据质量和止损距离。"
+        action_label = "重新评估，不直接交易"
+        checklist = [
+            "先刷新实时行情和数据质量，确认不是盘后或行情过期。",
+            "再查看正T/反T状态是否进入候选；没有候选时继续观察。",
+            "最后检查止损距离、回测门禁、费用模型和人工确认，全部通过后才生成交易计划。",
+        ]
     elif next_condition:
         message = f"{next_condition.get('label')} 当前 {next_condition.get('current')}，目标 {next_condition.get('target')}；接近后可重新评估。"
+        action_label = "接近解锁，只观察"
+        checklist = [
+            "不买入、不补仓、不做T；接近解锁不等于允许交易。",
+            f"优先盯住 {next_condition.get('label')} 是否真正达到 {next_condition.get('target')}。",
+            "达到目标后等待下一轮决策卡刷新，再看是否解除技术门禁。",
+        ]
     else:
         message = operation.get("next_step") or "技术条件接近解锁，等待下一轮确认。"
+        action_label = "继续观察"
+        checklist = ["等待下一轮技术指标刷新后再重新评估。"]
     return {
         "code": card.get("code"),
         "name": card.get("name"),
@@ -588,12 +602,28 @@ def build_technical_unlock_alert(card: dict[str, Any]) -> dict[str, Any] | None:
         "severity": "action" if all_passed else "watch",
         "title": title,
         "message": message,
+        "action_label": action_label,
+        "checklist": checklist,
         "technical_tier": operation.get("tier"),
         "technical_tier_label": operation.get("tier_label"),
         "min_gap": rounded(min_gap),
         "conditions": conditions,
         "matched_conditions": active_conditions,
     }
+
+
+def technical_post_unlock_checklist(operation: dict[str, Any]) -> list[str]:
+    if operation.get("allow_buy_watch") or operation.get("allow_t_watch"):
+        return [
+            "技术面只允许进入观察，不代表可以直接买入或做T。",
+            "继续确认实时价格区间、数据质量、止损距离和分时成交信号。",
+            "只有决策卡给出候选状态并通过人工确认后，才允许生成交易计划。",
+        ]
+    return [
+        "接近解锁时仍然不买入、不补仓、不做T。",
+        "等所有解锁条件满足后，先刷新决策卡；只把状态升级为“可重新评估”。",
+        "重新评估仍要通过实时价格、数据质量、止损距离、回测和费用模型。",
+    ]
 
 
 def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> dict[str, Any]:
@@ -1476,6 +1506,7 @@ def build_card(
 ) -> dict[str, Any]:
     technical_assessment = build_technical_assessment(technical_indicators)
     technical_operation = build_technical_operation(technical_assessment)
+    technical_operation["post_unlock_checklist"] = technical_post_unlock_checklist(technical_operation)
     positive_timing = build_positive_timing(intraday, t_check, minute_bars, technical_assessment, technical_operation)
     state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment)
     evidence = build_evidence(
