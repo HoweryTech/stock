@@ -255,6 +255,87 @@ function decisionCardFor(item) {
   return state.decisionCards.get(item.code);
 }
 
+function snapshotItemForCode(code) {
+  return (state.snapshot?.items || []).find(item => item.code === code) || null;
+}
+
+function triggerAlertTarget(alert) {
+  return alert.target || (alert.active_path === "price_action_ready" ? "action-step-table" : "manual-execution-plan");
+}
+
+function evaluateNearStopTriggerAlert(alert, card, item) {
+  const plan = card?.manual_execution_plan || {};
+  if (plan.plan_type !== "near_stop_playbook") return alert;
+  const current = Number(item?.quote?.latest_price ?? plan.current_price ?? card?.price_levels?.current_price);
+  const stopLoss = Number(plan.stop_loss_price ?? card?.price_levels?.stop_loss_price);
+  const reboundZone = Array.isArray(plan.price_zone) ? plan.price_zone.map(Number) : [];
+  const recoverPrice = Number(plan.technical_context?.recover_price);
+  const minuteStatus = plan.technical_context?.minute_confirmation_status || card?.minute_confirmation?.status;
+  const updated = {...alert, current_price: Number.isFinite(current) ? current : alert.current_price};
+
+  if (Number.isFinite(current) && Number.isFinite(stopLoss) && current <= stopLoss) {
+    return {
+      ...updated,
+      severity: "action",
+      title: "路径1已触发：下破硬止损",
+      action_label: "进入止损减仓/硬退出复核",
+      message: `现价 ${money(current)} 已小于等于硬止损 ${money(stopLoss)}，立刻刷新执行计划；不再等待反T或正T信号。`,
+      active_path: "path1_break",
+      target: "manual-execution-plan",
+    };
+  }
+
+  if (Number.isFinite(current) && reboundZone.length >= 2 && Number.isFinite(reboundZone[0]) && Number.isFinite(reboundZone[1]) && current >= reboundZone[0] && current <= reboundZone[1]) {
+    return {
+      ...updated,
+      severity: "action",
+      title: "路径2已触发：进入反抽区",
+      action_label: `复核风控减仓 ${plan.shares || "--"} 股`,
+      message: `现价 ${money(current)} 已进入反抽区 ${zoneText(reboundZone)}；若技术仍未修复，按风控减仓步骤处理。`,
+      active_path: "path2_rebound",
+      target: "manual-execution-plan",
+    };
+  }
+
+  if (Number.isFinite(current) && Number.isFinite(recoverPrice) && current >= recoverPrice && minuteStatus === "confirm") {
+    return {
+      ...updated,
+      severity: "watch",
+      title: "路径3已触发：站稳并分钟确认",
+      action_label: "风险降级观察",
+      message: `现价 ${money(current)} 已站上 ${money(recoverPrice)} 且分钟确认通过，本轮退出风险可降级为观察复核。`,
+      active_path: "path3_recover",
+      target: "manual-execution-plan",
+    };
+  }
+
+  return {
+    ...updated,
+    severity: "watch",
+    title: "等待路径触发",
+    action_label: "盯盘中，不提前交易",
+    active_path: null,
+    target: "manual-execution-plan",
+  };
+}
+
+function liveIntradayTriggerAlerts() {
+  const alerts = state.decisionReport?.intraday_trigger_alerts || [];
+  return alerts
+    .map(alert => {
+      const card = state.decisionCards.get(alert.code);
+      const item = snapshotItemForCode(alert.code);
+      const plan = card?.manual_execution_plan || {};
+      if (plan.plan_type === "near_stop_playbook") return evaluateNearStopTriggerAlert(alert, card, item);
+      const current = Number(item?.quote?.latest_price);
+      return Number.isFinite(current) ? {...alert, current_price: current} : alert;
+    })
+    .sort((left, right) => {
+      const severityRank = severity => severity === "action" ? 0 : 1;
+      return severityRank(left.severity) - severityRank(right.severity) || String(left.code || "").localeCompare(String(right.code || ""));
+    });
+}
+
 function technicalUnlockAlertFor(item) {
   return (state.decisionReport?.technical_unlock_alerts || []).find(alert => alert.code === item.code);
 }
@@ -551,11 +632,13 @@ function renderSummary() {
   const forecastAlerts = items.filter(item => state.forecasts.get(item.code)?.status === "early_warning").length;
   const priceAlerts = items.filter(isReverseTPriceAlert).length;
   const unlockAlerts = state.decisionReport?.technical_unlock_alerts?.length || 0;
+  const triggerAlerts = liveIntradayTriggerAlerts();
+  const triggeredNow = triggerAlerts.filter(alert => alert.severity === "action").length;
   const blocks = [
     ["账户总资产", money(state.snapshot?.total_assets), "持仓基准"],
     ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
     ["浮动盈亏", money(pnl), "按最新快照估算"],
-    ["退出风险", `${exitRisk || risk} 只`, `${dataPaused} 只暂停决策 · ${marketWait} 只等待时段`],
+    ["退出风险", `${exitRisk || risk} 只`, `${triggeredNow} 只触发 · ${triggerAlerts.length} 只盯盘`],
     ["数据可信", `${trustHigh} 高 / ${trustLow} 低`, `${qualityStale} 过期 · ${qualityBlocked} 阻断`],
     ["技术面", `${technicalStrong} 偏多 / ${technicalWeak} 偏弱`, `${unlockAlerts} 只接近解锁`],
     ["T观察", `${positiveT} 正T / ${reverseTByCard || reverseT} 反T`, `${priceAlerts} 只价格提醒 · ${forecastAlerts} 只概率预警`],
@@ -2506,12 +2589,27 @@ function closeDetail() {
 
 function renderEvents() {
   const container = document.querySelector("#eventList");
+  const triggerAlerts = liveIntradayTriggerAlerts();
   const technicalAlerts = state.decisionReport?.technical_unlock_alerts || [];
   const reviewAlerts = state.decisionReport?.post_unlock_review_alerts || [];
-  if (!state.events.length && !technicalAlerts.length && !reviewAlerts.length) {
+  if (!state.events.length && !triggerAlerts.length && !technicalAlerts.length && !reviewAlerts.length) {
     container.innerHTML = '<div class="empty-state">暂无状态变化事件</div>';
     return;
   }
+  const triggerHtml = triggerAlerts.map(alert => {
+    const triggerTags = (alert.triggers || []).map(trigger => trigger.condition || trigger.label).filter(Boolean);
+    const currentText = alert.current_price == null ? "" : `现价 ${money(alert.current_price)}`;
+    return `<article class="event-item event-trigger event-clickable" tabindex="0" data-event-code="${escapeHtml(alert.code || "")}" data-event-target="${escapeHtml(triggerAlertTarget(alert))}">
+      <div class="event-time">${escapeHtml(state.snapshot?.generated_at || state.decisionReport?.generated_at || "")}</div>
+      <div class="event-title">${escapeHtml(alert.code || "")} ${escapeHtml(alert.name || "")} · ${escapeHtml(alert.title || "盘中触发提醒")}</div>
+      ${alert.action_label ? `<div class="event-action event-action-${escapeHtml(alert.severity || "watch")}">${escapeHtml(alert.action_label)}</div>` : ""}
+      <p>${escapeHtml(alert.message || "")}</p>
+      <div class="event-changes">
+        ${currentText ? `<span class="event-tag">${escapeHtml(currentText)}</span>` : ""}
+        ${triggerTags.slice(0, 3).map(tag => `<span class="event-tag">${escapeHtml(tag)}</span>`).join("")}
+      </div>
+    </article>`;
+  }).join("");
   const alertHtml = technicalAlerts.map(alert => {
     const conditions = alert.matched_conditions || [];
     const conditionText = conditions.map(condition => `${condition.label || condition.code}: ${condition.current ?? "--"} / ${condition.target || "--"}`).join("；");
@@ -2547,7 +2645,7 @@ function renderEvents() {
     const tags = Object.entries(event.signature || {}).map(([code, info]) => `<span class="event-tag">${code} · ${labels[info.state] || info.state}${info.reverse_t_price_alert ? " · 反T价格提醒" : ""}</span>`).join("");
     return `<article class="event-item"><div class="event-time">${escapeHtml(event.generated_at)}</div><div class="event-changes">${tags}</div></article>`;
   }).join("");
-  container.innerHTML = reviewHtml + alertHtml + monitorHtml;
+  container.innerHTML = triggerHtml + reviewHtml + alertHtml + monitorHtml;
 }
 
 function updateHeader(status) {
@@ -2592,7 +2690,7 @@ async function loadData() {
     state.forecasts = new Map((forecasts.items || []).map(item => [item.code, item]));
     const staleDecisionCards = decisionReportIsOlderThanSnapshot(decisionCards, snapshot);
     state.decisionReport = staleDecisionCards
-      ? {...decisionCards, stale_due_to_snapshot_date: true, original_card_count: (decisionCards.cards || []).length, cards: [], priority_queue: {items: [], counts: {}}}
+      ? {...decisionCards, stale_due_to_snapshot_date: true, original_card_count: (decisionCards.cards || []).length, cards: [], intraday_trigger_alerts: [], technical_unlock_alerts: [], post_unlock_review_alerts: [], priority_queue: {items: [], counts: {}}}
       : decisionCards;
     state.decisionCards = staleDecisionCards ? new Map() : new Map((decisionCards.cards || []).map(card => [card.code, card]));
     state.refreshCheck = refreshCheck;

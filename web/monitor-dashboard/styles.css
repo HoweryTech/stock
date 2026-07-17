@@ -793,6 +793,8 @@ th:nth-child(8) { width: 100px; }
 .event-list { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
 .event-item { padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .event-item:last-child { border-bottom: 0; }
+.event-trigger { border-left: 4px solid var(--amber); background: #fffaf0; }
+.event-trigger:has(.event-action-action) { border-left-color: var(--green); background: #f4fbf7; }
 .event-technical { background: #fbfcfd; }
 .event-review { background: #fffdf7; }
 .event-clickable { cursor: pointer; }

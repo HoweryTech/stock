@@ -1120,6 +1120,87 @@ def build_post_unlock_review_alert(card: dict[str, Any]) -> dict[str, Any] | Non
     }
 
 
+def build_intraday_trigger_alert(card: dict[str, Any]) -> dict[str, Any] | None:
+    manual_plan = card.get("manual_execution_plan") or {}
+    price_table = card.get("price_action_table") or {}
+    primary = price_table.get("primary_action") or {}
+    levels = card.get("price_levels") or {}
+    current = as_float(levels.get("current_price"))
+
+    if manual_plan.get("plan_type") == "near_stop_playbook":
+        stop_loss = as_float(manual_plan.get("stop_loss_price") or levels.get("stop_loss_price"))
+        rebound_zone = manual_plan.get("price_zone") or []
+        recover_price = as_float(value_at(manual_plan, "technical_context.recover_price"))
+        minute_status = str(value_at(manual_plan, "technical_context.minute_confirmation_status") or (card.get("minute_confirmation") or {}).get("status") or "")
+        triggers = []
+        if stop_loss is not None:
+            triggers.append({"path": "path1_break", "label": "路径1-下破", "condition": f"现价小于等于 {money_text(stop_loss)}", "price": rounded(stop_loss)})
+        if isinstance(rebound_zone, list) and len(rebound_zone) >= 2:
+            triggers.append({"path": "path2_rebound", "label": "路径2-反抽", "condition": f"价格反抽到 {format_price_zone(rebound_zone)}", "price_zone": rebound_zone})
+        if recover_price is not None:
+            triggers.append({"path": "path3_recover", "label": "路径3-站稳", "condition": f"价格站上 {money_text(recover_price)} 且分钟确认", "price": rounded(recover_price)})
+
+        active_path = None
+        active_label = "等待路径触发"
+        severity = "watch"
+        action_label = "盯盘中，不提前交易"
+        message = manual_plan.get("reason") or "近硬止损预案已生成，等待下破、反抽或站稳任一路径触发。"
+        target = "manual-execution-plan"
+        if current is not None and stop_loss is not None and current <= stop_loss:
+            active_path = "path1_break"
+            active_label = "路径1已触发：下破硬止损"
+            severity = "action"
+            action_label = "进入止损减仓/硬退出复核"
+            message = f"现价 {money_text(current)} 已小于等于硬止损 {money_text(stop_loss)}，立刻刷新执行计划；不再等待反T或正T信号。"
+        elif current is not None and isinstance(rebound_zone, list) and len(rebound_zone) >= 2:
+            low = as_float(rebound_zone[0])
+            high = as_float(rebound_zone[1])
+            if low is not None and high is not None and low <= current <= high:
+                active_path = "path2_rebound"
+                active_label = "路径2已触发：进入反抽区"
+                severity = "action"
+                action_label = f"复核风控减仓 {manual_plan.get('shares') or '-'} 股"
+                message = f"现价 {money_text(current)} 已进入反抽区 {format_price_zone(rebound_zone)}；若技术仍未修复，按风控减仓步骤处理。"
+        if active_path is None and current is not None and recover_price is not None and current >= recover_price and minute_status == "confirm":
+            active_path = "path3_recover"
+            active_label = "路径3已触发：站稳并分钟确认"
+            severity = "watch"
+            action_label = "风险降级观察"
+            message = f"现价 {money_text(current)} 已站上 {money_text(recover_price)} 且分钟确认通过，本轮退出风险可降级为观察复核。"
+        return {
+            "code": card.get("code"),
+            "name": card.get("name"),
+            "type": "intraday_trigger",
+            "severity": severity,
+            "title": active_label,
+            "action_label": action_label,
+            "message": message,
+            "current_price": rounded(current),
+            "active_path": active_path,
+            "target": target,
+            "triggers": triggers,
+        }
+
+    if primary.get("status") != "ready" or primary.get("action") == "当前动作":
+        return None
+    return {
+        "code": card.get("code"),
+        "name": card.get("name"),
+        "type": "intraday_trigger",
+        "severity": "action",
+        "title": f"{primary.get('action') or '价格动作'}已触发",
+        "action_label": primary.get("status_label") or "可人工确认",
+        "message": (
+            f"{primary.get('trigger') or '触发条件已满足'}；"
+            f"操作：{primary.get('operation') or '按页面步骤处理'}。"
+        ),
+        "current_price": rounded(current),
+        "active_path": "price_action_ready",
+        "target": "action-step-table",
+        "primary_action": primary,
+    }
+
+
 def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> dict[str, Any]:
     if not technical_indicators:
         return {"available": False, "score": None, "label": "missing", "signals": [], "periods": {}, "dimension_scores": {}, "dimension_signals": [], "summary": ""}
@@ -3445,6 +3526,10 @@ def build_report(
         (alert for card in cards if (alert := build_post_unlock_review_alert(card))),
         key=lambda alert: (0 if alert.get("severity") == "action" else 1, str(alert.get("code") or "")),
     )
+    intraday_trigger_alerts = sorted(
+        (alert for card in cards if (alert := build_intraday_trigger_alert(card))),
+        key=lambda alert: (0 if alert.get("severity") == "action" else 1, str(alert.get("code") or "")),
+    )
     priority_queue = build_portfolio_priority_queue(cards)
     return {
         "generated_at": generated_at_value.isoformat(timespec="seconds"),
@@ -3461,6 +3546,7 @@ def build_report(
         },
         "card_count": len(cards),
         "state_counts": dict(sorted(state_counts.items())),
+        "intraday_trigger_alerts": intraday_trigger_alerts,
         "technical_unlock_alerts": technical_unlock_alerts,
         "post_unlock_review_alerts": post_unlock_review_alerts,
         "priority_queue": priority_queue,
@@ -3481,11 +3567,25 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- 卡片数：{report['card_count']}",
         f"- 状态分布：{report['state_counts']}",
         "",
+        "## 盘中盯盘提醒",
+        "",
+    ]
+    trigger_alerts = report.get("intraday_trigger_alerts") or []
+    if trigger_alerts:
+        for alert in trigger_alerts[:10]:
+            lines.append(
+                f"- {alert.get('code')} {alert.get('name')}：{alert.get('title')}；"
+                f"{alert.get('action_label')}。{alert.get('message')}"
+            )
+    else:
+        lines.append("- 暂无触发提醒。")
+    lines.extend([
+        "",
         "## 今日处理顺序",
         "",
         str(value_at(report, "priority_queue.summary") or "按队列顺序处理；队列只排序，不自动下单。"),
         "",
-    ]
+    ])
     queue_items = value_at(report, "priority_queue.top_items") or []
     if queue_items:
         lines.extend(["| 顺序 | 代码 | 名称 | 分类 | 动作 | 下一步 |", "| ---: | --- | --- | --- | --- | --- |"])

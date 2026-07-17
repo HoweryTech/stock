@@ -203,6 +203,10 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(report["priority_queue"]["top_items"][0]["code"], "600000")
         self.assertEqual(report["priority_queue"]["top_items"][0]["category"], "risk_exit")
         self.assertEqual(report["priority_queue"]["top_items"][0]["urgency"], "high")
+        self.assertEqual(report["intraday_trigger_alerts"][0]["type"], "intraday_trigger")
+        self.assertEqual(report["intraday_trigger_alerts"][0]["severity"], "action")
+        self.assertEqual(report["intraday_trigger_alerts"][0]["active_path"], "price_action_ready")
+        self.assertIn("止损减仓", report["intraday_trigger_alerts"][0]["title"])
 
     def test_stop_loss_with_reversal_uses_rebound_reduce_plan(self) -> None:
         portfolio = portfolio_result()
@@ -258,6 +262,10 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("当前不是立即卖出" in step for step in card["decision"]["action_steps"]))
         self.assertFalse(any("当前计划：止损风险复核 500 股" in step for step in card["decision"]["action_steps"]))
         content = render_markdown(report)
+        self.assertEqual(report["intraday_trigger_alerts"][0]["active_path"], None)
+        self.assertEqual(report["intraday_trigger_alerts"][0]["action_label"], "盯盘中，不提前交易")
+        self.assertTrue(any(trigger["path"] == "path1_break" for trigger in report["intraday_trigger_alerts"][0]["triggers"]))
+        self.assertIn("## 盘中盯盘提醒", content)
         self.assertIn("人工候选计划：近硬止损盘中预案；等待三路径触发", content)
         self.assertNotIn("人工候选计划：近硬止损盘中预案；卖出 500 股", content)
         arbitration = card["decision"]["action_arbitration"]
