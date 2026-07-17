@@ -198,7 +198,7 @@ function adviceFor(item) {
 const actionTierLabels = {
   reverse_buyback_first: "反T回补优先",
   immediate_executable: "立即可执行",
-  place_wait_order: "可挂单等待",
+  place_wait_order: "等待触发价",
   observe_only: "只观察",
   forbid_chase: "禁止追买",
   stop_loss_first: "止损优先",
@@ -214,7 +214,7 @@ function actionTierFor(item) {
   if (state === "exit_risk_review" || state === "risk_review") return {tier: "stop_loss_first", label: "止损优先"};
   if (state === "risk_reduction_review") return {tier: "risk_reduction_first", label: "减仓优先"};
   if (state === "hold_no_add" || state === "no_add_watch") return {tier: "forbid_chase", label: "禁止追买"};
-  if (state === "positive_t_watch" || state === "reverse_t_watch") return {tier: "place_wait_order", label: "可挂单等待"};
+  if (state === "positive_t_watch" || state === "reverse_t_watch") return {tier: "place_wait_order", label: "等待触发价"};
   return {tier: "observe_only", label: "只观察"};
 }
 
@@ -418,31 +418,18 @@ function compactQualityEvidence(item) {
 function renderDecisionSummary(item) {
   const card = decisionCardFor(item);
   const automaticDecision = automaticDecisionFor(item);
-  const action = card?.price_action_table?.primary_action || {};
-  const actionStatus = action.status || "watch";
-  const shares = action.shares ? ` · ${action.shares}股` : "";
-  const actionText = action.action
-    ? `${action.action} · ${action.status_label || actionStatus} · ${action.price || "--"}${shares}`
-    : "当前没有触发动作";
-  const blockers = [
-    action.status === "blocked" ? action.note : "",
-    ...(card?.blockers || []),
-    card?.decision?.technical_operation?.reason || "",
-  ].filter(Boolean);
-  const evidence = [
-    compactTechnicalEvidence(item),
-    compactQualityEvidence(item),
-  ].filter(Boolean);
-  const actionTone = actionStatus === "ready" ? "ready" : actionStatus === "blocked" ? "blocked" : "watch";
-  const blockerText = blockers.length ? blockers[0] : action.note || card?.decision?.next_step || "";
-  const evidenceText = evidence.length ? evidence.join("；") : card?.reason || "";
   const conclusion = card ? uniqueTradeConclusion(item, card, automaticDecision) : automaticDecision.action || adviceFor(item);
   return `<div class="advice-summary">
     <div class="advice-primary advice-unique"><span>唯一结论</span><strong>${escapeHtml(conclusion)}</strong></div>
-    <div class="advice-focus advice-focus-${escapeHtml(actionTone)}"><span>触发/风控</span><strong>${escapeHtml(actionText)}</strong></div>
-    ${blockerText ? `<div class="advice-support advice-support-block"><span>阻断/条件</span><em>${escapeHtml(blockerText)}</em></div>` : ""}
-    ${evidenceText ? `<div class="advice-support"><span>依据</span><em>${escapeHtml(evidenceText)}</em></div>` : ""}
   </div>`;
+}
+
+function uniqueConclusionForCode(code, fallback = "--") {
+  const item = (state.snapshot?.items || []).find(entry => entry.code === code);
+  if (!item) return fallback;
+  const card = decisionCardFor(item);
+  const automaticDecision = automaticDecisionFor(item);
+  return card ? uniqueTradeConclusion(item, card, automaticDecision) : automaticDecision.action || fallback;
 }
 
 function filteredItems() {
@@ -538,8 +525,7 @@ function renderPriorityQueue() {
           <span class="queue-main">
             <strong>${escapeHtml(item.name || "--")} <em>${escapeHtml(item.code || "")}</em></strong>
             <small>${escapeHtml(item.category_label || "--")} · ${escapeHtml(item.state_label || "--")}</small>
-            <b>${escapeHtml(item.action_label || "--")}</b>
-            <small>${escapeHtml(item.next_step || item.reason || "")}</small>
+            <b>${escapeHtml(uniqueConclusionForCode(item.code, item.next_step || item.action_label || item.reason || "--"))}</b>
           </span>
         </button>`).join("")}
     </div>`;
@@ -576,7 +562,7 @@ function tableRow(item) {
     <td class="number"><div>${num(item.quote.latest_price)}</div><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></td>
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
-    <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><div class="state-tier">${actionTierBadge(item)}</div></td>
+    <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span></td>
     <td class="advice">${renderDecisionSummary(item)}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
@@ -591,8 +577,8 @@ function mobileCard(item) {
       <div class="number"><strong>${num(item.quote.latest_price)}</strong><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></div>
     </div>
     <div class="card-row"><span>持仓盈亏</span><span class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)} · ${pct(item.position.return_pct)}</span></div>
-    <div class="card-row"><span>${actionTierBadge(item)}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
-    <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>${escapeHtml(displayState)}</span></div>
+    <div class="card-row"><span>仓位</span><span>${pct(item.position.live_position_pct)}</span></div>
+    <div class="card-row"><span>状态</span><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
     <div class="card-advice">${renderDecisionSummary(item)}</div>
   </article>`;
