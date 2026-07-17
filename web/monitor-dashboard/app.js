@@ -663,13 +663,40 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
   );
 }
 
+function uniqueTradeConclusion(item, decisionCard, automaticDecision) {
+  const primary = decisionCard?.price_action_table?.primary_action || {};
+  const decision = decisionCard?.decision || {};
+  const levels = decisionCard?.price_levels || {};
+  const cleanClause = text => String(text || "").replace(/[。；;，,\s]+$/g, "");
+  const dynamicStop = levels.dynamic_stop_loss_price == null ? "--" : money(levels.dynamic_stop_loss_price);
+  const stopConfirmed = Boolean(levels.stop_loss_confirmed);
+  const stopSuffix = levels.dynamic_stop_loss_price == null
+    ? ""
+    : `；动态止损复核价 ${dynamicStop}${stopConfirmed ? "，已确认则触发后优先风控" : "，未确认前不作为卖出价"}`;
+  if (primary.status === "ready") {
+    return `现在可执行：${primary.action || decision.action_label || automaticDecision.headline || "按主动作处理"}；价格 ${primary.price || money(item.quote?.latest_price)}${primary.shares ? `，数量 ${primary.shares}股` : ""}。`;
+  }
+  if (primary.action === "止损复核" && primary.status_label === "接近复核") {
+    return `现在先复核风险：现价接近动态止损复核价 ${primary.price || dynamicStop}，未确认前不直接卖出、不补仓、不做T。`;
+  }
+  if (decision.execution_allowed) {
+    return `现在只进入人工观察：${decision.action_label || primary.action || "等待触发"}；未到价格动作表触发线前不下单${stopSuffix}。`;
+  }
+  if (primary.status === "blocked") {
+    return `现在不交易：${primary.action || decision.action_label || "条件被阻断"}；先处理阻断原因${stopSuffix}。`;
+  }
+  const observeReason = cleanClause(decision.next_step || automaticDecision.action || primary.note || "等待新的价格和技术信号");
+  return `现在不买不卖，只观察；${observeReason}${stopSuffix}。`;
+}
+
 function renderStickyActionBar(item, decisionCard, automaticDecision) {
   const primary = decisionCard?.price_action_table?.primary_action || {};
   const decision = decisionCard?.decision || {};
   const blockers = decisionCard?.blockers || [];
+  const levels = decisionCard?.price_levels || {};
   const status = primary.status || (decision.execution_allowed ? "watch" : "blocked");
   const statusText = primary.status_label || (status === "ready" ? "已触发" : status === "blocked" ? "暂不执行" : "等待触发");
-  const actionText = primary.action || decision.action_label || automaticDecision.headline || "观察";
+  const conclusionText = uniqueTradeConclusion(item, decisionCard, automaticDecision);
   const priceText = primary.price || money(item.quote?.latest_price);
   const sharesText = primary.shares ? `${primary.shares}股` : "--";
   const reasonText = primary.note || blockers[0] || decision.next_step || automaticDecision.action || "";
@@ -677,11 +704,12 @@ function renderStickyActionBar(item, decisionCard, automaticDecision) {
   const statusClass = status === "ready" ? "ready" : status === "blocked" ? "blocked" : "watch";
   const fallbackActions = `
     <button class="secondary-action" type="button" data-detail-target="price-action-table">看价格动作表</button>
+    ${levels.dynamic_stop_loss_price ? `<button class="secondary-action" type="button" data-detail-target="dynamic-stop-loss">看动态止损</button>` : ""}
     ${blockers.length ? `<button class="secondary-action" type="button" data-detail-target="decision-card">看阻断原因</button>` : ""}`;
   return `<div class="sticky-action-bar action-bar-${escapeHtml(statusClass)}">
     <div class="sticky-action-main">
-      <span>${escapeHtml(statusText)}</span>
-      <strong>${escapeHtml(actionText)}</strong>
+      <span>唯一交易结论 · ${escapeHtml(statusText)}</span>
+      <strong>${escapeHtml(conclusionText)}</strong>
       <p>${escapeHtml(reasonText)}</p>
     </div>
     <div class="sticky-action-metrics">

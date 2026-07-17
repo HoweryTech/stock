@@ -315,7 +315,7 @@ th:nth-child(8) { width: 100px; }
   box-shadow: 0 8px 18px rgba(17, 24, 32, 0.08);
 }
 .sticky-action-main span { display: inline-block; margin-bottom: 4px; color: var(--muted); font-size: 12px; font-weight: 700; }
-.sticky-action-main strong { display: block; font-size: 15px; line-height: 1.35; }
+.sticky-action-main strong { display: block; font-size: 16px; line-height: 1.42; overflow-wrap: anywhere; }
 .sticky-action-main p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .sticky-action-metrics { display: grid; grid-template-columns: repeat(2, minmax(58px, auto)); gap: 8px; }
 .sticky-action-metrics dl { margin: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 5px; background: #fbfcfd; }
