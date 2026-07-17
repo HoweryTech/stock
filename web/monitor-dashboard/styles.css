@@ -377,6 +377,8 @@ th:nth-child(8) { width: 100px; }
   background: var(--red-bg);
   overflow-wrap: anywhere;
 }
+.post-trade-closure { display: grid; gap: 4px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
+.post-trade-closure span { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .confirm-actions { padding: 13px 16px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 10px; }
 .action-exit_risk_review { border-color: #f0aaa3; background: var(--red-bg); }
 .action-data_insufficient { border-color: #e5c46d; background: var(--amber-bg); }

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.serve_monitor_dashboard import API_FILES, dashboard_position_paths, handle_manual_trade, load_json, market_wait_refresh_status, monitor_status, recent_events, recent_flow_history
+from tools.serve_monitor_dashboard import API_FILES, build_post_trade_tracking, dashboard_position_paths, handle_manual_trade, load_json, market_wait_refresh_status, monitor_status, recent_events, recent_flow_history
 
 
 class ServeMonitorDashboardTest(unittest.TestCase):
@@ -95,20 +95,66 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertIn("--total-assets 25480.0", report["refresh_command"]["shell"])
 
     def test_handle_manual_trade_updates_position_and_refreshes_outputs(self) -> None:
+        def fake_load_json(path):
+            if path == API_FILES["/api/snapshot"]:
+                return {
+                    "total_assets": 25480.0,
+                    "items": [{"code": "000725", "name": "京东方Ａ", "quote": {"latest_price": 6.05}}],
+                }
+            if path == API_FILES["/api/decision-cards"]:
+                return {"cards": [{"code": "000725", "state_label": "退出风险优先", "decision": {"action_label": "禁止追买", "next_step": "止损风险优先"}}]}
+            return None
+
         with (
-            patch("tools.serve_monitor_dashboard.load_json", return_value={"total_assets": 25480.0}),
-            patch("tools.serve_monitor_dashboard.apply_manual_trade", return_value=({"trade": {"code": "000725", "side": "sell"}}, None)) as apply_trade,
+            patch("tools.serve_monitor_dashboard.load_json", side_effect=fake_load_json),
+            patch("tools.serve_monitor_dashboard.apply_manual_trade", return_value=({"trade": {"code": "000725", "side": "sell", "shares_after": 100}, "position": {"shares": 100}}, None)) as apply_trade,
             patch("tools.serve_monitor_dashboard.run_refresh_commands", return_value=[{"returncode": 0}]) as refresh,
         ):
             result = handle_manual_trade({"code": "000725", "side": "sell", "shares": 100, "price": 6.32})
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["update"]["trade"]["code"], "000725")
+        self.assertEqual(result["post_trade_tracking"]["refreshed_action"], "禁止追买")
+        self.assertIn("少于200股", result["post_trade_tracking"]["warnings"][0])
         apply_trade.assert_called_once()
         called_args = apply_trade.call_args.args[0]
         self.assertTrue(called_args.positions)
         self.assertTrue(all(Path(path).is_absolute() for path in called_args.positions))
         refresh.assert_called_once_with(25480.0)
+
+    def test_build_post_trade_tracking_includes_next_price_action(self) -> None:
+        update = {
+            "trade": {
+                "id": "MANUAL-1",
+                "code": "000725",
+                "side": "buy",
+                "trade_intent": "reverse_t_close",
+                "price": 5.99,
+                "shares": 100,
+                "shares_after": 200,
+                "fees": {"total_fees": 5.0},
+                "reverse_t_closure": {"next_plan": "反T闭环完成。", "net_profit": 22.0},
+            },
+            "position": {"shares": 200, "entry_price": 7.58},
+        }
+        snapshot = {"items": [{"code": "000725", "name": "京东方Ａ", "quote": {"latest_price": 6.06}}]}
+        decision_report = {
+            "cards": [
+                {
+                    "code": "000725",
+                    "state_label": "持有观察",
+                    "decision": {"action_label": "不买不卖", "next_step": "等待新信号"},
+                    "price_action_table": {"primary_action": {"action": "反T卖出", "status_label": "仅观察", "price": "6.10-6.12元"}},
+                }
+            ]
+        }
+
+        tracking = build_post_trade_tracking(update, snapshot, decision_report)
+
+        self.assertEqual(tracking["intent_label"], "反T回补")
+        self.assertTrue(tracking["can_reverse_t"])
+        self.assertEqual(tracking["primary_action"]["action"], "反T卖出")
+        self.assertTrue(any("刷新后当前建议" in step for step in tracking["next_steps"]))
 
     def test_dashboard_position_paths_are_absolute_files(self) -> None:
         paths = dashboard_position_paths()

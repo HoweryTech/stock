@@ -1143,7 +1143,11 @@ function closeManualTradeConfirm() {
   state.pendingManualTrade = null;
   document.querySelector("#manualTradeConfirm").hidden = true;
   document.querySelector("#manualTradeConfirm").setAttribute("aria-hidden", "true");
-  document.querySelector("#manualTradeConfirmButton").disabled = false;
+  const button = document.querySelector("#manualTradeConfirmButton");
+  button.disabled = false;
+  button.dataset.mode = "submit";
+  button.textContent = "确认写入并刷新";
+  document.querySelector("#manualTradeCancel").hidden = false;
   setManualTradeConfirmError("");
 }
 
@@ -1174,14 +1178,59 @@ async function submitManualTrade(payload, form) {
     });
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    status.textContent = result.refresh_error ? `已保存成交，但刷新建议失败：${result.refresh_error}` : "已更新，正在重新加载页面数据。";
-    closeManualTradeConfirm();
+    status.textContent = result.refresh_error ? `已保存成交，但刷新建议失败：${result.refresh_error}` : "已写入成交，并生成成交后追踪。";
+    showManualTradeResult(result);
     await loadData();
   } catch (error) {
     status.textContent = `更新失败：${error.message}`;
     setManualTradeConfirmError(`写入失败：${error.message}`);
     throw error;
   }
+}
+
+function renderPostTradeResult(result) {
+  const tracking = result.post_trade_tracking || {};
+  const metrics = [
+    ["证券", `${tracking.code || "--"} ${tracking.name || ""}`.trim()],
+    ["成交方向", tracking.side_label || "--"],
+    ["成交意图", tracking.intent_label || "--"],
+    ["成交价格", tracking.price == null ? "--" : `${num(tracking.price)}元`],
+    ["成交数量", tracking.shares == null ? "--" : `${num(tracking.shares, 0)}股`],
+    ["成交后股数", tracking.shares_after == null ? "--" : `${num(tracking.shares_after, 0)}股`],
+    ["最新现价", money(tracking.current_price)],
+    ["刷新后建议", tracking.refreshed_action || "--"],
+    ["是否还能反T", tracking.can_reverse_t ? "可以继续观察" : "不支持反T"],
+  ];
+  if (tracking.realized_pnl != null) metrics.push(["实现盈亏", money(tracking.realized_pnl)]);
+  if (tracking.entry_price_after != null) metrics.push(["成交后成本", money(tracking.entry_price_after)]);
+  if (tracking.fees_total != null) metrics.push(["本次费用", money(tracking.fees_total)]);
+  const closure = tracking.closure || {};
+  const closureHtml = closure.net_profit == null ? "" : `
+    <h4>闭环结果</h4>
+    <div class="post-trade-closure ${Number(closure.net_profit) >= 0 ? "positive" : "negative"}">
+      <strong>扣费后 ${money(closure.net_profit)}</strong>
+      <span>${escapeHtml(closure.next_plan || "")}</span>
+    </div>`;
+  const warnings = tracking.warnings || [];
+  const steps = tracking.next_steps || [];
+  return `<p><strong>成交已经写入本地持仓文件。</strong></p>
+    ${result.refresh_error ? `<p class="negative">刷新建议失败：${escapeHtml(result.refresh_error)}</p>` : `<p class="positive">实时建议已刷新。</p>`}
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    ${closureHtml}
+    ${warnings.length ? `<h4>风险提醒</h4><ul class="reason-list">${warnings.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+    ${steps.length ? `<h4>下一步计划</h4><ol class="reason-list">${steps.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : ""}`;
+}
+
+function showManualTradeResult(result) {
+  document.querySelector("#manualTradeConfirmTitle").textContent = "成交已写入";
+  document.querySelector("#manualTradeConfirmBody").innerHTML = renderPostTradeResult(result);
+  const button = document.querySelector("#manualTradeConfirmButton");
+  button.disabled = false;
+  button.dataset.mode = "close";
+  button.textContent = "关闭";
+  document.querySelector("#manualTradeCancel").hidden = true;
+  state.pendingManualTrade = null;
+  setManualTradeConfirmError("");
 }
 
 function reverseTradePresetControls(item) {
@@ -1802,6 +1851,10 @@ document.querySelector("#manualTradeConfirm").addEventListener("click", event =>
   if (event.target.id === "manualTradeConfirm") closeManualTradeConfirm();
 });
 document.querySelector("#manualTradeConfirmButton").addEventListener("click", async event => {
+  if (event.currentTarget.dataset.mode === "close") {
+    closeManualTradeConfirm();
+    return;
+  }
   const pending = state.pendingManualTrade;
   if (!pending) return;
   const button = event.currentTarget;

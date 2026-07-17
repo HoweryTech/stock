@@ -14,6 +14,7 @@ from argparse import Namespace
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 try:
@@ -197,6 +198,101 @@ def run_refresh_commands(total_assets: float) -> list[dict[str, object]]:
     return results
 
 
+def as_float(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def find_code_item(items: object, code: str) -> dict[str, Any] | None:
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if isinstance(item, dict) and str(item.get("code") or "") == code:
+            return item
+    return None
+
+
+def intent_label(intent: str) -> str:
+    return {
+        "reverse_t_open": "反T卖出腿",
+        "reverse_t_close": "反T回补",
+        "positive_t_open": "正T买入腿",
+        "positive_t_close": "正T目标卖出",
+    }.get(intent, "普通手工成交")
+
+
+def build_post_trade_tracking(update: dict[str, Any], snapshot: dict[str, object] | None, decision_report: dict[str, object] | None) -> dict[str, Any]:
+    trade = update.get("trade") if isinstance(update.get("trade"), dict) else {}
+    position = update.get("position") if isinstance(update.get("position"), dict) else {}
+    code = str(trade.get("code") or "")
+    item = find_code_item((snapshot or {}).get("items"), code)
+    card = find_code_item((decision_report or {}).get("cards"), code)
+    shares_after = as_float(trade.get("shares_after")) or as_float(position.get("shares")) or 0.0
+    next_steps: list[str] = []
+    warnings: list[str] = []
+
+    reverse_closure = trade.get("reverse_t_closure") if isinstance(trade.get("reverse_t_closure"), dict) else None
+    positive_closure = trade.get("positive_t_closure") if isinstance(trade.get("positive_t_closure"), dict) else None
+    if reverse_closure:
+        next_steps.append(str(reverse_closure.get("next_plan") or "反T闭环已完成，刷新后只按新的区间观察。"))
+    elif positive_closure:
+        next_steps.append(str(positive_closure.get("next_plan") or "正T闭环已完成，刷新后只按新的候选计划观察。"))
+    elif trade.get("trade_intent") == "reverse_t_open":
+        next_steps.append("已记录反T卖出腿；未到系统回补上限前不要追价买回。")
+    elif trade.get("trade_intent") == "positive_t_open":
+        next_steps.append("已记录正T买入腿；未到目标卖出区不急于卖出，跌破失败价先复核。")
+
+    if shares_after <= 0:
+        next_steps.append("该股持仓已归零；后续只观察，不再围绕该股做T，除非重新生成买入计划。")
+    elif shares_after < 200:
+        warnings.append("成交后持仓少于200股，不支持保留底仓反T。")
+        next_steps.append("低于200股时不再开放反T；后续只按风险复核或重新买入计划处理。")
+    else:
+        next_steps.append(f"成交后仍持有 {shares_after:g} 股；系统会按剩余仓位重新评估止损、正T和反T。")
+
+    decision = card.get("decision") if isinstance(card, dict) and isinstance(card.get("decision"), dict) else {}
+    if decision.get("action_label") or decision.get("next_step"):
+        next_steps.append(f"刷新后当前建议：{decision.get('action_label') or '--'}；{decision.get('next_step') or '--'}")
+    primary_action = None
+    price_table = card.get("price_action_table") if isinstance(card, dict) and isinstance(card.get("price_action_table"), dict) else {}
+    if isinstance(price_table.get("primary_action"), dict):
+        primary_action = price_table["primary_action"]
+        next_steps.append(
+            "下一价格动作："
+            f"{primary_action.get('action') or '--'}，"
+            f"{primary_action.get('status_label') or primary_action.get('status') or '--'}，"
+            f"{primary_action.get('price') or '--'}。"
+        )
+
+    return {
+        "trade_id": trade.get("id"),
+        "code": code,
+        "name": (item or {}).get("name") or trade.get("name") or code,
+        "side": trade.get("side"),
+        "side_label": "卖出" if trade.get("side") == "sell" else "买入",
+        "intent": trade.get("trade_intent") or "",
+        "intent_label": intent_label(str(trade.get("trade_intent") or "")),
+        "price": trade.get("price"),
+        "shares": trade.get("shares"),
+        "fees_total": (trade.get("fees") or {}).get("total_fees") if isinstance(trade.get("fees"), dict) else None,
+        "realized_pnl": trade.get("realized_pnl"),
+        "shares_after": shares_after,
+        "entry_price_after": position.get("entry_price"),
+        "can_reverse_t": shares_after >= 200,
+        "current_price": ((item or {}).get("quote") or {}).get("latest_price") if isinstance((item or {}).get("quote"), dict) else None,
+        "refreshed_state": card.get("state_label") if isinstance(card, dict) else None,
+        "refreshed_action": decision.get("action_label"),
+        "primary_action": primary_action,
+        "closure": reverse_closure or positive_closure,
+        "warnings": warnings,
+        "next_steps": next_steps,
+    }
+
+
 def handle_manual_trade(payload: dict[str, object]) -> dict[str, object]:
     snapshot = load_json(API_FILES["/api/snapshot"]) or {}
     total_assets_raw = snapshot.get("total_assets")
@@ -205,9 +301,11 @@ def handle_manual_trade(payload: dict[str, object]) -> dict[str, object]:
     update, _ = apply_manual_trade(args)
     try:
         refresh = run_refresh_commands(float(args.total_assets))
-        return {"ok": True, "update": update, "refresh": refresh}
+        tracking = build_post_trade_tracking(update, load_json(API_FILES["/api/snapshot"]), load_json(API_FILES["/api/decision-cards"]))
+        return {"ok": True, "update": update, "refresh": refresh, "post_trade_tracking": tracking}
     except Exception as exc:
-        return {"ok": True, "update": update, "refresh": [], "refresh_error": str(exc)}
+        tracking = build_post_trade_tracking(update, load_json(API_FILES["/api/snapshot"]), load_json(API_FILES["/api/decision-cards"]))
+        return {"ok": True, "update": update, "refresh": [], "refresh_error": str(exc), "post_trade_tracking": tracking}
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
