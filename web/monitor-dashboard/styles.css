@@ -91,6 +91,7 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 .auto-refresh-record { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(107, 114, 128, 0.22); }
 .auto-refresh-record strong { margin-bottom: 2px; font-size: 12px; }
 .auto-refresh-record span { display: block; line-height: 1.45; }
+.auto-refresh-record ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .refresh-command { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 52%; }
 .refresh-command code { min-width: 0; padding: 6px 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.72); color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .copy-refresh { flex: 0 0 auto; height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--text); }

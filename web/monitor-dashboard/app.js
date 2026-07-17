@@ -398,6 +398,7 @@ async function maybeRefreshTriggeredDecisionChain() {
       trigger_summary: triggerRefreshSummary(actionable),
       generated_at: result.generated_at || "",
       state_counts: result.state_counts || {},
+      diffs: result.diffs || [],
       message: "已根据盘中触发路径刷新完整决策链。",
     };
     await loadData();
@@ -804,6 +805,7 @@ function renderRefreshAlert() {
       <strong>${escapeHtml(autoRefresh.status === "running" ? "自动刷新中" : autoRefresh.status === "success" ? "最近自动刷新成功" : "最近自动刷新失败")}</strong>
       <span>${escapeHtml(autoRefresh.started_at || "--")}${autoRefresh.finished_at ? ` - ${escapeHtml(autoRefresh.finished_at)}` : ""} · ${escapeHtml(autoRefresh.trigger_summary || "--")} · ${escapeHtml(autoRefresh.trigger_count ?? 0)} 条触发</span>
       ${autoRefresh.generated_at ? `<span>新决策卡：${escapeHtml(String(autoRefresh.generated_at).replace("T", " "))}</span>` : ""}
+      ${(autoRefresh.diffs || []).length ? `<ul>${autoRefresh.diffs.slice(0, 3).map(diff => `<li>${escapeHtml(diff.message || "")}</li>`).join("")}</ul>` : ""}
     </div>` : "";
   alert.hidden = false;
   alert.className = `refresh-alert ${actionClass}`;

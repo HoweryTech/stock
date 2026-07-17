@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from tools.serve_monitor_dashboard import (
     API_FILES,
+    build_trigger_refresh_diffs,
     build_post_trade_tracking,
     dashboard_position_paths,
     handle_manual_trade,
@@ -271,11 +272,40 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         refresh.assert_called_once_with(25480.0)
 
     def test_handle_intraday_trigger_refresh_runs_pipeline_with_snapshot_assets(self) -> None:
+        calls = {"decision": 0}
+
         def fake_load_json(path):
             if path == API_FILES["/api/snapshot"]:
                 return {"total_assets": 30000.0}
             if path == API_FILES["/api/decision-cards"]:
-                return {"generated_at": "2026-07-17T10:00:00+08:00", "state_counts": {"exit_risk_review": 1}}
+                calls["decision"] += 1
+                if calls["decision"] == 1:
+                    return {
+                        "generated_at": "2026-07-17T09:59:00+08:00",
+                        "cards": [
+                            {
+                                "code": "000723",
+                                "state": "exit_risk_review",
+                                "state_label": "退出风险优先",
+                                "decision": {"action_label": "止损风险优先"},
+                                "manual_execution_plan": {"plan_type": "near_stop_playbook", "status_label": "近硬止损盘中预案", "shares": 500},
+                            }
+                        ],
+                    }
+                return {
+                    "generated_at": "2026-07-17T10:00:00+08:00",
+                    "state_counts": {"exit_risk_review": 1},
+                    "cards": [
+                        {
+                            "code": "000723",
+                            "state": "exit_risk_review",
+                            "state_label": "退出风险优先",
+                            "decision": {"action_label": "止损风险优先"},
+                            "manual_execution_plan": {"plan_type": "risk_reduce", "status_label": "止损减仓计划", "shares": 500},
+                            "price_action_table": {"primary_action": {"action": "止损减仓", "status_label": "可执行", "shares": 500, "price": "3.31 元"}},
+                        }
+                    ],
+                }
             return None
 
         with (
@@ -287,7 +317,21 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["trigger_count"], 1)
         self.assertEqual(result["state_counts"], {"exit_risk_review": 1})
+        self.assertTrue(result["diffs"][0]["changed"])
+        self.assertIn("刷新前", result["diffs"][0]["message"])
+        self.assertIn("止损减仓", result["diffs"][0]["message"])
         refresh.assert_called_once_with(30000.0)
+
+    def test_build_trigger_refresh_diffs_reports_no_change(self) -> None:
+        report = {"cards": [{"code": "000723", "state_label": "退出风险优先", "decision": {"action_label": "止损风险优先"}}]}
+        diffs = build_trigger_refresh_diffs(
+            [{"code": "000723", "name": "美锦能源", "title": "路径1已触发"}],
+            report,
+            report,
+        )
+
+        self.assertFalse(diffs[0]["changed"])
+        self.assertIn("结论暂未变化", diffs[0]["message"])
 
 
 if __name__ == "__main__":

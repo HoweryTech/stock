@@ -246,6 +246,85 @@ def find_code_item(items: object, code: str) -> dict[str, Any] | None:
     return None
 
 
+def compact_decision_summary(card: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(card, dict):
+        return {"available": False, "label": "未找到决策卡"}
+    decision = card.get("decision") if isinstance(card.get("decision"), dict) else {}
+    structured = decision.get("structured_conclusion") if isinstance(decision.get("structured_conclusion"), dict) else {}
+    manual_plan = card.get("manual_execution_plan") if isinstance(card.get("manual_execution_plan"), dict) else {}
+    price_table = card.get("price_action_table") if isinstance(card.get("price_action_table"), dict) else {}
+    primary = price_table.get("primary_action") if isinstance(price_table.get("primary_action"), dict) else {}
+    action = (
+        structured.get("current_action")
+        or primary.get("action")
+        or decision.get("action_label")
+        or card.get("state_label")
+        or card.get("state")
+        or "--"
+    )
+    status = manual_plan.get("status_label") or primary.get("status_label") or card.get("state_label") or "--"
+    shares = manual_plan.get("shares") or primary.get("shares")
+    price = primary.get("price") or structured.get("primary_price") or ""
+    label_parts = [str(action), str(status)]
+    if shares:
+        label_parts.append(f"{shares}股")
+    if price:
+        label_parts.append(str(price))
+    return {
+        "available": True,
+        "state": card.get("state"),
+        "state_label": card.get("state_label"),
+        "action": action,
+        "status": status,
+        "plan_type": manual_plan.get("plan_type"),
+        "plan_status": manual_plan.get("status"),
+        "primary_status": primary.get("status"),
+        "shares": shares,
+        "price": price,
+        "label": "；".join(label_parts),
+    }
+
+
+def build_trigger_refresh_diffs(
+    triggers: list[object],
+    before_report: dict[str, object] | None,
+    after_report: dict[str, object] | None,
+) -> list[dict[str, Any]]:
+    diffs: list[dict[str, Any]] = []
+    before_cards = (before_report or {}).get("cards")
+    after_cards = (after_report or {}).get("cards")
+    for trigger in triggers:
+        if not isinstance(trigger, dict):
+            continue
+        code = str(trigger.get("code") or "")
+        if not code:
+            continue
+        before = compact_decision_summary(find_code_item(before_cards, code))
+        after = compact_decision_summary(find_code_item(after_cards, code))
+        changed = any(
+            before.get(key) != after.get(key)
+            for key in ("state", "action", "status", "plan_type", "plan_status", "primary_status", "shares", "price")
+        )
+        name = str(trigger.get("name") or code)
+        trigger_title = str(trigger.get("title") or trigger.get("active_path") or "盘中触发")
+        message = f"{name}：{trigger_title}；刷新前：{before.get('label')}；刷新后：{after.get('label')}。"
+        if not changed:
+            message += "结论暂未变化，继续按当前触发路径观察。"
+        diffs.append(
+            {
+                "code": code,
+                "name": name,
+                "trigger": trigger_title,
+                "active_path": trigger.get("active_path"),
+                "changed": changed,
+                "before": before,
+                "after": after,
+                "message": message,
+            }
+        )
+    return diffs
+
+
 def intent_label(intent: str) -> str:
     return {
         "reverse_t_open": "反T卖出腿",
@@ -372,17 +451,20 @@ def handle_stop_loss_confirmation(payload: dict[str, object]) -> dict[str, objec
 
 def handle_intraday_trigger_refresh(payload: dict[str, object]) -> dict[str, object]:
     snapshot = load_json(API_FILES["/api/snapshot"]) or {}
+    before_report = load_json(API_FILES["/api/decision-cards"]) or {}
     total_assets_raw = snapshot.get("total_assets")
     total_assets = float(total_assets_raw) if isinstance(total_assets_raw, (int, float)) else 25480.0
     triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
     refresh = run_refresh_commands(total_assets)
     refreshed_report = load_json(API_FILES["/api/decision-cards"]) or {}
+    diffs = build_trigger_refresh_diffs(triggers, before_report, refreshed_report)
     return {
         "ok": True,
         "trigger_count": len(triggers),
         "refresh": refresh,
         "generated_at": refreshed_report.get("generated_at"),
         "state_counts": refreshed_report.get("state_counts") or {},
+        "diffs": diffs,
     }
 
 
