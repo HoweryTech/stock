@@ -649,7 +649,7 @@ function renderStickyActionBar(item, decisionCard, automaticDecision) {
   const priceText = primary.price || money(item.quote?.latest_price);
   const sharesText = primary.shares ? `${primary.shares}股` : "--";
   const reasonText = primary.note || blockers[0] || decision.next_step || automaticDecision.action || "";
-  const presetButton = primary.status === "ready" ? priceActionPresetButton(primary, item) : "";
+  const presetButton = primary.status === "ready" ? priceActionPresetButton(primary, item, decisionCard) : "";
   const statusClass = status === "ready" ? "ready" : status === "blocked" ? "blocked" : "watch";
   const fallbackActions = `
     <button class="secondary-action" type="button" data-detail-target="price-action-table">看价格动作表</button>
@@ -677,10 +677,10 @@ function groupedExecutionRows(table) {
   };
 }
 
-function renderExecutionLayerRows(rows, item) {
+function renderExecutionLayerRows(rows, item, decisionCard) {
   if (!rows.length) return `<p class="secondary">当前没有对应动作。</p>`;
   return rows.map(row => {
-    const preset = priceActionPresetButton(row, item);
+    const preset = priceActionPresetButton(row, item, decisionCard);
     return `<div class="execution-row execution-row-${escapeHtml(row.status || "unknown")}">
       <div>
         <strong>${escapeHtml(row.action || "--")}</strong>
@@ -691,6 +691,7 @@ function renderExecutionLayerRows(rows, item) {
       <dl><dt>状态</dt><dd>${escapeHtml(row.status_label || row.status || "--")}</dd></dl>
       <div class="execution-row-action">${preset || `<button class="secondary-action" type="button" data-detail-target="price-action-table">看明细</button>`}</div>
       ${row.note ? `<p class="execution-note">${escapeHtml(row.note)}</p>` : ""}
+      ${row.status === "ready" ? renderPresetConsequencePreview(row, item, decisionCard) : ""}
     </div>`;
   }).join("");
 }
@@ -708,7 +709,7 @@ function renderExecutionLayers(item, decisionCard) {
       <div class="execution-layer execution-layer-${key}">
         <div class="execution-layer-title"><strong>${label}</strong><span>${groups[key].length}项</span></div>
         <p class="secondary">${hint}</p>
-        ${renderExecutionLayerRows(groups[key], item)}
+        ${renderExecutionLayerRows(groups[key], item, decisionCard)}
       </div>`).join("")}</div>`,
     "execution-layers"
   );
@@ -811,20 +812,30 @@ function renderCapitalPlan(plan) {
   );
 }
 
-function priceActionPresetButton(row, item) {
+function priceActionPresetData(row, item, decisionCard = null) {
   if (!row || row.status !== "ready") return "";
   const currentPrice = item?.quote?.latest_price == null ? null : Number(item.quote.latest_price);
   const shares = Number(row.shares || 0);
   if (!currentPrice || !shares) return "";
   if (row.action === "止损/退出") {
-    return `<button class="secondary-action danger-lite-action" type="button" data-manual-preset data-auto-confirm="true" data-code="${escapeHtml(item.code)}" data-side="sell" data-price="${escapeHtml(currentPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="" data-note="价格动作表：止损/退出已触发，按真实成交确认写入">填入止损卖出</button>`;
+    return {side: "sell", price: currentPrice, shares, tradeIntent: "", linkedTradeId: "", note: "价格动作表：止损/退出已触发，按真实成交确认写入", label: "填入止损卖出", danger: true};
+  }
+  if (row.action === "正T买入") {
+    const plan = decisionCard?.manual_execution_plan || {};
+    const maxPrice = plan.max_price == null ? currentPrice : Number(plan.max_price);
+    const buyPrice = Math.min(currentPrice, maxPrice);
+    return {side: "buy", price: buyPrice, shares: Number(plan.shares || shares), tradeIntent: "positive_t_open", linkedTradeId: "", note: "价格动作表：正T买入已触发，打开正T买入腿", label: "填入正T买入"};
+  }
+  if (row.action === "反T卖出") {
+    const plan = decisionCard?.manual_execution_plan || {};
+    return {side: "sell", price: currentPrice, shares: Number(plan.shares || shares), tradeIntent: "reverse_t_open", linkedTradeId: "", note: "价格动作表：反T卖出已触发，打开反T卖出腿", label: "填入反T卖出"};
   }
   if (row.action === "反T回补") {
     const plan = item.reverse_t_plan || {};
     const buybackPrice = plan.buyback_max_price == null ? currentPrice : Math.min(currentPrice, Number(plan.buyback_max_price));
     const openLegId = plan.open_reverse_t_leg?.id || "";
     if (!openLegId) return "";
-    return `<button class="secondary-action" type="button" data-manual-preset data-auto-confirm="true" data-code="${escapeHtml(item.code)}" data-side="buy" data-price="${escapeHtml(buybackPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="reverse_t_close" data-linked-trade-id="${escapeHtml(openLegId)}" data-note="价格动作表：反T回补已触发，关闭开放反T卖出腿">填入反T回补</button>`;
+    return {side: "buy", price: buybackPrice, shares, tradeIntent: "reverse_t_close", linkedTradeId: openLegId, note: "价格动作表：反T回补已触发，关闭开放反T卖出腿", label: "填入反T回补"};
   }
   if (row.action === "正T目标卖出") {
     const plan = item.positive_t_plan || {};
@@ -832,12 +843,61 @@ function priceActionPresetButton(row, item) {
     const targetPrice = Array.isArray(zone) && zone.length >= 2 ? Number(zone[0]) : currentPrice;
     const openLegId = plan.open_positive_t_leg?.id || "";
     if (!openLegId) return "";
-    return `<button class="secondary-action" type="button" data-manual-preset data-auto-confirm="true" data-code="${escapeHtml(item.code)}" data-side="sell" data-price="${escapeHtml(targetPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="positive_t_close" data-linked-trade-id="${escapeHtml(openLegId)}" data-note="价格动作表：正T目标卖出已触发，关闭开放正T买入腿">填入正T卖出</button>`;
+    return {side: "sell", price: targetPrice, shares, tradeIntent: "positive_t_close", linkedTradeId: openLegId, note: "价格动作表：正T目标卖出已触发，关闭开放正T买入腿", label: "填入正T卖出"};
   }
   return "";
 }
 
-function renderPriceActionTable(table, item) {
+function priceActionPresetButton(row, item, decisionCard = null) {
+  const preset = priceActionPresetData(row, item, decisionCard);
+  if (!preset) return "";
+  const dangerClass = preset.danger ? " danger-lite-action" : "";
+  return `<button class="secondary-action${dangerClass}" type="button" data-manual-preset data-auto-confirm="true" data-code="${escapeHtml(item.code)}" data-side="${escapeHtml(preset.side)}" data-price="${escapeHtml(Number(preset.price).toFixed(2))}" data-shares="${escapeHtml(preset.shares)}" data-trade-intent="${escapeHtml(preset.tradeIntent)}" data-linked-trade-id="${escapeHtml(preset.linkedTradeId)}" data-note="${escapeHtml(preset.note)}">${escapeHtml(preset.label)}</button>`;
+}
+
+function tradeIntentEffectLabel(intent) {
+  return {
+    reverse_t_open: "打开反T卖出腿，后续只等回补上限内买回。",
+    reverse_t_close: "关闭开放反T卖出腿，刷新后复算持仓成本。",
+    positive_t_open: "打开正T买入腿，后续只卖新增股数。",
+    positive_t_close: "关闭开放正T买入腿，完成本轮正T闭环。",
+  }[intent] || "普通成交写入，不自动关闭做T腿。";
+}
+
+function renderPresetConsequencePreview(row, item, decisionCard = null) {
+  const preset = priceActionPresetData(row, item, decisionCard);
+  if (!preset) return "";
+  const impact = manualTradeImpact(item, preset.side, Number(preset.price), Number(preset.shares));
+  if (!impact?.valid) return "";
+  const payload = {
+    side: preset.side,
+    price: Number(preset.price),
+    shares: Number(preset.shares),
+    trade_intent: preset.tradeIntent,
+    linked_trade_id: preset.linkedTradeId,
+  };
+  const amount = payload.price * payload.shares;
+  const cashChange = payload.side === "sell" ? amount - impact.fees.total : -(amount + impact.fees.total);
+  const metrics = [
+    ["现金变化", money(cashChange)],
+    ["成交后股数", `${num(impact.remainingShares, 0)}股`],
+    ["预估费用", money(impact.fees.total)],
+    ["做T影响", impact.reverseTSupported ? "仍可观察" : "不足200股"],
+  ];
+  if (payload.side === "sell") {
+    metrics.push(["实现盈亏", money(impact.realizedPnl)]);
+  } else {
+    metrics.push(["预计新成本", money(impact.weightedCost)]);
+  }
+  return `<div class="execution-preview">
+    <div class="execution-preview-title">成交后果预览</div>
+    <div class="execution-preview-grid">${metrics.map(([key, value]) => `<dl><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    <p><strong>做T腿影响：</strong>${escapeHtml(tradeIntentEffectLabel(payload.trade_intent))}</p>
+    <p><strong>下一步：</strong>${escapeHtml(nextPlanAfterManualTrade(item, payload, impact))}</p>
+  </div>`;
+}
+
+function renderPriceActionTable(table, item, decisionCard = null) {
   const rows = table?.rows || [];
   if (!rows.length) return "";
   const statusClass = status => ({
@@ -860,7 +920,7 @@ function renderPriceActionTable(table, item) {
             <td>${escapeHtml(row.operation || "--")}</td>
             <td class="${statusClass(row.status)}">${escapeHtml(row.status_label || row.status || "--")}</td>
             <td class="number">${row.shares ? `${escapeHtml(row.shares)}股` : "--"}</td>
-            <td>${priceActionPresetButton(row, item)}</td>
+            <td>${priceActionPresetButton(row, item, decisionCard)}</td>
           </tr>
           ${row.note ? `<tr class="action-note"><td></td><td colspan="6">${escapeHtml(row.note)}</td></tr>` : ""}`
         ).join("")}</tbody>
@@ -1678,7 +1738,7 @@ function openDetail(code, options = {}) {
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`,
       "decision-card"
     );
-    html += renderPriceActionTable(decisionCard.price_action_table, item);
+    html += renderPriceActionTable(decisionCard.price_action_table, item, decisionCard);
     html += manualTradeSection(item);
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
     html += renderPositiveTPlan(item.positive_t_plan);
