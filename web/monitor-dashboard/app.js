@@ -1405,6 +1405,7 @@ function renderTechnicalOperationBlock(operation, mode) {
 
 function renderManualExecutionPlan(plan) {
   if (!plan?.applicable) return "";
+  const isRiskExit = plan.candidate === "risk_exit";
   const priceZone = Array.isArray(plan.price_zone) && plan.price_zone.length >= 2
     ? `${num(plan.price_zone[0])}-${num(plan.price_zone[1])}元`
     : "--";
@@ -1429,6 +1430,11 @@ function renderManualExecutionPlan(plan) {
   if (plan.risk_amount != null) metrics.push(["新增风险金额", money(plan.risk_amount)]);
   const steps = plan.steps || [];
   const failures = plan.failure_conditions || [];
+  const impactItems = [
+    plan.post_trade_shares == null ? "" : `成交后剩余 ${num(plan.post_trade_shares, 0)} 股。`,
+    plan.estimated_realized_pnl == null ? "" : `预计实现盈亏 ${money(plan.estimated_realized_pnl)}。`,
+    plan.post_trade_plan || "",
+  ].filter(Boolean);
   const fillPrice = plan.side === "buy"
     ? (plan.max_price ?? (Array.isArray(plan.price_zone) ? plan.price_zone[1] : null))
     : (plan.min_price ?? (Array.isArray(plan.price_zone) ? plan.price_zone[0] : null));
@@ -1437,17 +1443,41 @@ function renderManualExecutionPlan(plan) {
         <button class="primary-action" type="button" data-manual-preset data-code="${escapeHtml(state.selectedCode || "")}" data-side="${escapeHtml(plan.side)}" data-price="${escapeHtml(Number(fillPrice).toFixed(2))}" data-shares="${escapeHtml(plan.shares)}" data-trade-intent="${escapeHtml(plan.trade_intent || "")}" data-note="${escapeHtml(`${plan.status_label || "人工候选计划"}：按系统计划填入，券商真实成交后确认写入`)}">填入这笔计划</button>
       </div>`
     : "";
-  const sectionTitle = plan.candidate === "risk_exit" ? "退出风控执行计划" : "人工候选交易计划";
-  return detailSection(
-    sectionTitle,
-    `<div class="manual-plan manual-plan-${escapeHtml(plan.status || "watch")}">
+  const sectionTitle = isRiskExit ? "退出风控执行计划" : "人工候选交易计划";
+  const body = isRiskExit ? `
+      <div class="risk-exit-brief">
+        <section class="risk-exit-block risk-exit-decision">
+          <span>当前结论</span>
+          <strong>${escapeHtml(plan.action_label || plan.status_label || "--")}</strong>
+          <p>${escapeHtml(plan.reason || "触发风控后先降低风险，不用补仓或做T替代止损复核。")}</p>
+        </section>
+        <section class="risk-exit-block risk-exit-steps">
+          <span>现在怎么做</span>
+          <strong>${escapeHtml(plan.status === "wait_rebound_reduce" ? `等 ${priceZone}` : `${plan.side_label || "卖出"} ${plan.shares || "--"} 股`)}</strong>
+          ${steps.length ? `<ol>${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : `<p>等待系统给出可执行步骤。</p>`}
+        </section>
+        <section class="risk-exit-block risk-exit-impact">
+          <span>做完会怎样</span>
+          <strong>${escapeHtml(plan.post_trade_shares == null ? "刷新后重新评估" : `剩余 ${num(plan.post_trade_shares, 0)} 股`)}</strong>
+          ${impactItems.length ? `<ul>${impactItems.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>成交后刷新建议，重新计算止损、做T资格和下一步计划。</p>`}
+        </section>
+      </div>
+      <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+      ${failures.length ? `<h4>失败条件</h4><ul class="reason-list">${failures.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+      ${presetButton}
+      <p class="secondary">这是人工确认计划，不会自动下单；只有券商软件真实成交后，才在本系统写入成交。</p>`
+    : `
       ${plan.reason ? `<div class="action-panel action-exit_risk_review"><div class="action-panel-title">当前结论</div><p>${escapeHtml(plan.reason)}</p></div>` : ""}
       <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
       ${steps.length ? `<h4>傻瓜式操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
       ${failures.length ? `<h4>失败条件</h4><ul class="reason-list">${failures.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
       ${plan.post_trade_plan ? `<h4>成交后下一步</h4><p>${escapeHtml(plan.post_trade_plan)}</p>` : ""}
       ${presetButton}
-      <p class="secondary">这是人工确认计划，不会自动下单；只有券商软件真实成交后，才在本系统写入成交。</p>
+      <p class="secondary">这是人工确认计划，不会自动下单；只有券商软件真实成交后，才在本系统写入成交。</p>`;
+  return detailSection(
+    sectionTitle,
+    `<div class="manual-plan manual-plan-${escapeHtml(plan.status || "watch")}">
+      ${body}
     </div>`,
     "manual-execution-plan"
   );

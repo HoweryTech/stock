@@ -557,6 +557,23 @@ th:nth-child(8) { width: 100px; }
 .reverse-plan-block-blocked { border-left-color: var(--amber); background: rgba(255, 246, 221, 0.66); }
 .reverse-plan-block-reference { border-left-color: var(--muted); background: rgba(244, 246, 248, 0.78); }
 .reverse-plan-block-gate { border-left-color: var(--red); background: rgba(255, 240, 238, 0.48); }
+.risk-exit-brief { display: grid; gap: 10px; margin-bottom: 12px; }
+.risk-exit-block {
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.risk-exit-block span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 800; }
+.risk-exit-block strong { display: block; line-height: 1.35; }
+.risk-exit-block p { margin: 6px 0 0; color: var(--text); line-height: 1.5; }
+.risk-exit-block ol,
+.risk-exit-block ul { margin: 8px 0 0 18px; padding: 0; color: var(--text); line-height: 1.52; }
+.risk-exit-block li + li { margin-top: 5px; }
+.risk-exit-decision { border-left-color: var(--red); background: rgba(255, 240, 238, 0.55); }
+.risk-exit-steps { border-left-color: var(--amber); background: rgba(255, 246, 221, 0.7); }
+.risk-exit-impact { border-left-color: var(--blue); background: rgba(238, 244, 255, 0.68); }
 .manual-trade-form { display: grid; gap: 12px; }
 .manual-trade-lock {
   display: flex;
