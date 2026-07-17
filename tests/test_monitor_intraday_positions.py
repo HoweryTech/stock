@@ -184,6 +184,32 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertEqual(item["latest_reverse_t_closure"]["buy_trade_id"], "MANUAL-CLOSE-000725")
         self.assertEqual(item["latest_reverse_t_closure"]["status"], "closed_profitable")
 
+    def test_analyze_quote_exposes_latest_positive_t_closure(self) -> None:
+        closure = {
+            "status": "closed_profitable",
+            "buy_trade_id": "MANUAL-POSITIVE-OPEN",
+            "sell_trade_id": "MANUAL-POSITIVE-CLOSE",
+            "buy_price": 6.1,
+            "sell_price": 6.25,
+            "shares": 100.0,
+            "net_profit": 4.67,
+            "next_plan": "闭环完成。",
+        }
+        position = {
+            "stock": {"code": "000725", "name": "京东方A"},
+            "entry": {"shares": 200, "entry_price": 7.6025, "position_pct_of_total_assets": 4.72},
+            "tracking": {"latest_positive_t_closure": closure},
+        }
+        quote = {"code": "000725", "latest_price": 6.25, "change_pct": 1.2, "quote_timestamp": 1000}
+
+        item = analyze_quote(
+            position, quote, self.history(), total_assets=25480, max_stale_seconds=60,
+            costs=self.costs, max_reverse_t_position_ratio_pct=50, now_timestamp=1001,
+        )
+
+        self.assertEqual(item["latest_positive_t_closure"]["sell_trade_id"], "MANUAL-POSITIVE-CLOSE")
+        self.assertEqual(item["latest_positive_t_closure"]["status"], "closed_profitable")
+
     def test_open_positive_t_leg_triggers_target_sell_ready(self) -> None:
         position = {
             "stock": {"code": "000725", "name": "京东方A"},

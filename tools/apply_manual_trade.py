@@ -114,6 +114,43 @@ def reverse_t_closure_summary(open_record: dict[str, Any], close_record: dict[st
     }
 
 
+def positive_t_closure_summary(open_record: dict[str, Any], close_record: dict[str, Any]) -> dict[str, Any]:
+    buy_price = as_float(open_record.get("price"), 0.0) or 0.0
+    sell_price = as_float(close_record.get("price"), 0.0) or 0.0
+    open_shares = as_float(open_record.get("shares"), 0.0) or 0.0
+    close_shares = as_float(close_record.get("shares"), 0.0) or 0.0
+    shares = min(open_shares, close_shares)
+    buy_fees = as_float(value_at(open_record, "fees.total_fees"), 0.0) or 0.0
+    sell_fees = as_float(value_at(close_record, "fees.total_fees"), 0.0) or 0.0
+    gross_profit = (sell_price - buy_price) * shares
+    total_fees = buy_fees + sell_fees
+    net_profit = gross_profit - total_fees
+    status = "closed_profitable" if net_profit >= 0 else "closed_loss"
+    if status == "closed_profitable":
+        next_plan = "正T闭环完成；今天不再围绕同一买入腿重复操作，刷新实时建议后只按新的候选计划观察。"
+    else:
+        next_plan = "正T闭环已记录但扣费后未盈利；暂停同类操作，先复核买入价、卖出价和费用参数。"
+    return {
+        "status": status,
+        "buy_trade_id": open_record.get("id"),
+        "sell_trade_id": close_record.get("id"),
+        "buy_occurred_at": open_record.get("occurred_at"),
+        "sell_occurred_at": close_record.get("occurred_at"),
+        "buy_price": round(buy_price, 4),
+        "sell_price": round(sell_price, 4),
+        "shares": float(shares),
+        "gross_profit": round(gross_profit, 4),
+        "fees": {
+            "buy_fees": round(buy_fees, 4),
+            "sell_fees": round(sell_fees, 4),
+            "total_fees": round(total_fees, 4),
+        },
+        "net_profit": round(net_profit, 4),
+        "profit_per_share": None if shares <= 0 else round(net_profit / shares, 4),
+        "next_plan": next_plan,
+    }
+
+
 def apply_manual_trade(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     code = str(args.code)
     side = str(args.side).lower()
@@ -202,6 +239,9 @@ def apply_manual_trade(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             raise ValueError(f"linked positive T open trade not found: {linked_trade_id}")
         if open_record.get("side") != "buy" or open_record.get("trade_intent") != "positive_t_open":
             raise ValueError(f"linked trade is not a positive T open buy: {linked_trade_id}")
+        closure = positive_t_closure_summary(open_record, record)
+        record["positive_t_closure"] = closure
+        set_value(position, "tracking.latest_positive_t_closure", closure)
     append_manual_trade(position, record)
     write_yaml(path, position, overwrite=True)
     return {"position_path": str(path), "trade": record, "position": {"shares": float(new_shares), "entry_price": value_at(position, "entry.entry_price")}}, path

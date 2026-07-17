@@ -114,6 +114,13 @@ class ApplyManualTradeTest(unittest.TestCase):
 
         self.assertEqual(updated["manual_trade_history"][-1]["trade_intent"], "positive_t_close")
         self.assertEqual(updated["manual_trade_history"][-1]["linked_trade_id"], opened["id"])
+        closure = updated["manual_trade_history"][-1]["positive_t_closure"]
+        self.assertEqual(closure["buy_trade_id"], opened["id"])
+        self.assertEqual(closure["sell_trade_id"], updated["manual_trade_history"][-1]["id"])
+        self.assertAlmostEqual(closure["gross_profit"], 8.0, places=4)
+        self.assertAlmostEqual(closure["fees"]["total_fees"], 10.3213, places=4)
+        self.assertAlmostEqual(closure["net_profit"], -2.3213, places=4)
+        self.assertEqual(updated["tracking"]["latest_positive_t_closure"]["sell_trade_id"], updated["manual_trade_history"][-1]["id"])
 
     def test_positive_t_close_requires_linked_open_buy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

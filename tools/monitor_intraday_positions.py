@@ -810,6 +810,7 @@ def analyze_quote(
         },
         "signals": signals,
         "latest_reverse_t_closure": value_at(position, "tracking.latest_reverse_t_closure"),
+        "latest_positive_t_closure": value_at(position, "tracking.latest_positive_t_closure"),
         "reverse_t_plan": reverse_t_plan,
         "positive_t_plan": positive_t_plan,
         "reduction_plan": reduction_plan,
@@ -923,6 +924,7 @@ def state_signature(snapshot: dict[str, Any]) -> dict[str, Any]:
             "positive_t_status": item.get("positive_t_plan", {}).get("status"),
             "positive_t_target_ready": item.get("positive_t_plan", {}).get("status") == "target_sell_ready",
             "latest_reverse_t_closure": (item.get("latest_reverse_t_closure") or {}).get("buy_trade_id"),
+            "latest_positive_t_closure": (item.get("latest_positive_t_closure") or {}).get("sell_trade_id"),
             "reduction_status": item.get("reduction_plan", {}).get("status"),
         }
         for item in snapshot["items"]
