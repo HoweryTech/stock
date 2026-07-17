@@ -638,6 +638,35 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
   );
 }
 
+function renderStickyActionBar(item, decisionCard, automaticDecision) {
+  const primary = decisionCard?.price_action_table?.primary_action || {};
+  const decision = decisionCard?.decision || {};
+  const blockers = decisionCard?.blockers || [];
+  const status = primary.status || (decision.execution_allowed ? "watch" : "blocked");
+  const statusText = primary.status_label || (status === "ready" ? "已触发" : status === "blocked" ? "暂不执行" : "等待触发");
+  const actionText = primary.action || decision.action_label || automaticDecision.headline || "观察";
+  const priceText = primary.price || money(item.quote?.latest_price);
+  const sharesText = primary.shares ? `${primary.shares}股` : "--";
+  const reasonText = primary.note || blockers[0] || decision.next_step || automaticDecision.action || "";
+  const presetButton = primary.status === "ready" ? priceActionPresetButton(primary, item) : "";
+  const statusClass = status === "ready" ? "ready" : status === "blocked" ? "blocked" : "watch";
+  const fallbackActions = `
+    <button class="secondary-action" type="button" data-detail-target="price-action-table">看价格动作表</button>
+    ${blockers.length ? `<button class="secondary-action" type="button" data-detail-target="decision-card">看阻断原因</button>` : ""}`;
+  return `<div class="sticky-action-bar action-bar-${escapeHtml(statusClass)}">
+    <div class="sticky-action-main">
+      <span>${escapeHtml(statusText)}</span>
+      <strong>${escapeHtml(actionText)}</strong>
+      <p>${escapeHtml(reasonText)}</p>
+    </div>
+    <div class="sticky-action-metrics">
+      <dl><dt>触发价</dt><dd>${escapeHtml(priceText)}</dd></dl>
+      <dl><dt>数量</dt><dd>${escapeHtml(sharesText)}</dd></dl>
+    </div>
+    <div class="sticky-action-controls">${presetButton || fallbackActions}</div>
+  </div>`;
+}
+
 function renderConsistencyChecks(quality) {
   const consistency = quality?.source_consistency || {};
   const checks = consistency.checks || [];
@@ -1542,6 +1571,7 @@ function openDetail(code, options = {}) {
   state.detailRenderedAt = state.snapshot?.generated_at || "";
   let html = detailRefreshNotice();
   if (decisionCard) {
+    html += renderStickyActionBar(item, decisionCard, automaticDecision);
     html += renderDecisionBrief(item, decisionCard, automaticDecision);
   }
   html += detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status");
