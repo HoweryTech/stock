@@ -617,6 +617,14 @@ function renderManualExecutionPlan(plan) {
   if (plan.risk_amount != null) metrics.push(["新增风险金额", money(plan.risk_amount)]);
   const steps = plan.steps || [];
   const failures = plan.failure_conditions || [];
+  const fillPrice = plan.side === "buy"
+    ? (plan.max_price ?? (Array.isArray(plan.price_zone) ? plan.price_zone[1] : null))
+    : (plan.min_price ?? (Array.isArray(plan.price_zone) ? plan.price_zone[0] : null));
+  const presetButton = plan.status === "ready_for_manual_confirm" && plan.side && plan.shares && fillPrice
+    ? `<div class="manual-plan-actions">
+        <button class="primary-action" type="button" data-manual-preset data-code="${escapeHtml(state.selectedCode || "")}" data-side="${escapeHtml(plan.side)}" data-price="${escapeHtml(Number(fillPrice).toFixed(2))}" data-shares="${escapeHtml(plan.shares)}" data-trade-intent="${escapeHtml(plan.trade_intent || "")}" data-note="${escapeHtml(`${plan.status_label || "人工候选计划"}：按系统计划填入，券商真实成交后确认写入`)}">填入这笔计划</button>
+      </div>`
+    : "";
   return detailSection(
     "人工候选交易计划",
     `<div class="manual-plan manual-plan-${escapeHtml(plan.status || "watch")}">
@@ -624,6 +632,7 @@ function renderManualExecutionPlan(plan) {
       ${steps.length ? `<h4>傻瓜式操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
       ${failures.length ? `<h4>失败条件</h4><ul class="reason-list">${failures.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
       ${plan.post_trade_plan ? `<h4>成交后下一步</h4><p>${escapeHtml(plan.post_trade_plan)}</p>` : ""}
+      ${presetButton}
       <p class="secondary">这是人工确认计划，不会自动下单；只有券商软件真实成交后，才在本系统写入成交。</p>
     </div>`,
     "manual-execution-plan"
@@ -832,6 +841,17 @@ function manualTradePreflightChecks(item, payload, impact) {
       zoneOk ? "pass" : "warn",
       zone.length < 2 ? "当前没有明确卖出观察区，按真实成交记录但不作为系统候选反T。" : zoneOk ? `卖出价位于 ${num(zone[0])}-${num(zone[1])} 元观察区。` : `卖出价不在 ${num(zone[0])}-${num(zone[1])} 元观察区，请确认这是手工决策。`,
     );
+  } else if (payload.trade_intent === "positive_t_open") {
+    const card = state.decisionCards.get(item.code);
+    const plan = card?.manual_execution_plan || {};
+    const zone = plan.price_zone || [];
+    const zoneOk = zone.length < 2 || (payload.price >= Number(zone[0]) && payload.price <= Number(zone[1]));
+    const sharesOk = !plan.shares || Number(payload.shares) === Number(plan.shares);
+    add(
+      "正T买入计划",
+      zoneOk && sharesOk ? "pass" : "warn",
+      zone.length < 2 ? "当前没有明确买入观察区，请人工复核。" : zoneOk && sharesOk ? `买入价位于 ${num(zone[0])}-${num(zone[1])} 元观察区，数量符合计划。` : `计划区间 ${num(zone[0])}-${num(zone[1])} 元、数量 ${plan.shares || "--"} 股；当前填写值需要人工复核。`,
+    );
   } else {
     add("成交意图", "warn", "这会按普通手工成交写入，不会关闭或打开反T腿。");
   }
@@ -857,6 +877,7 @@ function renderManualTradeConfirmation(item, payload, impact, checks) {
   const intentLabel = {
     reverse_t_open: "反T卖出腿",
     reverse_t_close: "反T回补",
+    positive_t_open: "正T买入腿",
   }[payload.trade_intent] || "普通手工成交";
   const metrics = [
     ["证券", `${item.code} ${item.name}`],
@@ -1446,7 +1467,7 @@ document.querySelector("#detailContent").addEventListener("click", event => {
   }
   const button = event.target.closest("[data-manual-preset]");
   if (!button) return;
-  const form = button.closest(".manual-trade-form");
+  const form = button.closest(".manual-trade-form") || document.querySelector(`.manual-trade-form[data-code="${CSS.escape(button.dataset.code || state.selectedCode || "")}"]`);
   if (!form) return;
   form.querySelector('[name="side"]').value = button.dataset.side || "sell";
   form.querySelector('[name="price"]').value = button.dataset.price || "";
@@ -1457,6 +1478,9 @@ document.querySelector("#detailContent").addEventListener("click", event => {
   updateManualTradeImpact(form);
   const status = form.querySelector(".manual-trade-status");
   status.textContent = "已填入系统建议成交参数；确认已真实成交后再点击记录。";
+  form.scrollIntoView({ block: "center", behavior: "smooth" });
+  form.classList.add("detail-focus");
+  setTimeout(() => form.classList.remove("detail-focus"), 1800);
 });
 document.querySelector("#detailContent").addEventListener("input", event => {
   const form = event.target.closest(".manual-trade-form");

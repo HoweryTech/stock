@@ -384,6 +384,7 @@ th:nth-child(8) { width: 100px; }
 .manual-plan { padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
 .manual-plan-ready_for_manual_confirm { border-color: rgba(35, 122, 63, 0.28); background: var(--green-bg); }
 .manual-plan-blocked { border-color: rgba(190, 52, 48, 0.28); background: var(--red-bg); }
+.manual-plan-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 10px; }
 .technical-table-wrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; }
 .technical-table { min-width: 720px; table-layout: fixed; }
 .technical-table th { height: 34px; padding: 0 8px; }
