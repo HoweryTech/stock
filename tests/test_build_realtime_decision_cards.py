@@ -163,6 +163,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertFalse(card["decision"]["execution_allowed"])
         self.assertIn("禁止做T", card["decision"]["next_step"])
         exit_actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+        self.assertEqual(card["price_action_table"]["rows"][0]["action"], "止损/退出")
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "止损/退出")
         self.assertEqual(exit_actions["止损/退出"]["status"], "ready")
         self.assertEqual(exit_actions["止损/退出"]["operation"], "卖出风险仓位")
         self.assertEqual(exit_actions["做T阻断"]["status"], "blocked")
@@ -212,6 +214,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["capital_plan"]["suggested_buy_shares"], 100)
         actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
         self.assertIn("正T买入", actions)
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "正T买入")
         self.assertEqual(actions["正T买入"]["shares"], 100)
         self.assertEqual(actions["正T买入"]["status"], "watch")
         self.assertIn("禁止追买", actions)
@@ -391,6 +394,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["manual_execution_plan"]["trade_intent"], "reverse_t_open")
         self.assertEqual(card["manual_execution_plan"]["post_trade_shares"], 400)
         reverse_actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "反T卖出")
         self.assertEqual(reverse_actions["反T卖出"]["status"], "ready")
         self.assertEqual(reverse_actions["反T卖出"]["shares"], 100)
         self.assertEqual(reverse_actions["反T回补"]["price"], "≤ 9.95 元")
@@ -433,6 +437,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIn("做T实盘绩效", card["post_unlock_review_summary"]["blocking_checks"])
         self.assertTrue(any("累计净收益 -6.50 元" in blocker for blocker in card["blockers"]))
         blocked_actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "反T卖出")
         self.assertEqual(blocked_actions["反T卖出"]["status"], "blocked")
         self.assertEqual(blocked_actions["反T卖出"]["status_label"], "绩效阻断")
         self.assertTrue(any("做T实盘绩效阻断" in step for step in card["decision"]["action_steps"]))

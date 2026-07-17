@@ -1907,6 +1907,7 @@ def action_table_row(
     status_label: str,
     shares: int | None = None,
     note: str = "",
+    priority: int = 0,
 ) -> dict[str, Any]:
     return {
         "action": action,
@@ -1917,7 +1918,38 @@ def action_table_row(
         "status": status,
         "status_label": status_label,
         "note": note,
+        "priority": priority,
     }
+
+
+def price_action_priority(action: str, status: str) -> int:
+    if status == "ready":
+        return {
+            "止损/退出": 100,
+            "反T回补": 95,
+            "正T目标卖出": 90,
+            "正T买入": 82,
+            "反T卖出": 80,
+        }.get(action, 70)
+    if status == "blocked":
+        return {
+            "做T阻断": 78,
+            "反T卖出": 72,
+            "正T买入": 70,
+            "当前动作": 68,
+            "禁止追买": 40,
+        }.get(action, 60)
+    if status == "watch":
+        return {
+            "反T回补": 58,
+            "正T目标卖出": 55,
+            "正T买入": 50,
+            "反T卖出": 48,
+            "止损/退出": 45,
+            "做T阻断": 42,
+            "当前动作": 30,
+        }.get(action, 20)
+    return 0
 
 
 def build_price_action_table(
@@ -1950,6 +1982,7 @@ def build_price_action_table(
             status_label="等待数据" if state in {"data_stale", "market_wait", "data_insufficient"} else "观察",
             shares=None,
             note="先看本表价格触发条件；没有进入触发价前不操作。",
+            priority=price_action_priority("当前动作", "blocked" if state in {"data_stale", "market_wait", "data_insufficient"} else "watch"),
         )
     )
 
@@ -1965,6 +1998,7 @@ def build_price_action_table(
                 status_label="已触发" if stop_ready else "未触发",
                 shares=shares,
                 note="触发后优先处理退出风险；禁止补仓、禁止做T摊低成本。",
+                priority=price_action_priority("止损/退出", "ready" if stop_ready else "watch"),
             )
         )
 
@@ -1979,6 +2013,7 @@ def build_price_action_table(
                 status="blocked" if blocked_now else "watch",
                 status_label="阻断中" if blocked_now else "未进入",
                 note="离止损太近时，不允许用正T或反T扩大风险。",
+                priority=price_action_priority("做T阻断", "blocked" if blocked_now else "watch"),
             )
         )
 
@@ -1999,6 +2034,7 @@ def build_price_action_table(
                 status_label="禁止" if buy_blocked else "可确认" if buy_ready else "等待",
                 shares=suggested_buy_shares or None,
                 note="高于买入上限不追；买入后目标是卖出新增仓位，不是长期补仓。",
+                priority=price_action_priority("正T买入", "blocked" if buy_blocked else "ready" if buy_ready else "watch"),
             )
         )
 
@@ -2006,6 +2042,7 @@ def build_price_action_table(
         close_shares = int(positive_plan.get("trade_shares") or suggested_buy_shares or 0)
         target_low = as_float(target_zone[0]) if isinstance(target_zone, list) and len(target_zone) >= 2 else None
         target_ready = current is not None and target_low is not None and current >= target_low and positive_plan.get("status") == "target_sell_ready"
+        has_open_positive_leg = bool(positive_plan.get("open_positive_t_leg"))
         rows.append(
             action_table_row(
                 "正T目标卖出",
@@ -2016,6 +2053,7 @@ def build_price_action_table(
                 status_label="已触发" if target_ready else "等待",
                 shares=close_shares or None,
                 note="只卖新增股数完成闭环；未到目标不急卖。",
+                priority=price_action_priority("正T目标卖出", "ready" if target_ready else "watch") if has_open_positive_leg or target_ready else 36,
             )
         )
 
@@ -2033,6 +2071,7 @@ def build_price_action_table(
                 status_label="可确认" if reverse_candidate else "绩效阻断" if t_performance_gate.get("status") == "blocked" else "仅观察",
                 shares=reverse_shares or None,
                 note="没有回补上限或未接受卖出后果时，不执行反T卖出。",
+                priority=price_action_priority("反T卖出", "ready" if reverse_candidate else "blocked" if t_performance_gate.get("status") == "blocked" else "watch"),
             )
         )
 
@@ -2040,6 +2079,7 @@ def build_price_action_table(
     if buyback is not None:
         open_leg = reverse_plan.get("open_reverse_t_leg") or {}
         buyback_ready = reverse_plan.get("status") == "buyback_ready"
+        has_open_reverse_leg = bool(open_leg)
         buyback_shares = int(as_float(open_leg.get("shares"), 0.0) or reverse_shares or 0)
         rows.append(
             action_table_row(
@@ -2051,6 +2091,7 @@ def build_price_action_table(
                 status_label="已触发" if buyback_ready else "等待",
                 shares=buyback_shares or None,
                 note="高于回补上限不追买；未回补要按减仓后果管理。",
+                priority=price_action_priority("反T回补", "ready" if buyback_ready else "watch") if has_open_reverse_leg else 35,
             )
         )
 
@@ -2065,13 +2106,18 @@ def build_price_action_table(
                 status="blocked",
                 status_label="硬限制",
                 note="宁可错过，不在计划外提高买入价。",
+                priority=price_action_priority("禁止追买", "blocked"),
             )
         )
 
+    ordered_rows = sorted(enumerate(rows), key=lambda item: (-int(item[1].get("priority") or 0), item[0]))
+    rows = [row for _, row in ordered_rows]
+    primary_action = rows[0] if rows else None
     return {
         "status": state,
         "status_label": STATE_LABELS.get(state, state),
         "rows": rows,
+        "primary_action": primary_action,
         "summary": "按触发价执行；未进入对应价格区间时只观察，不提前操作。",
     }
 

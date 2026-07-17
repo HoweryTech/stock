@@ -175,6 +175,9 @@ th:nth-child(8) { width: 100px; }
 .positive-t-ready { color: var(--green); }
 .positive-t-fail { color: var(--red); }
 .positive-t-wait { color: var(--blue); }
+.price-action-ready { color: var(--red); }
+.price-action-blocked { color: var(--amber); }
+.price-action-watch { color: var(--blue); }
 .review-line { display: flex; align-items: flex-start; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 12px; }
 .review-line span { display: inline-flex; flex: 0 0 auto; min-height: 22px; align-items: center; padding: 2px 7px; border-radius: 4px; font-weight: 700; }
 .review-line em { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-style: normal; }
@@ -239,6 +242,8 @@ th:nth-child(8) { width: 100px; }
 .action-table th, .action-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .action-table th { color: var(--muted); font-weight: 700; background: #f6f8fa; }
 .action-table tr:last-child td { border-bottom: 0; }
+.action-table .action-row-ready td { background: var(--red-bg); }
+.action-table .action-row-blocked td { background: #fff8e6; }
 .action-table .action-note td { padding-top: 0; color: var(--muted); background: var(--surface); }
 .action-panel { margin: 14px 0; padding: 12px 13px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
 .action-panel-title { margin-bottom: 7px; font-size: 12px; color: var(--muted); font-weight: 700; }

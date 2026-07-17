@@ -317,6 +317,14 @@ function tClosurePerformanceTag(item) {
   return `<div class="advice-tag ${toneClass}">做T实盘统计 · ${performance.profitable_count}/${performance.total_count}盈利 · 累计${money(performance.total_net_profit)}</div>`;
 }
 
+function priceActionTag(item) {
+  const action = decisionCardFor(item)?.price_action_table?.primary_action;
+  if (!action) return "";
+  const toneClass = action.status === "ready" ? "price-action-ready" : action.status === "blocked" ? "price-action-blocked" : "price-action-watch";
+  const shares = action.shares ? ` · ${action.shares}股` : "";
+  return `<div class="advice-tag ${toneClass}">最紧急：${escapeHtml(action.action || "--")} · ${escapeHtml(action.status_label || "--")} · ${escapeHtml(action.price || "--")}${shares}</div>`;
+}
+
 function filteredItems() {
   const items = state.snapshot?.items || [];
   return items.filter(item => {
@@ -419,6 +427,7 @@ function tableRow(item) {
   const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
   const reviewTag = postUnlockReviewTag(item);
   const performanceTag = tClosurePerformanceTag(item);
+  const actionTag = priceActionTag(item);
   const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<tr data-code="${item.code}" tabindex="0">
@@ -427,7 +436,7 @@ function tableRow(item) {
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
     <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><div class="state-tier">${actionTierBadge(item)}</div></td>
-    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${positiveTag}${performanceTag}${techTag}${dataTag}${reverseTag}</td>
+    <td class="advice">${escapeHtml(adviceFor(item))}${actionTag}${cardTag}${unlockTag}${reviewTag}${positiveTag}${performanceTag}${techTag}${dataTag}${reverseTag}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
@@ -445,6 +454,7 @@ function mobileCard(item) {
   const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
   const reviewTag = postUnlockReviewTag(item);
   const performanceTag = tClosurePerformanceTag(item);
+  const actionTag = priceActionTag(item);
   const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
@@ -456,7 +466,7 @@ function mobileCard(item) {
     <div class="card-row"><span>${actionTierBadge(item)}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
     <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>${escapeHtml(displayState)}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
-    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${positiveTag}${performanceTag}${techTag}${dataTag}${reverseTag}</div>
+    <div class="card-advice">${escapeHtml(adviceFor(item))}${actionTag}${cardTag}${unlockTag}${reviewTag}${positiveTag}${performanceTag}${techTag}${dataTag}${reverseTag}</div>
   </article>`;
 }
 
@@ -594,7 +604,7 @@ function renderPriceActionTable(table) {
       <table class="action-table">
         <thead><tr><th>动作</th><th>触发条件</th><th>价格</th><th>操作</th><th>状态</th><th>数量</th></tr></thead>
         <tbody>${rows.map(row => `
-          <tr>
+          <tr class="action-row-${escapeHtml(row.status || "unknown")}">
             <td><strong>${escapeHtml(row.action || "--")}</strong></td>
             <td>${escapeHtml(row.trigger || "--")}</td>
             <td class="number">${escapeHtml(row.price || "--")}</td>
