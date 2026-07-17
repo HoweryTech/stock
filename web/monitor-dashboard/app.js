@@ -459,6 +459,40 @@ function renderSummary() {
     </div>`).join("");
 }
 
+function renderPriorityQueue() {
+  const queue = state.decisionReport?.priority_queue || {};
+  const items = queue.top_items || [];
+  const container = document.querySelector("#priorityQueue");
+  if (!items.length) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+  const displayItems = items.slice(0, 5);
+  const totalCount = (queue.items || items).length;
+  container.hidden = false;
+  container.innerHTML = `
+    <div class="queue-header">
+      <div>
+        <h2>今日处理顺序</h2>
+        <p>${escapeHtml(queue.summary || "按风险和候选优先级排序；不自动下单。")}</p>
+      </div>
+      <span>${displayItems.length}/${totalCount} 项</span>
+    </div>
+    <div class="queue-list">
+      ${displayItems.map((item, index) => `
+        <button class="queue-item queue-${escapeHtml(item.urgency || "low")}" type="button" data-queue-code="${escapeHtml(item.code || "")}">
+          <span class="queue-rank">${index + 1}</span>
+          <span class="queue-main">
+            <strong>${escapeHtml(item.name || "--")} <em>${escapeHtml(item.code || "")}</em></strong>
+            <small>${escapeHtml(item.category_label || "--")} · ${escapeHtml(item.state_label || "--")}</small>
+            <b>${escapeHtml(item.action_label || "--")}</b>
+            <small>${escapeHtml(item.next_step || item.reason || "")}</small>
+          </span>
+        </button>`).join("")}
+    </div>`;
+}
+
 function renderRefreshAlert() {
   const alert = document.querySelector("#refreshAlert");
   const check = state.refreshCheck;
@@ -1772,6 +1806,7 @@ async function loadData() {
     updateHeader(status);
     renderRefreshAlert();
     renderSummary();
+    renderPriorityQueue();
     renderPositions();
     renderEvents();
     if (state.selectedCode && !manualTradeInteractionActive()) openDetail(state.selectedCode);
@@ -1806,6 +1841,11 @@ document.querySelector("#refreshAlert").addEventListener("click", event => {
   navigator.clipboard?.writeText(button.dataset.command || "");
   button.textContent = "已复制";
   setTimeout(() => { button.textContent = "复制"; }, 1200);
+});
+document.querySelector("#priorityQueue").addEventListener("click", event => {
+  const item = event.target.closest("[data-queue-code]");
+  if (!item) return;
+  openDetail(item.dataset.queueCode);
 });
 document.querySelector("#eventList").addEventListener("click", event => {
   const item = event.target.closest("[data-event-code]");

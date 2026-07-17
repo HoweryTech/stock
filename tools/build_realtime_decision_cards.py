@@ -2273,6 +2273,85 @@ def confidence_for(state: str, evidence: list[str], blockers: list[str]) -> str:
     return "low"
 
 
+def queue_category(card: dict[str, Any]) -> tuple[str, str, int]:
+    state = str(card.get("state") or "")
+    primary = value_at(card, "price_action_table.primary_action") or {}
+    primary_action = str(primary.get("action") or "")
+    primary_status = str(primary.get("status") or "")
+    review_status = str(value_at(card, "post_unlock_review_summary.status") or "")
+    if primary_action == "止损/退出" and primary_status == "ready":
+        return "risk_exit", "优先处理卖出风险", 100
+    if state == "exit_risk_review":
+        return "risk_exit", "优先处理卖出风险", 95
+    if state in {"data_stale", "market_wait", "data_insufficient"}:
+        return "data_fix", "先修复数据", 86 if state == "data_insufficient" else 82
+    if state == "risk_reduction_review":
+        return "risk_reduction", "复核降仓", 78
+    if review_status == "manual_candidate":
+        return "manual_candidate", "人工候选复核", 70
+    if state in {"positive_t_watch", "reverse_t_watch"}:
+        return "watch_candidate", "候选观察", 62
+    if state == "hold_no_add":
+        return "blocked_watch", "禁止操作只观察", 45
+    return "observe", "继续观察", 20
+
+
+def build_portfolio_priority_queue(cards: list[dict[str, Any]]) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for card in cards:
+        category, category_label, base_rank = queue_category(card)
+        primary = value_at(card, "price_action_table.primary_action") or {}
+        blockers = card.get("blockers") or []
+        review = card.get("post_unlock_review_summary") or {}
+        t_gate = card.get("t_performance_gate") or {}
+        q_gate = card.get("execution_quality_gate") or {}
+        rank = base_rank
+        if primary.get("status") == "ready":
+            rank += 8
+        if blockers:
+            rank += 2 if category in {"risk_exit", "data_fix", "risk_reduction"} else -4
+        if q_gate.get("status") == "blocked" or t_gate.get("status") == "blocked":
+            rank -= 3 if category not in {"risk_exit", "data_fix"} else 0
+        action_label = card.get("decision", {}).get("action_label") or category_label
+        if primary.get("action") and primary.get("status") == "ready":
+            action_label = f"{primary.get('action')}：{primary.get('operation') or action_label}"
+        elif category == "data_fix":
+            action_label = "补齐数据后再决策"
+        elif category == "blocked_watch":
+            action_label = "禁止买入、补仓、做T"
+        next_step = card.get("decision", {}).get("next_step") or review.get("next_step") or ""
+        items.append(
+            {
+                "rank": rank,
+                "urgency": "high" if rank >= 85 else "medium" if rank >= 60 else "low",
+                "category": category,
+                "category_label": category_label,
+                "code": card.get("code"),
+                "name": card.get("name"),
+                "state": card.get("state"),
+                "state_label": card.get("state_label"),
+                "action_label": action_label,
+                "next_step": next_step,
+                "reason": card.get("reason"),
+                "primary_action": primary,
+                "blocking_checks": review.get("blocking_checks") or [],
+                "t_performance_status": t_gate.get("status_label") or t_gate.get("status"),
+                "execution_quality_status": q_gate.get("status_label") or q_gate.get("status"),
+            }
+        )
+    ordered = sorted(items, key=lambda item: (-int(item.get("rank") or 0), str(item.get("code") or "")))
+    counts: dict[str, int] = {}
+    for item in ordered:
+        category = str(item.get("category") or "unknown")
+        counts[category] = counts.get(category, 0) + 1
+    return {
+        "items": ordered,
+        "top_items": ordered[:8],
+        "counts": dict(sorted(counts.items())),
+        "summary": "按风险优先、数据可用、人工候选、禁止操作、观察的顺序处理；队列只排序，不自动下单。",
+    }
+
+
 def technical_decision_note(technical_assessment: dict[str, Any]) -> str | None:
     label = technical_assessment.get("label")
     if label == "bearish":
@@ -2496,6 +2575,7 @@ def build_report(
         (alert for card in cards if (alert := build_post_unlock_review_alert(card))),
         key=lambda alert: (0 if alert.get("severity") == "action" else 1, str(alert.get("code") or "")),
     )
+    priority_queue = build_portfolio_priority_queue(cards)
     return {
         "generated_at": (generated_at or datetime.now().astimezone()).isoformat(timespec="seconds"),
         "source": {
@@ -2513,6 +2593,7 @@ def build_report(
         "state_counts": dict(sorted(state_counts.items())),
         "technical_unlock_alerts": technical_unlock_alerts,
         "post_unlock_review_alerts": post_unlock_review_alerts,
+        "priority_queue": priority_queue,
         "cards": sorted(cards, key=lambda card: (-decision_priority(card["state"]), str(card["code"]))),
     }
 
@@ -2530,9 +2611,24 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- 卡片数：{report['card_count']}",
         f"- 状态分布：{report['state_counts']}",
         "",
+        "## 今日处理顺序",
+        "",
+        str(value_at(report, "priority_queue.summary") or "按队列顺序处理；队列只排序，不自动下单。"),
+        "",
+    ]
+    queue_items = value_at(report, "priority_queue.top_items") or []
+    if queue_items:
+        lines.extend(["| 顺序 | 代码 | 名称 | 分类 | 动作 | 下一步 |", "| ---: | --- | --- | --- | --- | --- |"])
+        for index, item in enumerate(queue_items, start=1):
+            lines.append(
+                f"| {index} | {item.get('code')} | {item.get('name')} | {item.get('category_label')} | "
+                f"{item.get('action_label')} | {item.get('next_step') or '-'} |"
+            )
+        lines.append("")
+    lines.extend([
         "| 代码 | 名称 | 状态 | 当前价 | 止损 | 阻断价 | 技术分 | 动作 | 置信度 |",
         "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
-    ]
+    ])
     for card in report["cards"]:
         levels = card["price_levels"]
         decision = card["decision"]

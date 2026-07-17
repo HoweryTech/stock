@@ -177,6 +177,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("成交后的下一步计划" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("做T阻断价" in step for step in card["decision"]["action_steps"]))
         self.assertIn("距离止损不足1%。", card["blockers"])
+        self.assertEqual(report["priority_queue"]["top_items"][0]["code"], "600000")
+        self.assertEqual(report["priority_queue"]["top_items"][0]["category"], "risk_exit")
+        self.assertEqual(report["priority_queue"]["top_items"][0]["urgency"], "high")
 
     def test_unconfirmed_imported_stop_reference_does_not_take_exit_priority(self) -> None:
         portfolio = portfolio_result()
@@ -626,6 +629,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["state"], "data_stale")
         self.assertEqual(card["decision"]["action"], "pause_intraday_decision")
         self.assertIn("实时持仓决策卡", content)
+        self.assertIn("今日处理顺序", content)
+        self.assertIn("补齐数据后再决策", content)
         self.assertIn("行情过期", content)
 
     def test_off_session_stale_quote_waits_for_market(self) -> None:
