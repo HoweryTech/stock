@@ -211,6 +211,27 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(actions["反弹减仓"]["status_label"], "等反弹")
         self.assertTrue(any("只等待价格反弹到" in step for step in card["manual_execution_plan"]["steps"]))
 
+    def test_near_confirmed_stop_loss_keeps_risk_review_primary(self) -> None:
+        portfolio = portfolio_result()
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 9.95
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_confirmed"] = True
+        report = build_report(
+            {"items": [intraday_item()]},
+            portfolio,
+            t_result(blockers=[{"code": "near_stop_loss", "message": "距离止损不足1%。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            None,
+            generated_at=datetime(2026, 7, 16, 9, 30, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "exit_risk_review")
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "止损风险复核")
+        self.assertEqual(card["price_action_table"]["primary_action"]["status_label"], "近硬止损")
+        self.assertFalse(card["manual_execution_plan"]["applicable"])
+
     def test_unconfirmed_imported_stop_reference_does_not_take_exit_priority(self) -> None:
         portfolio = portfolio_result()
         result = portfolio["positions"][0]["result"]

@@ -2322,6 +2322,7 @@ def price_action_priority(action: str, status: str) -> int:
         }.get(action, 70)
     if status == "blocked":
         return {
+            "止损风险复核": 88,
             "做T阻断": 78,
             "反T卖出": 72,
             "正T买入": 70,
@@ -2382,14 +2383,15 @@ def build_price_action_table(
     if stop_loss is not None and stop_loss_confirmed:
         stop_ready = current is not None and current <= stop_loss
         stop_plan = manual_execution_plan if manual_execution_plan.get("candidate") == "risk_exit" else {}
-        stop_action = str(stop_plan.get("action_label") or "止损/退出")
+        stop_action = str(stop_plan.get("action_label") or ("止损风险复核" if state == "exit_risk_review" and not stop_ready else "止损/退出"))
         plan_status = str(stop_plan.get("status") or "")
         row_status = "ready" if plan_status == "ready_for_manual_confirm" else "watch"
         if not stop_plan:
-            row_status = "ready" if stop_ready else "watch"
+            row_status = "ready" if stop_ready else "blocked" if state == "exit_risk_review" else "watch"
         row_status_label = (
             "可执行" if row_status == "ready" and stop_plan else
             "等反弹" if plan_status == "wait_rebound_reduce" else
+            "近硬止损" if row_status == "blocked" and state == "exit_risk_review" else
             "已触发" if stop_ready else "未触发"
         )
         row_price = format_price_zone(stop_plan.get("price_zone")) if stop_plan.get("price_zone") else f"≤ {stop_loss:.2f} 元"
@@ -2403,7 +2405,7 @@ def build_price_action_table(
                 stop_action,
                 row_trigger,
                 row_price,
-                "卖出风险仓位",
+                "卖出风险仓位" if row_status == "ready" else "不买入/不做T",
                 status=row_status,
                 status_label=row_status_label,
                 shares=row_shares,
@@ -2573,6 +2575,8 @@ def queue_category(card: dict[str, Any]) -> tuple[str, str, int]:
     review_status = str(value_at(card, "post_unlock_review_summary.status") or "")
     if primary_action in {"止损/退出", "止损减仓", "硬退出"} and primary_status == "ready":
         return "risk_exit", "优先处理卖出风险", 100
+    if primary_action == "止损风险复核":
+        return "risk_exit", "先复核硬止损风险", 99
     if primary_action == "反弹减仓":
         return "risk_exit", "等待反弹减仓", 98
     if state == "exit_risk_review":
