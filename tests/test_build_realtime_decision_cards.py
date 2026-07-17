@@ -467,6 +467,57 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("做T实盘绩效阻断" in step for step in card["decision"]["action_steps"]))
         self.assertFalse(card["manual_execution_plan"]["applicable"])
 
+    def test_poor_execution_quality_blocks_reverse_t_candidate(self) -> None:
+        item = intraday_item(reverse_status="candidate")
+        item["position"]["shares"] = 500
+        item["position"]["entry_price"] = 9.8
+        item["reverse_t_plan"]["trade_shares"] = 100
+        item["reverse_t_plan"]["buyback_max_price"] = 9.95
+        item["t_closure_performance"] = {
+            "status": "profitable",
+            "total_count": 3,
+            "profitable_count": 3,
+            "loss_count": 0,
+            "win_rate_pct": 100.0,
+            "total_net_profit": 36.0,
+            "recent_closures": [{"net_profit": 12.0}, {"net_profit": 11.0}, {"net_profit": 13.0}],
+        }
+        item["execution_quality_summary"] = {
+            "status": "blocked",
+            "review_count": 2,
+            "recent_count": 2,
+            "average_score": 57.5,
+            "failed_count": 1,
+            "needs_review_count": 1,
+            "poor_score_count": 2,
+            "recent_reviews": [{"score": 45, "status": "failed"}, {"score": 70, "status": "needs_review"}],
+            "latest_review": {"score": 70, "status_label": "需要复盘"},
+        }
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(),
+            None,
+            {"items": [{"code": "600000", "verdict": "pass", "verdict_label": "反T回测通过"}]},
+            None,
+            None,
+            bullish_technical_doc(),
+            {},
+            generated_at=datetime(2026, 7, 16, 9, 41, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "hold_no_add")
+        self.assertEqual(card["execution_quality_gate"]["status"], "blocked")
+        self.assertEqual(card["post_unlock_review_summary"]["status"], "blocked_after_unlock")
+        self.assertIn("执行质量评分", card["post_unlock_review_summary"]["blocking_checks"])
+        self.assertTrue(any("执行质量阻断" in step for step in card["decision"]["action_steps"]))
+        blocked_actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+        self.assertEqual(blocked_actions["反T卖出"]["status"], "blocked")
+        self.assertEqual(blocked_actions["反T卖出"]["status_label"], "执行评分阻断")
+        self.assertFalse(card["manual_execution_plan"]["applicable"])
+
     def test_positive_t_candidate_without_intraday_confirmation_waits(self) -> None:
         item = intraday_item()
         item["position"]["shares"] = 100

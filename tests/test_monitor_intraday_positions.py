@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 
-from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_positive_t_plan, build_reduction_plan, build_reverse_t_plan, build_t_closure_performance, dynamic_price_zone_width, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
+from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_execution_quality_summary, build_positive_t_plan, build_reduction_plan, build_reverse_t_plan, build_t_closure_performance, dynamic_price_zone_width, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
 
 
 class MonitorIntradayPositionsTest(unittest.TestCase):
@@ -304,6 +304,53 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertEqual(item["t_closure_performance"]["total_count"], 1)
         self.assertEqual(item["t_closure_performance"]["status"], "profitable")
         self.assertAlmostEqual(item["t_closure_performance"]["total_net_profit"], 17.6717, places=4)
+
+    def test_execution_quality_summary_blocks_recent_failed_review(self) -> None:
+        position = {
+            "manual_trade_history": [
+                {
+                    "id": "MANUAL-LOSS",
+                    "side": "sell",
+                    "occurred_at": "2026-07-17T10:00:00+08:00",
+                    "execution_quality_review": {
+                        "status": "failed",
+                        "status_label": "执行失败复盘",
+                        "score": 45,
+                        "next_action": "暂停同类操作。",
+                    },
+                }
+            ]
+        }
+
+        summary = build_execution_quality_summary(position)
+
+        self.assertEqual(summary["status"], "blocked")
+        self.assertEqual(summary["failed_count"], 1)
+        self.assertEqual(summary["latest_review"]["trade_id"], "MANUAL-LOSS")
+
+    def test_analyze_quote_exposes_execution_quality_summary(self) -> None:
+        position = {
+            "stock": {"code": "000725", "name": "京东方A"},
+            "entry": {"shares": 200, "entry_price": 7.6025, "position_pct_of_total_assets": 4.72},
+            "tracking": {"latest_execution_quality_review": {"status": "good", "score": 90}},
+            "manual_trade_history": [
+                {
+                    "id": "MANUAL-GOOD",
+                    "side": "buy",
+                    "execution_quality_review": {"status": "good", "status_label": "执行质量良好", "score": 90},
+                }
+            ],
+        }
+        quote = {"code": "000725", "latest_price": 6.25, "change_pct": 1.2, "quote_timestamp": 1000}
+
+        item = analyze_quote(
+            position, quote, self.history(), total_assets=25480, max_stale_seconds=60,
+            costs=self.costs, max_reverse_t_position_ratio_pct=50, now_timestamp=1001,
+        )
+
+        self.assertEqual(item["latest_execution_quality_review"]["status"], "good")
+        self.assertEqual(item["execution_quality_summary"]["status"], "pass")
+        self.assertEqual(item["execution_quality_summary"]["average_score"], 90.0)
 
     def test_open_positive_t_leg_triggers_target_sell_ready(self) -> None:
         position = {

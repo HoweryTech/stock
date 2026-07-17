@@ -252,6 +252,72 @@ def build_t_closure_performance(position: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_execution_quality_summary(position: dict[str, Any]) -> dict[str, Any]:
+    history = position.get("manual_trade_history") or []
+    if not isinstance(history, list):
+        history = []
+    reviews: list[dict[str, Any]] = []
+    for record in history:
+        review = record.get("execution_quality_review") if isinstance(record, dict) else None
+        if not isinstance(review, dict):
+            continue
+        score = as_float(review.get("score"))
+        reviews.append(
+            {
+                "trade_id": record.get("id"),
+                "occurred_at": record.get("occurred_at"),
+                "side": record.get("side"),
+                "trade_intent": record.get("trade_intent") or "",
+                "score": score,
+                "status": review.get("status"),
+                "status_label": review.get("status_label"),
+                "next_action": review.get("next_action"),
+            }
+        )
+
+    recent_reviews = reviews[-5:]
+    scored = [item for item in recent_reviews if item.get("score") is not None]
+    average_score = round(sum(float(item["score"]) for item in scored) / len(scored), 2) if scored else None
+    failed_count = sum(1 for item in recent_reviews if item.get("status") == "failed")
+    needs_review_count = sum(1 for item in recent_reviews if item.get("status") == "needs_review")
+    poor_score_count = sum(1 for item in scored if float(item["score"]) < 70)
+
+    if not reviews:
+        status = "no_history"
+        status_label = "暂无执行评分"
+        next_action = "先记录真实成交后的执行评分；没有评分前不放大做T或买入规模。"
+    elif failed_count:
+        status = "blocked"
+        status_label = "近期执行评分失败"
+        next_action = "暂停新的买入/做T候选，先复盘失败成交的价格、费用和执行原因。"
+    elif poor_score_count >= 2 or (average_score is not None and average_score < 70):
+        status = "blocked"
+        status_label = "近期执行质量偏低"
+        next_action = "暂停新的买入/做T候选；只保留止损、减仓或观察。"
+    elif average_score is None or needs_review_count or average_score < 85:
+        status = "caution"
+        status_label = "执行质量需复盘"
+        next_action = "若其他门禁通过，也只允许最小股数候选；先看复盘检查项。"
+    else:
+        status = "pass"
+        status_label = "执行质量良好"
+        next_action = "可以继续小额候选，但仍需人工确认价格、数量和失败后果。"
+
+    return {
+        "status": status,
+        "status_label": status_label,
+        "review_count": len(reviews),
+        "recent_count": len(recent_reviews),
+        "average_score": average_score,
+        "failed_count": failed_count,
+        "needs_review_count": needs_review_count,
+        "poor_score_count": poor_score_count,
+        "recent_reviews": recent_reviews,
+        "latest_review": reviews[-1] if reviews else None,
+        "next_action": next_action,
+    }
+
+
 def one_side_trade_fees(side: str, price: float, shares: int, costs: dict[str, float]) -> dict[str, float]:
     amount = price * shares
     commission = max(amount * costs["commission_rate"], costs["minimum_commission"])
@@ -880,6 +946,7 @@ def analyze_quote(
         costs=costs,
     )
     t_closure_performance = build_t_closure_performance(position)
+    execution_quality_summary = build_execution_quality_summary(position)
     action_decision = apply_state_action_tier(build_action_decision(reverse_t_plan, reduction_plan), state, reverse_t_plan, reduction_plan)
 
     return {
@@ -909,6 +976,8 @@ def analyze_quote(
         "signals": signals,
         "latest_reverse_t_closure": value_at(position, "tracking.latest_reverse_t_closure"),
         "latest_positive_t_closure": value_at(position, "tracking.latest_positive_t_closure"),
+        "latest_execution_quality_review": value_at(position, "tracking.latest_execution_quality_review"),
+        "execution_quality_summary": execution_quality_summary,
         "t_closure_performance": t_closure_performance,
         "reverse_t_plan": reverse_t_plan,
         "positive_t_plan": positive_t_plan,

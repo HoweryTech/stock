@@ -1466,6 +1466,7 @@ function openDetail(code, options = {}) {
       ["技术操作档位", technicalOperation.tier_label || "--"],
       ["技术允许观察", technicalOperation.allow_buy_watch || technicalOperation.allow_t_watch ? "允许进入观察" : "不支持买入/做T"],
       ["做T绩效门禁", decisionCard.t_performance_gate?.status_label || "--"],
+      ["执行质量门禁", decisionCard.execution_quality_gate?.status_label || "--"],
       ["状态", decisionCard.state_label],
       ["建议动作", decision.action_label],
       ["置信度", decision.confidence],
