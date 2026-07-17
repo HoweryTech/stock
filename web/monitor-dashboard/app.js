@@ -845,10 +845,12 @@ function renderReverseTForecastSection(forecast, decisionCard) {
   const stale = forecastIsStale(forecast);
   const levels = decisionCard?.price_levels || {};
   const currentZone = levels.reverse_t_sell_zone ? `${num(levels.reverse_t_sell_zone[0])}–${num(levels.reverse_t_sell_zone[1])}元` : "--";
+  const intradayReferenceZone = levels.reverse_t_intraday_reference_zone ? `${num(levels.reverse_t_intraday_reference_zone[0])}–${num(levels.reverse_t_intraday_reference_zone[1])}元` : "--";
   const oldZone = forecast.predicted_sell_zone ? `${num(forecast.predicted_sell_zone[0])}–${num(forecast.predicted_sell_zone[1])}元` : "--";
   const metrics = stale
     ? [
-      ["当前有效卖出观察区", currentZone],
+      ["当日有效建议区间", currentZone],
+      ["盘中高点参考区", intradayReferenceZone],
       ["当前回补参考", money(levels.reverse_t_buyback_max_price)],
       ["旧预测时间", forecast.as_of || "--"],
       ["旧预测区间", oldZone],
@@ -866,7 +868,7 @@ function renderReverseTForecastSection(forecast, decisionCard) {
     ];
   const title = stale ? "旧反T概率预测（已过期）" : "下一次反T概率预测";
   const message = stale
-    ? `该预测生成于 ${forecast.as_of || "--"}，不是当前交易日数据；不能作为下一次反T区间。当前详情以决策卡的实时区间为准。`
+    ? `该预测生成于 ${forecast.as_of || "--"}，不是当前交易日数据；不能作为下一次反T建议区间。没有当日有效预测时，盘中高点区间只作为参考，不进入价格动作表。`
     : forecast.note || "预测仅用于提前预警，不代表价格必然到达。";
   const badge = stale ? '<span class="forecast-stale-badge">已过期</span>' : "";
   return detailSection(
@@ -1944,9 +1946,11 @@ function openDetail(code, options = {}) {
     const reverseTechnicalBlock = renderTechnicalOperationBlock(technicalOperation, "reverse_t");
     const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "仅供观察，不可执行";
     const zone = reversePlan.sell_zone ? `${num(reversePlan.sell_zone[0])}–${num(reversePlan.sell_zone[1])}元` : "--";
+    const reverseZoneSource = decisionCard?.price_levels?.reverse_t_zone_source;
+    const reverseZoneLabel = reverseZoneSource === "forecast" ? "建议卖出观察区" : "盘中高点参考区";
     const planMetrics = [
       ["状态", reverseStatus], ["试做数量", `${reversePlan.trade_shares || 100}股`],
-      ["卖出观察区", zone], ["参考回补上限", money(reversePlan.buyback_max_price)],
+      [reverseZoneLabel, zone], ["参考回补上限", money(reversePlan.buyback_max_price)],
       ["实际所需价差", pct(reversePlan.required_gap_pct)], ["占当前持仓", pct(reversePlan.trade_ratio_pct)],
       ["未回补后果", reversePlan.failure_as_reduction_acceptable ? "计入计划降仓" : "形成计划外减仓"],
       ["主力确认", reversePlan.main_flow_confirmation === "wait_for_weakening" ? "净流入偏强，等待转弱" : "未见强净流入阻断"],
@@ -1974,6 +1978,7 @@ function openDetail(code, options = {}) {
       : blockers.length ? `<ul class="reason-list">${blockers.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : "";
     const executionSteps = reversePlan.execution_steps || reversePlan.instructions || [];
     html += detailSection("反T降低成本", `<div class="metric-grid">${planMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>
+      ${reverseZoneSource !== "forecast" ? `<p class="secondary">当前没有当日有效的指标预测反T区间；这里的区间来自盘中高点审计，只作参考，不作为直接反T建议。</p>` : ""}
       ${reversePlan.next_action ? `<div class="action-panel action-${reversePlan.status === "candidate" ? "reverse_t_watch" : "hold_no_add"}"><div class="action-panel-title">下一步动作</div><p>${escapeHtml(reversePlan.next_action)}</p></div>` : ""}
       ${reverseTechnicalBlock ? `<h4>技术面门禁</h4><div class="blocker-list">${reverseTechnicalBlock}</div>` : ""}
       <p>${escapeHtml(reversePlan.failure_result || "")}</p>

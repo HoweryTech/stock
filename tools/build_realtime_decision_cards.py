@@ -1416,16 +1416,14 @@ def price_levels(
     intraday_sell_zone = value_at(intraday, "reverse_t_plan.sell_zone")
     intraday_buyback = as_float(value_at(intraday, "reverse_t_plan.buyback_max_price"))
     has_forecast = reverse_forecast is not None and not forecast_stale
-    sell_zone = forecast_sell_zone if has_forecast else intraday_sell_zone
-    buyback = forecast_buyback if has_forecast else intraday_buyback
+    sell_zone = forecast_sell_zone if has_forecast else None
+    buyback = forecast_buyback if has_forecast else None
     if has_forecast and forecast_sell_zone:
         zone_source = "forecast"
-    elif reverse_forecast is not None and forecast_stale and intraday_sell_zone:
-        zone_source = "intraday_high_fallback"
+    elif reverse_forecast is not None and forecast_stale:
+        zone_source = "forecast_stale"
     elif has_forecast:
         zone_source = "forecast_unavailable"
-    elif intraday_sell_zone:
-        zone_source = "intraday_high_fallback"
     else:
         zone_source = None
     return {
@@ -1440,6 +1438,8 @@ def price_levels(
         "recent_low": rounded(as_float(t_calculations.get("recent_low"))),
         "reverse_t_sell_zone": sell_zone,
         "reverse_t_buyback_max_price": rounded(buyback),
+        "reverse_t_intraday_reference_zone": intraday_sell_zone,
+        "reverse_t_intraday_reference_buyback_max_price": rounded(intraday_buyback),
         "reverse_t_zone_source": zone_source,
         "reverse_t_forecast_as_of": forecast_as_of,
         "reverse_t_forecast_stale": forecast_stale,
@@ -1705,10 +1705,10 @@ def build_manual_execution_plan(
     if candidate == "reverse_t":
         reverse_plan = intraday.get("reverse_t_plan") or {}
         shares = int(reverse_plan.get("trade_shares") or 100)
-        sell_zone = levels.get("reverse_t_sell_zone") or reverse_plan.get("sell_zone") or []
-        buyback_max = as_float(levels.get("reverse_t_buyback_max_price") or reverse_plan.get("buyback_max_price"))
-        sell_low = as_float(sell_zone[0]) if isinstance(sell_zone, list) and len(sell_zone) >= 2 else current
-        sell_high = as_float(sell_zone[1]) if isinstance(sell_zone, list) and len(sell_zone) >= 2 else current
+        sell_zone = levels.get("reverse_t_sell_zone") or []
+        buyback_max = as_float(levels.get("reverse_t_buyback_max_price"))
+        sell_low = as_float(sell_zone[0]) if isinstance(sell_zone, list) and len(sell_zone) >= 2 else None
+        sell_high = as_float(sell_zone[1]) if isinstance(sell_zone, list) and len(sell_zone) >= 2 else None
         fee_price = sell_low or current
         fees = estimate_trade_fees("sell", fee_price, shares)
         estimated_cash = fee_price * shares - float(fees["total_fees"] or 0.0) if fee_price is not None else None
@@ -2226,7 +2226,7 @@ def build_price_action_table(
             )
         )
 
-    reverse_zone = levels.get("reverse_t_sell_zone") or reverse_plan.get("sell_zone")
+    reverse_zone = levels.get("reverse_t_sell_zone")
     reverse_shares = int(reverse_plan.get("trade_shares") or 0)
     if reverse_zone:
         reverse_gate_blocked = t_performance_gate.get("status") == "blocked" or execution_quality_gate.get("status") == "blocked"
@@ -2246,11 +2246,11 @@ def build_price_action_table(
             )
         )
 
-    buyback = as_float(levels.get("reverse_t_buyback_max_price") or reverse_plan.get("buyback_max_price"))
-    if buyback is not None:
-        open_leg = reverse_plan.get("open_reverse_t_leg") or {}
-        buyback_ready = reverse_plan.get("status") == "buyback_ready"
-        has_open_reverse_leg = bool(open_leg)
+    open_leg = reverse_plan.get("open_reverse_t_leg") or {}
+    has_open_reverse_leg = bool(open_leg)
+    buyback = as_float(reverse_plan.get("buyback_max_price") if has_open_reverse_leg else levels.get("reverse_t_buyback_max_price"))
+    if buyback is not None and (has_open_reverse_leg or reverse_zone):
+        buyback_ready = reverse_plan.get("status") == "buyback_ready" and has_open_reverse_leg
         buyback_shares = int(as_float(open_leg.get("shares"), 0.0) or reverse_shares or 0)
         rows.append(
             action_table_row(
