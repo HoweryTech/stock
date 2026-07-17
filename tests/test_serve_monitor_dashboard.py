@@ -12,6 +12,7 @@ from tools.serve_monitor_dashboard import (
     handle_manual_trade,
     handle_stop_loss_confirmation,
     handle_intraday_trigger_refresh,
+    handle_trigger_review_status,
     load_json,
     market_wait_refresh_status,
     monitor_status,
@@ -100,6 +101,66 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertEqual(queue[0]["after_shares"], 500)
         self.assertEqual(queue[1]["status"], "watch_only")
         self.assertEqual(queue[1]["action_label"], "只观察，不交易")
+
+    def test_build_trigger_review_queue_merges_review_statuses(self) -> None:
+        events = [
+            {
+                "generated_at": "2026-07-17T10:01:00+08:00",
+                "trigger_action_snapshots": [
+                    {
+                        "code": "000723",
+                        "active_path": "path1_break",
+                        "after": {"available": True, "label": "止损减仓", "plan_type": "risk_reduce"},
+                    },
+                    {
+                        "code": "601939",
+                        "active_path": "path2_rebound",
+                        "after": {"available": True, "label": "反抽复核", "primary_status": "watch"},
+                    },
+                ],
+            }
+        ]
+        statuses = [
+            {
+                "review_key": "000723:path1_break:2026-07-17T10:01:00+08:00",
+                "resolution": "handled",
+                "resolution_label": "已处理",
+            },
+            {
+                "review_key": "601939:path2_rebound:2026-07-17T10:01:00+08:00",
+                "resolution": "viewed",
+                "resolution_label": "已查看",
+            },
+        ]
+
+        queue = build_trigger_review_queue(events, statuses=statuses)
+        self.assertEqual([item["code"] for item in queue], ["601939"])
+        self.assertEqual(queue[0]["review_resolution"], "viewed")
+        self.assertEqual(queue[0]["review_resolution_label"], "已查看")
+
+        queue_with_closed = build_trigger_review_queue(events, statuses=statuses, include_closed=True)
+        self.assertEqual([item["code"] for item in queue_with_closed], ["000723", "601939"])
+
+    def test_handle_trigger_review_status_writes_audit_record(self) -> None:
+        with (
+            patch("tools.serve_monitor_dashboard.append_jsonl") as append_status,
+            patch("tools.serve_monitor_dashboard.recent_trigger_refresh_events", return_value=[]),
+            patch("tools.serve_monitor_dashboard.recent_trigger_review_statuses", return_value=[]),
+        ):
+            result = handle_trigger_review_status(
+                {
+                    "code": "000723",
+                    "active_path": "path1_break",
+                    "event_generated_at": "2026-07-17T10:01:00+08:00",
+                    "resolution": "handled",
+                }
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"]["resolution"], "handled")
+        self.assertEqual(result["status"]["resolution_label"], "已处理")
+        self.assertEqual(result["status"]["review_key"], "000723:path1_break:2026-07-17T10:01:00+08:00")
+        append_status.assert_called_once()
 
     def test_recent_flow_history_reads_archives_and_latest(self) -> None:
         class FakeArchiveDir:

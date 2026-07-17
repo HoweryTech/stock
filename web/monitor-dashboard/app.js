@@ -2911,7 +2911,13 @@ function renderEvents() {
       <div class="event-action event-action-${escapeHtml(statusClass)}">${escapeHtml(item.status_label || "--")} · ${escapeHtml(item.action_label || "--")}</div>
       <p>${escapeHtml(item.after_label || "查看刷新后的执行计划和阻断原因。")}</p>
       <div class="event-changes">
+        <span class="event-tag">${escapeHtml(item.review_resolution_label || "待处理")}</span>
         ${details.map(detail => `<span class="event-tag">${escapeHtml(detail)}</span>`).join("")}
+      </div>
+      <div class="event-actions">
+        <button class="secondary-action" type="button" data-review-status="viewed" data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}">已查看</button>
+        <button class="secondary-action" type="button" data-review-status="ignored" data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}">暂不处理</button>
+        <button class="primary-action" type="button" data-review-status="handled" data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}">已处理</button>
       </div>
     </article>`;
   }).join("");
@@ -2992,6 +2998,32 @@ function renderEvents() {
     return `<article class="event-item"><div class="event-time">${escapeHtml(event.generated_at)}</div><div class="event-changes">${tags}</div></article>`;
   }).join("");
   container.innerHTML = triggerQueueHtml + triggerHtml + triggerHistoryHtml + reviewHtml + alertHtml + monitorHtml;
+}
+
+async function updateTriggerReviewStatus(button) {
+  const payload = {
+    code: button.dataset.reviewCode || "",
+    active_path: button.dataset.reviewPath || "",
+    event_generated_at: button.dataset.reviewEvent || "",
+    resolution: button.dataset.reviewStatus || "",
+  };
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "写入中...";
+  try {
+    const response = await fetch("/api/intraday-trigger-review-status", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    await loadData();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = original;
+    document.querySelector("#monitorStatus").textContent = `复核状态写入失败：${error.message}`;
+  }
 }
 
 function updateHeader(status) {
@@ -3112,6 +3144,12 @@ document.querySelector("#priorityQueue").addEventListener("click", event => {
   openDetail(item.dataset.queueCode, { target: item.dataset.queueTarget });
 });
 document.querySelector("#eventList").addEventListener("click", event => {
+  const reviewButton = event.target.closest("[data-review-status]");
+  if (reviewButton) {
+    event.stopPropagation();
+    void updateTriggerReviewStatus(reviewButton);
+    return;
+  }
   const item = event.target.closest("[data-event-code]");
   if (!item) return;
   openDetail(item.dataset.eventCode, { target: item.dataset.eventTarget });

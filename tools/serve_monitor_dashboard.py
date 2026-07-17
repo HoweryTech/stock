@@ -41,6 +41,7 @@ API_FILES = {
 PID_FILE = ROOT / "data" / "metadata" / "intraday-monitor.pid"
 EVENT_FILE = ROOT / "data" / "metadata" / "intraday-monitor.events.jsonl"
 TRIGGER_REFRESH_EVENT_FILE = ROOT / "data" / "metadata" / "intraday-trigger-refresh.events.jsonl"
+TRIGGER_REVIEW_STATUS_FILE = ROOT / "data" / "metadata" / "intraday-trigger-review-status.jsonl"
 FLOW_HISTORY_FILE = ROOT / "data" / "metadata" / "intraday-flow-history.jsonl"
 ARCHIVE_DIR = ROOT / "data" / "metadata" / "intraday-archive"
 
@@ -109,6 +110,34 @@ def recent_trigger_refresh_events(limit: int) -> list[dict[str, object]]:
     return list(reversed(events))
 
 
+def trigger_review_key(code: str, active_path: str, event_generated_at: object) -> str:
+    return f"{code}:{active_path}:{event_generated_at or ''}"
+
+
+def recent_trigger_review_statuses(limit: int = 500) -> list[dict[str, object]]:
+    if not TRIGGER_REVIEW_STATUS_FILE.exists():
+        return []
+    lines = TRIGGER_REVIEW_STATUS_FILE.read_text(encoding="utf-8").splitlines()
+    statuses: list[dict[str, object]] = []
+    for line in lines[-limit:]:
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            statuses.append(item)
+    return list(reversed(statuses))
+
+
+def latest_trigger_review_status_by_key(statuses: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    latest: dict[str, dict[str, object]] = {}
+    for item in statuses:
+        key = str(item.get("review_key") or "")
+        if key and key not in latest:
+            latest[key] = item
+    return latest
+
+
 def classify_trigger_review_item(snapshot: dict[str, Any]) -> dict[str, str]:
     after = snapshot.get("after") if isinstance(snapshot.get("after"), dict) else {}
     active_path = str(snapshot.get("active_path") or "")
@@ -148,9 +177,16 @@ def classify_trigger_review_item(snapshot: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def build_trigger_review_queue(events: list[dict[str, object]], *, limit: int = 20) -> list[dict[str, Any]]:
+def build_trigger_review_queue(
+    events: list[dict[str, object]],
+    *,
+    limit: int = 20,
+    statuses: list[dict[str, object]] | None = None,
+    include_closed: bool = False,
+) -> list[dict[str, Any]]:
     queue: list[dict[str, Any]] = []
     seen: set[str] = set()
+    status_by_key = latest_trigger_review_status_by_key(statuses or [])
     for event in events:
         snapshots = event.get("trigger_action_snapshots") if isinstance(event.get("trigger_action_snapshots"), list) else []
         for snapshot in snapshots:
@@ -167,8 +203,14 @@ def build_trigger_review_queue(events: list[dict[str, object]], *, limit: int = 
             classification = classify_trigger_review_item(snapshot)
             after = snapshot.get("after") if isinstance(snapshot.get("after"), dict) else {}
             confirmation = snapshot.get("confirmation") if isinstance(snapshot.get("confirmation"), dict) else {}
+            review_key = trigger_review_key(code, active_path, event.get("generated_at"))
+            review_status = status_by_key.get(review_key) or {}
+            review_resolution = str(review_status.get("resolution") or "open")
+            if review_resolution in {"handled", "ignored"} and not include_closed:
+                continue
             queue.append(
                 {
+                    "review_key": review_key,
                     "code": code,
                     "name": snapshot.get("name"),
                     "active_path": active_path,
@@ -185,11 +227,47 @@ def build_trigger_review_queue(events: list[dict[str, object]], *, limit: int = 
                     "after_primary_status": after.get("primary_status"),
                     "after_shares": after.get("shares"),
                     "after_price": after.get("price"),
+                    "review_resolution": review_resolution,
+                    "review_resolution_label": review_status.get("resolution_label") or {
+                        "open": "待处理",
+                        "viewed": "已查看",
+                        "handled": "已处理",
+                        "ignored": "暂不处理",
+                    }.get(review_resolution, review_resolution),
+                    "review_note": review_status.get("note") or "",
+                    "review_updated_at": review_status.get("updated_at"),
                     **classification,
                 }
             )
     queue.sort(key=lambda item: int(item.get("priority", 9)))
     return queue[:limit]
+
+
+def handle_trigger_review_status(payload: dict[str, object]) -> dict[str, object]:
+    code = str(payload.get("code") or "")
+    active_path = str(payload.get("active_path") or "")
+    event_generated_at = payload.get("event_generated_at") or ""
+    resolution = str(payload.get("resolution") or "")
+    if not code or not active_path or not event_generated_at:
+        raise ValueError("code, active_path and event_generated_at are required")
+    labels = {"viewed": "已查看", "handled": "已处理", "ignored": "暂不处理", "open": "待处理"}
+    if resolution not in labels:
+        raise ValueError("resolution must be one of viewed, handled, ignored, open")
+    item = {
+        "review_key": trigger_review_key(code, active_path, event_generated_at),
+        "code": code,
+        "active_path": active_path,
+        "event_generated_at": event_generated_at,
+        "resolution": resolution,
+        "resolution_label": labels[resolution],
+        "note": str(payload.get("note") or ""),
+        "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "source": "dashboard",
+    }
+    append_jsonl(TRIGGER_REVIEW_STATUS_FILE, item)
+    events = recent_trigger_refresh_events(100)
+    queue = build_trigger_review_queue(events, statuses=recent_trigger_review_statuses(), limit=20)
+    return {"ok": True, "status": item, "queue": queue}
 
 
 def recent_flow_history(limit: int) -> dict[str, object]:
@@ -687,8 +765,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 limit = min(100, max(1, int(query.get("limit", [20])[0])))
             except ValueError:
                 limit = 20
+            include_closed = str(query.get("include_closed", ["false"])[0]).lower() in {"1", "true", "yes"}
             events = recent_trigger_refresh_events(100)
-            self.send_json({"items": build_trigger_review_queue(events, limit=limit)})
+            self.send_json({"items": build_trigger_review_queue(events, limit=limit, statuses=recent_trigger_review_statuses(), include_closed=include_closed)})
             return
         if parsed.path == "/api/flow-history":
             query = parse_qs(parsed.query)
@@ -724,6 +803,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "/api/manual-trade": handle_manual_trade,
             "/api/stop-loss-confirmation": handle_stop_loss_confirmation,
             "/api/intraday-trigger-refresh": handle_intraday_trigger_refresh,
+            "/api/intraday-trigger-review-status": handle_trigger_review_status,
         }
         handler = handlers.get(parsed.path)
         if handler is None:

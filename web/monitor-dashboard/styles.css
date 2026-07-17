@@ -834,6 +834,7 @@ th:nth-child(8) { width: 100px; }
 .event-action-watch { color: var(--amber); background: var(--amber-bg); }
 .event-action-observe { color: var(--muted); background: #eef1f4; }
 .event-changes { display: flex; flex-wrap: wrap; gap: 6px; }
+.event-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .event-tag { padding: 3px 7px; border-radius: 3px; background: #eef1f4; font-size: 12px; }
 .event-checklist { margin: 8px 0 0; padding-left: 18px; line-height: 1.55; color: var(--muted); }
 
