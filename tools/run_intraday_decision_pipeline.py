@@ -16,6 +16,8 @@ try:
     from tools.build_realtime_decision_cards import build_report as build_decision_cards_report
     from tools.build_realtime_decision_cards import load_minute_bars
     from tools.build_realtime_decision_cards import render_markdown as render_decision_cards_markdown
+    from tools.calc_technical_indicators import build_report as build_technical_indicators_report
+    from tools.calc_technical_indicators import render_markdown as render_technical_indicators_markdown
     from tools.check_portfolio_positions import expand_position_paths, summarize_positions
     from tools.check_portfolio_t_opportunities import check_portfolio_t_opportunities
     from tools.fetch_daily_bars_sina import fetch_daily_bars
@@ -27,6 +29,8 @@ except ModuleNotFoundError:
     from build_realtime_decision_cards import build_report as build_decision_cards_report
     from build_realtime_decision_cards import load_minute_bars
     from build_realtime_decision_cards import render_markdown as render_decision_cards_markdown
+    from calc_technical_indicators import build_report as build_technical_indicators_report
+    from calc_technical_indicators import render_markdown as render_technical_indicators_markdown
     from check_portfolio_positions import expand_position_paths, summarize_positions
     from check_portfolio_t_opportunities import check_portfolio_t_opportunities
     from fetch_daily_bars_sina import fetch_daily_bars
@@ -108,6 +112,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     )
     write_json(Path(args.t_opportunities_output), t_opportunities)
 
+    technical_indicators = build_technical_indicators_report(Path(args.daily_bars), [str(path) for path in position_paths])
+    write_json(Path(args.technical_indicators), technical_indicators)
+    write_text(Path(args.technical_indicators_markdown_output), render_technical_indicators_markdown(technical_indicators))
+
     data_quality = build_data_quality_report(
         position_paths,
         intraday_snapshot,
@@ -135,7 +143,6 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     reverse_t_forecast_path = Path(args.reverse_t_forecast)
     if reverse_t_forecast_path.exists():
         reverse_t_forecast = json.loads(reverse_t_forecast_path.read_text(encoding="utf-8"))
-    technical_indicators = None
     technical_indicators_path = Path(args.technical_indicators)
     if technical_indicators_path.exists():
         technical_indicators = json.loads(technical_indicators_path.read_text(encoding="utf-8"))
@@ -188,6 +195,11 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 "markdown_output": args.data_quality_markdown_output,
                 "usable_count": data_quality.get("usable_count", 0),
                 "status_counts": data_quality.get("status_counts", {}),
+            },
+            "technical_indicators_refresh": {
+                "output": args.technical_indicators,
+                "markdown_output": args.technical_indicators_markdown_output,
+                "item_count": len(technical_indicators.get("items", []) if isinstance(technical_indicators, dict) else []),
             },
             "decision_cards": {
                 "output": args.decision_cards_output,
@@ -250,6 +262,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reverse-t-backtest", default="data/metadata/reverse-t-backtest.json")
     parser.add_argument("--reverse-t-forecast", default="data/metadata/reverse-t-forecast.json")
     parser.add_argument("--technical-indicators", default="data/metadata/technical-indicators.json")
+    parser.add_argument("--technical-indicators-markdown-output", default="reports/technical-indicators.md")
     parser.add_argument("--intraday-output", default="data/metadata/intraday-monitor.latest.json")
     parser.add_argument("--intraday-markdown-output", default="reports/intraday-monitor.latest.md")
     parser.add_argument("--portfolio-check-output", default="data/metadata/eastmoney-portfolio-check.after-threshold.json")

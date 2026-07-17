@@ -119,6 +119,7 @@ def make_args(base: Path) -> Namespace:
         reverse_t_backtest=str(base / "missing-reverse-backtest.json"),
         reverse_t_forecast=str(base / "missing-reverse-forecast.json"),
         technical_indicators=str(base / "missing-technical-indicators.json"),
+        technical_indicators_markdown_output=str(base / "reports/technical-indicators.md"),
         intraday_output=str(base / "metadata/intraday.json"),
         intraday_markdown_output=str(base / "reports/intraday.md"),
         portfolio_check_output=str(base / "metadata/portfolio.json"),
@@ -187,13 +188,16 @@ class RunIntradayDecisionPipelineTest(unittest.TestCase):
             daily_fetch.assert_called_once()
             self.assertEqual(metadata["steps"]["intraday_snapshot"]["success_count"], 1)
             self.assertEqual(metadata["steps"]["daily_refresh"]["fetched_row_count"], 25)
+            self.assertEqual(metadata["steps"]["technical_indicators_refresh"]["item_count"], 1)
             self.assertEqual(metadata["steps"]["decision_cards"]["card_count"], 1)
             self.assertTrue((base / "metadata/intraday.json").exists())
             self.assertTrue((base / "metadata/daily-fetch.json").exists())
             self.assertTrue((base / "metadata/portfolio.json").exists())
             self.assertTrue((base / "metadata/t.json").exists())
             self.assertTrue((base / "metadata/data-quality.json").exists())
+            self.assertTrue((base / "missing-technical-indicators.json").exists())
             self.assertTrue((base / "metadata/cards.json").exists())
+            self.assertTrue((base / "reports/technical-indicators.md").exists())
             self.assertTrue((base / "reports/data-quality.md").exists())
             self.assertTrue((base / "reports/cards.md").exists())
             cards = load_yaml(base / "metadata/cards.json")
