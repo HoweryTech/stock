@@ -1004,7 +1004,9 @@ function renderCapitalPlan(plan) {
     `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     <p>${escapeHtml(plan.failure_plan || "")}</p>
     ${steps.length ? `<h4>操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
-    ${reasons.length ? `<h4>限制原因</h4><ul class="reason-list">${reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`
+    ${reasons.length ? `<h4>限制原因</h4><ul class="reason-list">${reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`,
+    "capital-plan",
+    {collapsed: true, summary: plan.status_label || "资金上限、买入区和风险金额"}
   );
 }
 
@@ -1053,7 +1055,7 @@ function renderReverseTForecastSection(forecast, decisionCard) {
     <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     <p class="secondary">${escapeHtml(message)}</p>`,
     stale ? "reverse-t-forecast-stale" : "reverse-t-forecast",
-    stale ? {collapsed: true, summary: "旧预测，仅用于追溯"} : {}
+    {collapsed: true, summary: stale ? "旧预测，仅用于追溯" : "概率预测、参考区间和样本"}
   );
 }
 
@@ -1362,7 +1364,8 @@ function renderReverseTPlanSection(item, decisionCard, technicalOperation) {
       </div>
     </div>
     ${executionSteps.length ? `<h4>操作步骤</h4><ol class="reason-list">${executionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}`,
-    "reverse-t-plan"
+    "reverse-t-plan",
+    {collapsed: true, summary: executableHeadline}
   );
 }
 
@@ -1603,7 +1606,8 @@ function renderPositiveTPlan(plan) {
     ${closeButton}
     ${steps.length ? `<h4>操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
     ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}`,
-    "positive-t-plan"
+    "positive-t-plan",
+    {collapsed: plan.status !== "target_sell_ready", summary: plan.next_action || "正T买入腿/目标卖出跟踪"}
   );
 }
 
@@ -1645,7 +1649,9 @@ function renderPositiveTiming(timing, technicalOperation = null) {
         <p>${escapeHtml(blocker.reason || "")}</p>
         <p class="secondary">${escapeHtml(blocker.next_step || "")}</p>
       </div>`).join("")}</div>` : ""}
-    ${signals.length ? `<h4>评分依据</h4><ul class="reason-list">${signals.map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}`
+    ${signals.length ? `<h4>评分依据</h4><ul class="reason-list">${signals.map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}`,
+    "positive-timing",
+    {collapsed: true, summary: timing.next_action || "正T专项评分明细"}
   );
 }
 
@@ -1679,8 +1685,7 @@ function renderMinuteConfirmation(confirmation) {
     <div class="metric-grid">${metricRows.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     ${signals.length ? `<h4>支持信号</h4><ul class="reason-list">${signals.map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}
     ${blockers.length ? `<h4>阻断/扣分信号</h4><ul class="reason-list">${blockers.map(blocker => `<li>${escapeHtml(blocker)}</li>`).join("")}</ul>` : ""}`,
-    "minute-confirmation",
-    {collapsed: confirmation.status !== "block", summary: confirmation.summary || confirmation.status_label || "分钟线确认"}
+    "minute-confirmation"
   );
 }
 
@@ -2163,7 +2168,8 @@ function manualTradeSection(item) {
       <button class="primary-action" type="submit">记录成交并刷新建议</button>
       <p class="manual-trade-status secondary" aria-live="polite"></p>
     </form>`,
-    "manual-trade"
+    "manual-trade",
+    {collapsed: !draft.dirty, summary: draft.dirty ? "成交草稿编辑中" : "真实成交后再展开录入"}
   );
 }
 
@@ -2188,7 +2194,9 @@ function reverseTClosureSection(item) {
     </div>
     <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>
     <h4>下一步计划</h4>
-    <p>${escapeHtml(closure.next_plan || "刷新实时建议后，按新的反T区间和风险状态重新判断。")}</p>`
+    <p>${escapeHtml(closure.next_plan || "刷新实时建议后，按新的反T区间和风险状态重新判断。")}</p>`,
+    "reverse-t-closure",
+    {collapsed: true, summary: statusText}
   );
 }
 
@@ -2213,7 +2221,9 @@ function positiveTClosureSection(item) {
     </div>
     <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>
     <h4>下一步计划</h4>
-    <p>${escapeHtml(closure.next_plan || "刷新实时建议后，按新的正T/反T候选和风险状态重新判断。")}</p>`
+    <p>${escapeHtml(closure.next_plan || "刷新实时建议后，按新的正T/反T候选和风险状态重新判断。")}</p>`,
+    "positive-t-closure",
+    {collapsed: true, summary: statusText}
   );
 }
 
@@ -2252,7 +2262,9 @@ function tClosurePerformanceSection(item) {
       <span>${escapeHtml(performance.next_action || "继续按系统候选小额验证。")}</span>
     </div>
     <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${value}</dd></dl>`).join("")}</div>
-    ${recentHtml ? `<h4>最近闭环</h4>${recentHtml}` : ""}`
+    ${recentHtml ? `<h4>最近闭环</h4>${recentHtml}` : ""}`,
+    "t-closure-performance",
+    {collapsed: true, summary: performance.status_label || "做T闭环统计"}
   );
 }
 
@@ -2330,6 +2342,9 @@ function openDetail(code, options = {}) {
     html += renderStickyActionBar(item, decisionCard, automaticDecision);
     html += renderDecisionBrief(item, decisionCard, automaticDecision);
     html += renderActionStepTable(decisionCard.price_action_table, item, decisionCard);
+    html += renderMinuteConfirmation(decisionCard.minute_confirmation);
+    html += renderDynamicStopLossSection(item, decisionCard);
+    html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
   }
   html += detailSection("持仓与行情", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status", {collapsed: true, summary: "现价、成本、仓位和均线"});
   if (decisionCard) {
@@ -2355,12 +2370,9 @@ function openDetail(code, options = {}) {
       ["最大允许偏差", consistency.max_diff_pct == null ? "--" : `${Number(consistency.max_diff_pct).toFixed(2)}%`],
       ["冲突数量", String((consistency.issues || []).length)],
     ];
-    html += renderDynamicStopLossSection(item, decisionCard);
     html += manualTradeSection(item);
-    html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
     html += renderPositiveTPlan(item.positive_t_plan);
     html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);
-    html += renderMinuteConfirmation(decisionCard.minute_confirmation);
     html += renderCapitalPlan(decisionCard.capital_plan);
     html += renderReverseTPlanSection(item, decisionCard, technicalOperation);
     html += renderTechnicalAssessment(decisionCard.technical_assessment);
@@ -2435,7 +2447,7 @@ function openDetail(code, options = {}) {
     html += detailSection("反T历史回测", `<p><strong>${escapeHtml(backtest.verdict_label)}</strong></p><p>${escapeHtml(intradayText)}</p><div class="metric-grid">${backtestMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">盘中当天不计入历史验证。仅验证5分钟价格规则和估算费用；未覆盖历史资金流、滑点及盘口排队。</p>`, "reverse-t-backtest", {collapsed: true, summary: "历史触发、回补成功率和净收益"});
   }
   if (item.signals.length) {
-    html += detailSection("盘中信号", `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>`, "intraday-signals");
+    html += detailSection("盘中信号", `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>`, "intraday-signals", {collapsed: true, summary: `${item.signals.length}条实时信号`});
   }
   const flow = item.capital_flow || {};
   const flowMetrics = [
@@ -2455,7 +2467,7 @@ function openDetail(code, options = {}) {
       ["降仓后仓位", pct(reductionPlan.post_reduction_position_pct)], ["减少比例", pct(reductionPlan.reduction_ratio_pct)],
       ["预计释放现金", money(reductionPlan.estimated_net_proceeds)], ["预计实现盈亏", money(reductionPlan.estimated_realized_pnl_after_fees)],
     ];
-    html += detailSection("具体降仓步骤", `<div class="metric-grid">${reductionMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p>${escapeHtml(reductionPlan.objective || "")}</p><ol class="reason-list">${reductionPlan.steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`);
+    html += detailSection("具体降仓步骤", `<div class="metric-grid">${reductionMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p>${escapeHtml(reductionPlan.objective || "")}</p><ol class="reason-list">${reductionPlan.steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`, "reduction-plan", {collapsed: true, summary: "仓位超限时的降仓测算"});
   }
   if (research) {
     const fin = research.latest_financials || {};
@@ -2470,7 +2482,7 @@ function openDetail(code, options = {}) {
     const flags = research.financial_review?.flags || [];
     const notices = research.risk_review?.matched_announcements || [];
     if (flags.length || notices.length) {
-      html += detailSection("待复核事项", `${flags.length ? `<ul class="reason-list">${flags.map(flag => `<li>${escapeHtml(flag.message)}</li>`).join("")}</ul>` : ""}${notices.length ? `<ul class="reason-list">${notices.map(notice => `<li>${escapeHtml(notice.title)}</li>`).join("")}</ul>` : ""}`, "research-review");
+      html += detailSection("待复核事项", `${flags.length ? `<ul class="reason-list">${flags.map(flag => `<li>${escapeHtml(flag.message)}</li>`).join("")}</ul>` : ""}${notices.length ? `<ul class="reason-list">${notices.map(notice => `<li>${escapeHtml(notice.title)}</li>`).join("")}</ul>` : ""}`, "research-review", {collapsed: true, summary: "财务和公告风险提醒"});
     }
   }
   document.querySelector("#detailContent").innerHTML = html;

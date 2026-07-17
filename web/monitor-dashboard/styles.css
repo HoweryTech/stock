@@ -416,16 +416,24 @@ th:nth-child(8) { width: 100px; }
 .detail-section-collapsed[open] summary::after { content: "-"; }
 .detail-section-body { padding-top: 12px; }
 .detail-section-decision-card,
-.detail-section-action-step-table { border-left-color: var(--blue); background: linear-gradient(90deg, rgba(231, 240, 255, 0.72), rgba(255, 255, 255, 0)); }
+.detail-section-action-step-table,
+.detail-section-minute-confirmation { border-left-color: var(--blue); background: linear-gradient(90deg, rgba(231, 240, 255, 0.72), rgba(255, 255, 255, 0)); }
 .detail-section-manual-trade,
 .detail-section-manual-execution-plan,
 .detail-section-reverse-t-plan,
 .detail-section-positive-t-plan,
+.detail-section-positive-timing,
+.detail-section-capital-plan,
 .detail-section-dynamic-stop-loss { border-left-color: var(--amber); background: linear-gradient(90deg, rgba(255, 248, 230, 0.82), rgba(255, 255, 255, 0)); }
 .detail-section-technical-assessment,
 .detail-section-data-quality,
 .detail-section-realtime-status { border-left-color: var(--green); background: linear-gradient(90deg, rgba(232, 246, 237, 0.72), rgba(255, 255, 255, 0)); }
-.detail-section-reverse-t-forecast-stale { border-left-color: var(--muted); background: linear-gradient(90deg, rgba(238, 241, 244, 0.9), rgba(255, 255, 255, 0)); }
+.detail-section-reverse-t-forecast-stale,
+.detail-section-reverse-t-closure,
+.detail-section-positive-t-closure,
+.detail-section-t-closure-performance,
+.detail-section-intraday-signals,
+.detail-section-research-review { border-left-color: var(--muted); background: linear-gradient(90deg, rgba(238, 241, 244, 0.9), rgba(255, 255, 255, 0)); }
 .detail-focus { outline: 2px solid rgba(23, 92, 211, 0.35); outline-offset: 4px; border-radius: 6px; }
 .detail-section:first-child { padding-top: 0; }
 .detail-section h3 { margin: 0 0 12px; font-size: 15px; font-weight: 800; }
