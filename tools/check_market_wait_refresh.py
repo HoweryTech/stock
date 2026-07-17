@@ -27,6 +27,11 @@ def shell_join(parts: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in parts)
 
 
+def append_existing_input(parts: list[str], option: str, path_text: str) -> None:
+    if Path(path_text).exists():
+        parts.extend([option, path_text])
+
+
 def build_pipeline_command(
     *,
     positions: list[str],
@@ -45,7 +50,29 @@ def build_pipeline_command(
     ]
     ready = total_assets is not None
     parts.append(str(total_assets) if total_assets is not None else "<TOTAL_ASSETS>")
+    append_existing_input(parts, "--minute-cache-dir", "data/processed/minute-bars")
+    append_existing_input(parts, "--action-backtests", "data/metadata/portfolio-action-matrix-backtests.after-plan.json")
+    append_existing_input(parts, "--reverse-t-backtest", "data/metadata/reverse-t-backtest.json")
+    append_existing_input(parts, "--reverse-t-forecast", "data/metadata/reverse-t-forecast.json")
+    append_existing_input(parts, "--technical-indicators", "data/metadata/technical-indicators.json")
     return {"ready": ready, "argv": parts, "shell": shell_join(parts)}
+
+
+def stale_intraday_inputs(cards: list[dict[str, Any]], as_of: datetime) -> list[dict[str, Any]]:
+    stale_items: list[dict[str, Any]] = []
+    for card in cards:
+        quality = card.get("data_quality") if isinstance(card.get("data_quality"), dict) else {}
+        minute = quality.get("minute") if isinstance(quality.get("minute"), dict) else {}
+        quote = quality.get("quote") if isinstance(quality.get("quote"), dict) else {}
+        minute_dt = parse_datetime(minute.get("latest_timestamp"))
+        reasons: list[str] = []
+        if minute_dt and minute_dt.date() != as_of.date():
+            reasons.append(f"分钟线最新 {minute_dt.date().isoformat()} 不是当前交易日 {as_of.date().isoformat()}")
+        if quote.get("status") == "stale":
+            reasons.append(str(quote.get("message") or "实时行情过期"))
+        if quality.get("overall_status") in {"stale", "insufficient"} and reasons:
+            stale_items.append({"code": card.get("code"), "name": card.get("name"), "reasons": reasons})
+    return stale_items
 
 
 def build_refresh_check(
@@ -85,6 +112,20 @@ def build_refresh_check(
             "decision_cards_generated_at": cards_doc.get("generated_at"),
             "refresh_command": command,
         }
+    if session["live_quote_required"]:
+        stale_inputs = stale_intraday_inputs(cards, as_of)
+        if stale_inputs:
+            conclusion = "refresh_due_stale_intraday_inputs" if command["ready"] else "refresh_due_missing_total_assets"
+            return {
+                "generated_at": as_of.isoformat(timespec="seconds"),
+                "conclusion": conclusion,
+                "action_required": True,
+                "message": "实时决策卡存在旧分钟线或过期行情输入，必须刷新后才能作为当前盘中建议。",
+                "market_session": session,
+                "market_wait_count": 0,
+                "stale_input_items": stale_inputs[:10],
+                "refresh_command": command,
+            }
     market_wait_items = [card for card in cards if card.get("state") == "market_wait"]
     if not market_wait_items:
         return {

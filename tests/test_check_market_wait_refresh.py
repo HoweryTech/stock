@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 
 from tools.check_market_wait_refresh import build_refresh_check
 
@@ -11,6 +12,25 @@ def cards(*states: str, generated_at: str = "2026-07-16T09:30:00+08:00") -> dict
             {"code": f"60000{index}", "name": f"测试{index}", "state": state, "state_label": state}
             for index, state in enumerate(states)
         ]
+    }
+
+
+def stale_minute_cards() -> dict:
+    return {
+        "generated_at": "2026-07-16T09:30:00+08:00",
+        "cards": [
+            {
+                "code": "600000",
+                "name": "测试",
+                "state": "observe",
+                "state_label": "观察",
+                "data_quality": {
+                    "overall_status": "stale",
+                    "minute": {"latest_timestamp": "2026-07-15 15:00"},
+                    "quote": {"status": "usable"},
+                },
+            }
+        ],
     }
 
 
@@ -44,6 +64,22 @@ class MarketWaitRefreshTest(unittest.TestCase):
         self.assertTrue(report["refresh_command"]["ready"])
         self.assertIn("--total-assets 25480.0", report["refresh_command"]["shell"])
 
+    def test_refresh_command_includes_decision_context_inputs_when_available(self) -> None:
+        with patch("tools.check_market_wait_refresh.Path.exists", return_value=True):
+            report = build_refresh_check(
+                cards("market_wait"),
+                as_of=datetime(2026, 7, 16, 9, 35, 0),
+                positions=["positions/*.yaml"],
+                daily_bars="data/processed/daily_bars.csv",
+                total_assets=25480.0,
+                python_bin=".venv/bin/python",
+            )
+
+        command = report["refresh_command"]["argv"]
+        self.assertIn("--minute-cache-dir", command)
+        self.assertIn("data/processed/minute-bars", command)
+        self.assertIn("--technical-indicators", command)
+
     def test_refresh_due_requires_total_assets(self) -> None:
         report = build_refresh_check(
             cards("market_wait"),
@@ -68,6 +104,20 @@ class MarketWaitRefreshTest(unittest.TestCase):
 
         self.assertEqual(report["conclusion"], "no_market_wait")
         self.assertFalse(report["action_required"])
+
+    def test_stale_intraday_inputs_must_refresh_even_without_market_wait(self) -> None:
+        report = build_refresh_check(
+            stale_minute_cards(),
+            as_of=datetime(2026, 7, 16, 9, 35, 0),
+            positions=["positions/*.yaml"],
+            daily_bars="data/processed/daily_bars.csv",
+            total_assets=25480.0,
+        )
+
+        self.assertEqual(report["conclusion"], "refresh_due_stale_intraday_inputs")
+        self.assertTrue(report["action_required"])
+        self.assertIn("旧分钟线", report["message"])
+        self.assertEqual(report["stale_input_items"][0]["code"], "600000")
 
     def test_stale_decision_cards_must_refresh_during_trading_session(self) -> None:
         report = build_refresh_check(
