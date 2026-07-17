@@ -378,7 +378,7 @@ function tableRow(item) {
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
-  const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">技术接近解锁 · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
+  const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
   const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<tr data-code="${item.code}" tabindex="0">
@@ -401,7 +401,7 @@ function mobileCard(item) {
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
-  const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">技术接近解锁 · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
+  const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
   const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
@@ -1228,7 +1228,7 @@ function renderEvents() {
     return `<article class="event-item event-technical event-clickable" tabindex="0" data-event-code="${escapeHtml(alert.code || "")}" data-event-target="technical-gate">
       <div class="event-time">${escapeHtml(state.decisionReport?.generated_at || "")}</div>
       <div class="event-title">${escapeHtml(alert.code || "")} ${escapeHtml(alert.name || "")} · ${escapeHtml(alert.title || "技术解锁提醒")}</div>
-      ${alert.action_label ? `<div class="event-action">${escapeHtml(alert.action_label)}</div>` : ""}
+      ${alert.action_label ? `<div class="event-action event-action-${escapeHtml(alert.severity || "watch")}">${escapeHtml(alert.action_label)}</div>` : ""}
       <p>${escapeHtml(alert.message || "")}</p>
       ${conditionText ? `<div class="event-changes"><span class="event-tag">${escapeHtml(conditionText)}</span></div>` : ""}
       ${checklist.length ? `<ol class="event-checklist">${checklist.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : ""}

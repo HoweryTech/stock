@@ -382,6 +382,8 @@ th:nth-child(8) { width: 100px; }
 .event-time { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 .event-title { margin-bottom: 6px; font-weight: 700; }
 .event-action { display: inline-flex; min-height: 22px; align-items: center; margin-bottom: 6px; padding: 2px 7px; border-radius: 4px; color: var(--amber); background: var(--amber-bg); font-size: 12px; font-weight: 700; }
+.event-action-action { color: var(--green); background: var(--green-bg); }
+.event-action-watch { color: var(--amber); background: var(--amber-bg); }
 .event-changes { display: flex; flex-wrap: wrap; gap: 6px; }
 .event-tag { padding: 3px 7px; border-radius: 3px; background: #eef1f4; font-size: 12px; }
 .event-checklist { margin: 8px 0 0; padding-left: 18px; line-height: 1.55; color: var(--muted); }
