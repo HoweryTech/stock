@@ -612,6 +612,37 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(levels["reverse_t_zone_source"], "forecast")
         self.assertTrue(any("未给出可执行回补上限" in evidence for evidence in card["evidence"]))
 
+    def test_stale_reverse_t_forecast_falls_back_to_intraday_zone(self) -> None:
+        report = build_report(
+            {"items": [intraday_item(reverse_status="watch")]},
+            portfolio_result(),
+            t_result(),
+            None,
+            None,
+            {
+                "items": [
+                    {
+                        "code": "600000",
+                        "status": "watch",
+                        "as_of": "2026-07-16 15:00",
+                        "predicted_sell_zone": [9.82, 9.84],
+                        "predicted_buyback_max_price": 9.61,
+                    }
+                ]
+            },
+            generated_at=datetime(2026, 7, 17, 10, 20, 0),
+        )
+
+        card = report["cards"][0]
+        levels = card["price_levels"]
+        actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+
+        self.assertEqual(levels["reverse_t_sell_zone"], [10.2, 10.3])
+        self.assertEqual(levels["reverse_t_buyback_max_price"], 10.0)
+        self.assertEqual(levels["reverse_t_zone_source"], "intraday_high_fallback")
+        self.assertTrue(levels["reverse_t_forecast_stale"])
+        self.assertEqual(actions["反T卖出"]["price"], "10.20-10.30 元")
+
     def test_stale_quote_pauses_intraday_decision(self) -> None:
         report = build_report(
             {"items": [intraday_item(signals=[{"code": "stale_quote", "severity": "block", "message": "行情过期。"}])]},

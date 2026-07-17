@@ -71,6 +71,21 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def parse_date(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        match = re.match(r"(\d{4}-\d{2}-\d{2})", text)
+        return match.group(1) if match else None
+
+
 def load_minute_bars(cache_dir: Path | None) -> dict[str, list[dict[str, Any]]]:
     if cache_dir is None or not cache_dir.exists():
         return {}
@@ -1379,6 +1394,7 @@ def price_levels(
     t_check: dict[str, Any] | None,
     intraday: dict[str, Any],
     reverse_forecast: dict[str, Any] | None = None,
+    generated_at: datetime | None = None,
 ) -> dict[str, Any]:
     calculations = (portfolio or {}).get("calculations", {})
     t_calculations = (t_check or {}).get("calculations", {})
@@ -1393,13 +1409,19 @@ def price_levels(
         near_block_price = stop_loss / (1 - block_pct / 100)
     forecast_sell_zone = value_at(reverse_forecast or {}, "predicted_sell_zone")
     forecast_buyback = as_float(value_at(reverse_forecast or {}, "predicted_buyback_max_price"))
+    forecast_as_of = value_at(reverse_forecast or {}, "as_of")
+    forecast_date = parse_date(forecast_as_of)
+    decision_date = parse_date(generated_at)
+    forecast_stale = bool(forecast_date and decision_date and forecast_date != decision_date)
     intraday_sell_zone = value_at(intraday, "reverse_t_plan.sell_zone")
     intraday_buyback = as_float(value_at(intraday, "reverse_t_plan.buyback_max_price"))
-    has_forecast = reverse_forecast is not None
+    has_forecast = reverse_forecast is not None and not forecast_stale
     sell_zone = forecast_sell_zone if has_forecast else intraday_sell_zone
     buyback = forecast_buyback if has_forecast else intraday_buyback
-    if forecast_sell_zone:
+    if has_forecast and forecast_sell_zone:
         zone_source = "forecast"
+    elif reverse_forecast is not None and forecast_stale and intraday_sell_zone:
+        zone_source = "intraday_high_fallback"
     elif has_forecast:
         zone_source = "forecast_unavailable"
     elif intraday_sell_zone:
@@ -1419,7 +1441,8 @@ def price_levels(
         "reverse_t_sell_zone": sell_zone,
         "reverse_t_buyback_max_price": rounded(buyback),
         "reverse_t_zone_source": zone_source,
-        "reverse_t_forecast_as_of": value_at(reverse_forecast or {}, "as_of"),
+        "reverse_t_forecast_as_of": forecast_as_of,
+        "reverse_t_forecast_stale": forecast_stale,
         "reverse_t_reach_probability_pct": rounded(as_float(value_at(reverse_forecast or {}, "reach_probability_pct"))),
         "reverse_t_roundtrip_probability_pct": rounded(as_float(value_at(reverse_forecast or {}, "roundtrip_probability_pct"))),
         "reverse_t_joint_probability_pct": rounded(as_float(value_at(reverse_forecast or {}, "joint_roundtrip_probability_pct"))),
@@ -2381,6 +2404,7 @@ def build_card(
     technical_indicators: dict[str, Any] | None = None,
     total_assets: float | None = None,
     minute_bars: list[dict[str, Any]] | None = None,
+    generated_at: datetime | None = None,
 ) -> dict[str, Any]:
     technical_assessment = build_technical_assessment(technical_indicators)
     technical_operation = build_technical_operation(technical_assessment)
@@ -2403,7 +2427,7 @@ def build_card(
         execution_quality_gate,
     )
     blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment, t_performance_gate, execution_quality_gate)
-    levels = price_levels(portfolio, t_check, intraday, reverse_forecast)
+    levels = price_levels(portfolio, t_check, intraday, reverse_forecast, generated_at)
     technical_operation["post_unlock_review"] = build_post_unlock_review(
         technical_operation,
         state,
@@ -2547,6 +2571,7 @@ def build_report(
     *,
     generated_at: datetime | None = None,
 ) -> dict[str, Any]:
+    generated_at_value = generated_at or datetime.now().astimezone()
     portfolio_by_code = index_portfolio_check(portfolio_check)
     t_by_code = index_t_checks(t_opportunities)
     action_backtest_by_code = index_action_backtests(action_backtests)
@@ -2568,6 +2593,7 @@ def build_report(
             technical_by_code.get(str(item.get("code"))),
             total_assets,
             minute_by_code.get(str(item.get("code"))),
+            generated_at_value,
         )
         for item in intraday_snapshot.get("items", [])
     ]
@@ -2584,7 +2610,7 @@ def build_report(
     )
     priority_queue = build_portfolio_priority_queue(cards)
     return {
-        "generated_at": (generated_at or datetime.now().astimezone()).isoformat(timespec="seconds"),
+        "generated_at": generated_at_value.isoformat(timespec="seconds"),
         "source": {
             "intraday_generated_at": intraday_snapshot.get("generated_at"),
             "portfolio_check_available": portfolio_check is not None,
