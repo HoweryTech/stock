@@ -288,6 +288,7 @@ def build_post_trade_tracking(update: dict[str, Any], snapshot: dict[str, object
         "refreshed_action": decision.get("action_label"),
         "primary_action": primary_action,
         "closure": reverse_closure or positive_closure,
+        "execution_quality_review": trade.get("execution_quality_review") if isinstance(trade.get("execution_quality_review"), dict) else None,
         "warnings": warnings,
         "next_steps": next_steps,
     }

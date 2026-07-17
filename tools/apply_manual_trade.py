@@ -151,6 +151,79 @@ def positive_t_closure_summary(open_record: dict[str, Any], close_record: dict[s
     }
 
 
+def execution_quality_review(record: dict[str, Any]) -> dict[str, Any]:
+    score = 70
+    checks: list[dict[str, Any]] = []
+
+    def add(code: str, label: str, status: str, message: str, delta: int = 0) -> None:
+        nonlocal score
+        score += delta
+        checks.append({"code": code, "label": label, "status": status, "message": message, "score_delta": delta})
+
+    shares = as_float(record.get("shares"), 0.0) or 0.0
+    side = str(record.get("side") or "")
+    intent = str(record.get("trade_intent") or "")
+    realized_pnl = as_float(record.get("realized_pnl"))
+    reverse_closure = record.get("reverse_t_closure") if isinstance(record.get("reverse_t_closure"), dict) else None
+    positive_closure = record.get("positive_t_closure") if isinstance(record.get("positive_t_closure"), dict) else None
+    closure = reverse_closure or positive_closure
+
+    if shares > 0 and shares % 100 == 0:
+        add("lot_size", "交易单位", "pass", "成交数量为100股整数手。", 5)
+    else:
+        add("lot_size", "交易单位", "warn", "成交数量不是100股整数手，后续需要人工复核。", -15)
+
+    if intent:
+        add("intent_recorded", "成交意图", "pass", f"已记录成交意图：{intent}。", 5)
+    else:
+        add("intent_missing", "成交意图", "warn", "普通手工成交未绑定系统候选计划，复盘时要确认是否属于临时决策。", -5)
+
+    if closure:
+        net_profit = as_float(closure.get("net_profit"), 0.0) or 0.0
+        if net_profit >= 10:
+            add("closure_profit_target", "闭环收益", "pass", f"扣费后净收益 {net_profit:.2f} 元，达到10元复盘参考线。", 15)
+        elif net_profit >= 0:
+            add("closure_profitable", "闭环收益", "warn", f"扣费后净收益 {net_profit:.2f} 元，盈利但低于10元参考线。", 5)
+        else:
+            add("closure_loss", "闭环收益", "block", f"扣费后净收益 {net_profit:.2f} 元，闭环未盈利。", -30)
+    elif intent in {"reverse_t_open", "positive_t_open"}:
+        add("open_leg_pending", "开放腿跟踪", "warn", "已打开T交易腿，必须等回补/目标卖出完成后才能判断最终收益。", 0)
+    elif side == "sell" and realized_pnl is not None:
+        if realized_pnl < 0:
+            add("risk_exit_loss", "卖出结果", "warn", f"本次卖出确认亏损 {realized_pnl:.2f} 元；若是止损退出，复盘重点是是否避免继续扩大亏损。", -5)
+        else:
+            add("sell_profit", "卖出结果", "pass", f"本次卖出实现收益 {realized_pnl:.2f} 元。", 10)
+    elif side == "buy":
+        add("buy_follow_up", "买入跟踪", "warn", "买入成交后还不能判断成败，需要跟踪目标卖出区、失败价和仓位风险。", 0)
+
+    total_fees = as_float(value_at(record, "fees.total_fees"))
+    if total_fees is not None:
+        add("fees_recorded", "费用记录", "pass", f"已记录本次费用 {total_fees:.2f} 元。", 5)
+    else:
+        add("fees_missing", "费用记录", "warn", "未记录费用，收益复盘可能失真。", -10)
+
+    score = max(0, min(100, score))
+    blocking = any(check["status"] == "block" for check in checks)
+    warnings = [check for check in checks if check["status"] == "warn"]
+    if blocking:
+        status = "failed"
+        label = "执行失败复盘"
+        next_action = "暂停同类操作，先复盘价格、费用和执行原因。"
+    elif score >= 85:
+        status = "good"
+        label = "执行质量良好"
+        next_action = "按刷新后的实时建议继续观察，不因单次成功放大仓位。"
+    elif warnings:
+        status = "needs_review"
+        label = "需要复盘"
+        next_action = "先按检查项复盘，不把这笔成交直接当作可复制样本。"
+    else:
+        status = "acceptable"
+        label = "执行可接受"
+        next_action = "继续跟踪后续价格表现，等待系统刷新下一动作。"
+    return {"score": round(score, 1), "status": status, "status_label": label, "checks": checks, "next_action": next_action}
+
+
 def apply_manual_trade(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     code = str(args.code)
     side = str(args.side).lower()
@@ -242,6 +315,9 @@ def apply_manual_trade(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         closure = positive_t_closure_summary(open_record, record)
         record["positive_t_closure"] = closure
         set_value(position, "tracking.latest_positive_t_closure", closure)
+    review = execution_quality_review(record)
+    record["execution_quality_review"] = review
+    set_value(position, "tracking.latest_execution_quality_review", review)
     append_manual_trade(position, record)
     write_yaml(path, position, overwrite=True)
     return {"position_path": str(path), "trade": record, "position": {"shares": float(new_shares), "entry_price": value_at(position, "entry.entry_price")}}, path

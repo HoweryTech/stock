@@ -107,7 +107,21 @@ class ServeMonitorDashboardTest(unittest.TestCase):
 
         with (
             patch("tools.serve_monitor_dashboard.load_json", side_effect=fake_load_json),
-            patch("tools.serve_monitor_dashboard.apply_manual_trade", return_value=({"trade": {"code": "000725", "side": "sell", "shares_after": 100}, "position": {"shares": 100}}, None)) as apply_trade,
+            patch(
+                "tools.serve_monitor_dashboard.apply_manual_trade",
+                return_value=(
+                    {
+                        "trade": {
+                            "code": "000725",
+                            "side": "sell",
+                            "shares_after": 100,
+                            "execution_quality_review": {"status": "needs_review", "score": 70, "checks": []},
+                        },
+                        "position": {"shares": 100},
+                    },
+                    None,
+                ),
+            ) as apply_trade,
             patch("tools.serve_monitor_dashboard.run_refresh_commands", return_value=[{"returncode": 0}]) as refresh,
         ):
             result = handle_manual_trade({"code": "000725", "side": "sell", "shares": 100, "price": 6.32})
@@ -115,6 +129,7 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["update"]["trade"]["code"], "000725")
         self.assertEqual(result["post_trade_tracking"]["refreshed_action"], "禁止追买")
+        self.assertEqual(result["post_trade_tracking"]["execution_quality_review"]["status"], "needs_review")
         self.assertIn("少于200股", result["post_trade_tracking"]["warnings"][0])
         apply_trade.assert_called_once()
         called_args = apply_trade.call_args.args[0]
@@ -134,6 +149,7 @@ class ServeMonitorDashboardTest(unittest.TestCase):
                 "shares_after": 200,
                 "fees": {"total_fees": 5.0},
                 "reverse_t_closure": {"next_plan": "反T闭环完成。", "net_profit": 22.0},
+                "execution_quality_review": {"status": "good", "score": 95, "checks": [{"code": "closure_profit_target"}]},
             },
             "position": {"shares": 200, "entry_price": 7.58},
         }
@@ -152,6 +168,7 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         tracking = build_post_trade_tracking(update, snapshot, decision_report)
 
         self.assertEqual(tracking["intent_label"], "反T回补")
+        self.assertEqual(tracking["execution_quality_review"]["score"], 95)
         self.assertTrue(tracking["can_reverse_t"])
         self.assertEqual(tracking["primary_action"]["action"], "反T卖出")
         self.assertTrue(any("刷新后当前建议" in step for step in tracking["next_steps"]))

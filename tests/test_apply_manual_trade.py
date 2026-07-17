@@ -59,6 +59,8 @@ class ApplyManualTradeTest(unittest.TestCase):
         self.assertEqual(updated["manual_trade_history"][-1]["side"], "sell")
         self.assertAlmostEqual(updated["manual_trade_history"][-1]["fees"]["total_fees"], 5.3223, places=4)
         self.assertAlmostEqual(updated["manual_trade_history"][-1]["realized_pnl"], -284.8223, places=4)
+        self.assertEqual(updated["manual_trade_history"][-1]["execution_quality_review"]["status"], "needs_review")
+        self.assertTrue(any(check["code"] == "risk_exit_loss" for check in updated["manual_trade_history"][-1]["execution_quality_review"]["checks"]))
         self.assertEqual(result["position"]["shares"], 100.0)
 
     def test_buy_updates_weighted_cost(self) -> None:
@@ -161,7 +163,10 @@ class ApplyManualTradeTest(unittest.TestCase):
         self.assertAlmostEqual(closure["gross_profit"], 28.0, places=4)
         self.assertAlmostEqual(closure["fees"]["total_fees"], 10.3283, places=4)
         self.assertAlmostEqual(closure["net_profit"], 17.6717, places=4)
+        self.assertEqual(closed["execution_quality_review"]["status"], "good")
+        self.assertGreaterEqual(closed["execution_quality_review"]["score"], 85)
         self.assertEqual(updated["tracking"]["latest_reverse_t_closure"]["buy_trade_id"], closed["id"])
+        self.assertEqual(updated["tracking"]["latest_execution_quality_review"]["status"], "good")
 
 
 if __name__ == "__main__":

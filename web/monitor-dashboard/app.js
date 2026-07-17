@@ -1205,18 +1205,33 @@ function renderPostTradeResult(result) {
   if (tracking.entry_price_after != null) metrics.push(["成交后成本", money(tracking.entry_price_after)]);
   if (tracking.fees_total != null) metrics.push(["本次费用", money(tracking.fees_total)]);
   const closure = tracking.closure || {};
+  const quality = tracking.execution_quality_review || {};
   const closureHtml = closure.net_profit == null ? "" : `
     <h4>闭环结果</h4>
     <div class="post-trade-closure ${Number(closure.net_profit) >= 0 ? "positive" : "negative"}">
       <strong>扣费后 ${money(closure.net_profit)}</strong>
       <span>${escapeHtml(closure.next_plan || "")}</span>
     </div>`;
+  const qualityChecks = quality.checks || [];
+  const qualityHtml = quality.score == null ? "" : `
+    <h4>执行质量复盘</h4>
+    <div class="execution-quality execution-quality-${escapeHtml(quality.status || "unknown")}">
+      <strong>${escapeHtml(quality.status_label || quality.status || "--")} · ${num(quality.score, 1)}分</strong>
+      <p>${escapeHtml(quality.next_action || "")}</p>
+    </div>
+    ${qualityChecks.length ? `<div class="preflight-list">${qualityChecks.map(check => `
+      <div class="preflight-item preflight-${escapeHtml(check.status || "warn")}">
+        <strong>${escapeHtml(check.label || check.code || "检查项")}</strong>
+        <span>${check.status === "pass" ? "通过" : check.status === "block" ? "失败" : "复盘"}</span>
+        <p>${escapeHtml(check.message || "")}</p>
+      </div>`).join("")}</div>` : ""}`;
   const warnings = tracking.warnings || [];
   const steps = tracking.next_steps || [];
   return `<p><strong>成交已经写入本地持仓文件。</strong></p>
     ${result.refresh_error ? `<p class="negative">刷新建议失败：${escapeHtml(result.refresh_error)}</p>` : `<p class="positive">实时建议已刷新。</p>`}
     <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     ${closureHtml}
+    ${qualityHtml}
     ${warnings.length ? `<h4>风险提醒</h4><ul class="reason-list">${warnings.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
     ${steps.length ? `<h4>下一步计划</h4><ol class="reason-list">${steps.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : ""}`;
 }
