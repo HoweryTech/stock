@@ -4,8 +4,9 @@ from datetime import datetime
 from tools.check_market_wait_refresh import build_refresh_check
 
 
-def cards(*states: str) -> dict:
+def cards(*states: str, generated_at: str = "2026-07-16T09:30:00+08:00") -> dict:
     return {
+        "generated_at": generated_at,
         "cards": [
             {"code": f"60000{index}", "name": f"测试{index}", "state": state, "state_label": state}
             for index, state in enumerate(states)
@@ -67,6 +68,19 @@ class MarketWaitRefreshTest(unittest.TestCase):
 
         self.assertEqual(report["conclusion"], "no_market_wait")
         self.assertFalse(report["action_required"])
+
+    def test_stale_decision_cards_must_refresh_during_trading_session(self) -> None:
+        report = build_refresh_check(
+            cards("observe", generated_at="2026-07-15T15:00:00+08:00"),
+            as_of=datetime(2026, 7, 16, 9, 35, 0),
+            positions=["positions/*.yaml"],
+            daily_bars="data/processed/daily_bars.csv",
+            total_assets=25480.0,
+        )
+
+        self.assertEqual(report["conclusion"], "refresh_due_stale_decision_cards")
+        self.assertTrue(report["action_required"])
+        self.assertIn("历史建议", report["message"])
 
 
 if __name__ == "__main__":

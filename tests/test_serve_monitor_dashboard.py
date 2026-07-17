@@ -94,7 +94,7 @@ class ServeMonitorDashboardTest(unittest.TestCase):
             if path == API_FILES["/api/snapshot"]:
                 return {"total_assets": 25480.0}
             if path == API_FILES["/api/decision-cards"]:
-                return {"cards": [{"code": "600000", "state": "market_wait"}]}
+                return {"generated_at": "2026-07-16T09:30:00+08:00", "cards": [{"code": "600000", "state": "market_wait"}]}
             return None
 
         with patch("tools.serve_monitor_dashboard.load_json", side_effect=fake_load_json):
@@ -104,6 +104,23 @@ class ServeMonitorDashboardTest(unittest.TestCase):
 
         self.assertEqual(report["conclusion"], "refresh_due")
         self.assertIn("--total-assets 25480.0", report["refresh_command"]["shell"])
+
+    def test_market_wait_refresh_status_requires_current_day_decision_cards(self) -> None:
+        def fake_load_json(path):
+            if path == API_FILES["/api/snapshot"]:
+                return {"total_assets": 25480.0}
+            if path == API_FILES["/api/decision-cards"]:
+                return {"generated_at": "2026-07-17T15:00:00+08:00", "cards": [{"code": "600000", "state": "observe"}]}
+            return None
+
+        with patch("tools.serve_monitor_dashboard.load_json", side_effect=fake_load_json):
+            with patch("tools.serve_monitor_dashboard.datetime") as fake_datetime:
+                fake_datetime.now.return_value.astimezone.return_value = __import__("datetime").datetime(2026, 7, 20, 9, 35, 0)
+                report = market_wait_refresh_status()
+
+        self.assertEqual(report["conclusion"], "refresh_due_stale_decision_cards")
+        self.assertTrue(report["action_required"])
+        self.assertIn("不是当前交易日", report["message"])
 
     def test_handle_manual_trade_updates_position_and_refreshes_outputs(self) -> None:
         def fake_load_json(path):

@@ -71,6 +71,20 @@ def build_refresh_check(
         }
 
     cards = cards_doc.get("cards", []) or []
+    cards_generated_at = parse_datetime(cards_doc.get("generated_at"))
+    cards_date = cards_generated_at.date() if cards_generated_at else None
+    if session["live_quote_required"] and cards_date != as_of.date():
+        conclusion = "refresh_due_stale_decision_cards" if command["ready"] else "refresh_due_missing_total_assets"
+        return {
+            "generated_at": as_of.isoformat(timespec="seconds"),
+            "conclusion": conclusion,
+            "action_required": True,
+            "message": "实时决策卡不是当前交易日生成，必须刷新完整日内决策链，不能把历史建议当当前建议。",
+            "market_session": session,
+            "market_wait_count": 0,
+            "decision_cards_generated_at": cards_doc.get("generated_at"),
+            "refresh_command": command,
+        }
     market_wait_items = [card for card in cards if card.get("state") == "market_wait"]
     if not market_wait_items:
         return {

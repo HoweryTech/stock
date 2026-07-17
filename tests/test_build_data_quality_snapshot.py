@@ -139,6 +139,55 @@ class DataQualitySnapshotTest(unittest.TestCase):
         self.assertEqual(minute_check["status"], "reference_only")
         self.assertEqual(item["source_consistency"]["status"], "skipped")
 
+    def test_next_trading_day_open_blocks_previous_day_minute_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            position = base / "positions/POS-600000.yaml"
+            write_position(position, "600000")
+            write_daily(base / "daily.csv", {"600000": [f"2026-07-{day:02d}" for day in range(1, 18)]})
+            write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-17 15:00")
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0, "latest_price": 10.0}}]}
+
+            report = build_report(
+                [position],
+                snapshot,
+                base / "daily.csv",
+                base / "minutes",
+                as_of=datetime(2026, 7, 20, 9, 31, 0),
+                min_daily_bars=10,
+                max_minute_age_hours=999.0,
+            )
+
+        item = report["items"][0]
+        self.assertEqual(item["market_session"]["phase"], "continuous_trading")
+        self.assertEqual(item["overall_status"], "stale")
+        self.assertEqual(item["minute"]["status"], "stale")
+        self.assertIn("盘中执行窗口要求当天分钟线", item["minute"]["message"])
+        self.assertFalse(item["data_trust"]["intraday_decision_allowed"])
+
+    def test_next_trading_day_premarket_keeps_previous_close_as_wait_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            position = base / "positions/POS-600000.yaml"
+            write_position(position, "600000")
+            write_daily(base / "daily.csv", {"600000": [f"2026-07-{day:02d}" for day in range(1, 18)]})
+            write_minutes(base / "minutes/600000.json", "600000", 130, "2026-07-17 15:00")
+            snapshot = {"items": [{"code": "600000", "quote": {"quote_lag_seconds": 5.0, "latest_price": 10.0}}]}
+
+            report = build_report(
+                [position],
+                snapshot,
+                base / "daily.csv",
+                base / "minutes",
+                as_of=datetime(2026, 7, 20, 8, 50, 0),
+                min_daily_bars=10,
+                max_minute_age_hours=999.0,
+            )
+
+        item = report["items"][0]
+        self.assertEqual(item["market_session"]["phase"], "pre_market")
+        self.assertNotIn("盘中执行窗口要求当天分钟线", item["minute"]["message"])
+
     def test_marks_new_listing_daily_bars_as_limited_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)

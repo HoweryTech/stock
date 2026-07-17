@@ -51,6 +51,12 @@ const datePart = value => {
   return match ? match[0] : "";
 };
 
+function decisionReportIsOlderThanSnapshot(report, snapshot) {
+  const reportDate = datePart(report?.generated_at);
+  const snapshotDate = datePart(snapshot?.generated_at);
+  return Boolean(reportDate && snapshotDate && reportDate < snapshotDate);
+}
+
 function linearSlope(values) {
   const n = values.length;
   if (n < 2) return 0;
@@ -535,24 +541,28 @@ function renderPriorityQueue() {
 function renderRefreshAlert() {
   const alert = document.querySelector("#refreshAlert");
   const check = state.refreshCheck;
-  if (!check || check.conclusion === "no_market_wait") {
+  const staleDecisionReport = state.decisionReport?.stale_due_to_snapshot_date;
+  if (!check && !staleDecisionReport || check?.conclusion === "no_market_wait" && !staleDecisionReport) {
     alert.hidden = true;
     alert.innerHTML = "";
     return;
   }
-  const command = check.refresh_command?.shell || "";
-  const actionClass = check.action_required ? "refresh-action" : "refresh-wait";
+  const command = check?.refresh_command?.shell || "";
+  const actionClass = check?.action_required || staleDecisionReport ? "refresh-action" : "refresh-wait";
   const commandHtml = command
     ? `<div class="refresh-command"><code>${escapeHtml(command)}</code><button class="copy-refresh" type="button" data-command="${escapeHtml(command)}">复制</button></div>`
     : "";
+  const message = staleDecisionReport
+    ? `实时决策卡生成于 ${state.decisionReport?.generated_at || "--"}，早于行情快照 ${state.snapshot?.generated_at || "--"}；旧决策已停用，请刷新完整日内决策链。`
+    : check?.message || "等待行情刷新。";
   alert.hidden = false;
   alert.className = `refresh-alert ${actionClass}`;
   alert.innerHTML = `
     <div>
-      <strong>${escapeHtml(check.message || "等待行情刷新。")}</strong>
-      <span>${escapeHtml(check.market_session?.label || "--")} · ${escapeHtml(check.market_wait_count ?? 0)} 只等待</span>
+      <strong>${escapeHtml(message)}</strong>
+      <span>${escapeHtml(check?.market_session?.label || "--")} · ${escapeHtml(check?.market_wait_count ?? 0)} 只等待</span>
     </div>
-    ${check.action_required ? commandHtml : ""}`;
+    ${check?.action_required || staleDecisionReport ? commandHtml : ""}`;
 }
 
 function tableRow(item) {
@@ -2394,8 +2404,11 @@ async function loadData() {
     state.research = new Map((research.items || []).map(item => [item.code, item]));
     state.backtests = new Map((backtests.items || []).map(item => [item.code, item]));
     state.forecasts = new Map((forecasts.items || []).map(item => [item.code, item]));
-    state.decisionReport = decisionCards;
-    state.decisionCards = new Map((decisionCards.cards || []).map(card => [card.code, card]));
+    const staleDecisionCards = decisionReportIsOlderThanSnapshot(decisionCards, snapshot);
+    state.decisionReport = staleDecisionCards
+      ? {...decisionCards, stale_due_to_snapshot_date: true, original_card_count: (decisionCards.cards || []).length, cards: [], priority_queue: {items: [], counts: {}}}
+      : decisionCards;
+    state.decisionCards = staleDecisionCards ? new Map() : new Map((decisionCards.cards || []).map(card => [card.code, card]));
     state.refreshCheck = refreshCheck;
     state.events = events.events || [];
     state.flowHistory = new Map();
