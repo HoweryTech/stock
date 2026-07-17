@@ -1846,6 +1846,103 @@ def build_stop_loss_risk_plan(
     }
 
 
+def build_near_stop_risk_plan(
+    state: str,
+    levels: dict[str, Any],
+    position: dict[str, Any],
+    technical_assessment: dict[str, Any] | None,
+) -> dict[str, Any]:
+    current = as_float(levels.get("current_price"))
+    stop_loss = as_float(levels.get("stop_loss_price"))
+    near_block = as_float(levels.get("near_stop_block_price"))
+    stop_loss_confirmed = bool(levels.get("stop_loss_confirmed", stop_loss is not None))
+    current_shares = int(as_float(position.get("shares"), 0.0) or 0)
+    if (
+        state != "exit_risk_review"
+        or current is None
+        or stop_loss is None
+        or not stop_loss_confirmed
+        or current <= stop_loss
+        or current_shares <= 0
+    ):
+        return {"applicable": False, "status": "not_applicable", "steps": []}
+
+    scores = (technical_assessment or {}).get("dimension_scores") or {}
+    trend = as_float(scores.get("trend"), 0.0) or 0.0
+    risk = as_float(scores.get("risk"), 0.0) or 0.0
+    reversal = as_float(scores.get("reversal"), 0.0) or 0.0
+    volume = as_float(scores.get("volume_confirmation"), 0.0) or 0.0
+    label = str((technical_assessment or {}).get("label") or "")
+    distance_pct = (current - stop_loss) / stop_loss * 100 if stop_loss else None
+    shares = risk_exit_reduce_shares(current_shares)
+    ma5 = as_float(levels.get("ma5"))
+    ma20 = as_float(levels.get("ma20"))
+    rebound_low = max(current * 1.006, stop_loss * 1.01)
+    if ma5 is not None and ma5 > current:
+        rebound_high = min(ma5, current * 1.035)
+    elif ma20 is not None and ma20 > current:
+        rebound_high = min(ma20, current * 1.035)
+    else:
+        rebound_high = current * 1.018
+    rebound_high = max(rebound_low, rebound_high)
+    rebound_zone = [rounded(rebound_low), rounded(rebound_high)]
+    recover_price = max(stop_loss * 1.012, current * 1.004)
+    if ma5 is not None:
+        recover_price = max(recover_price, ma5)
+    failure_zone = [rounded(stop_loss), rounded(stop_loss)]
+    stop_text = money_text(stop_loss)
+    near_text = money_text(near_block)
+    rebound_text = format_price_zone(rebound_zone)
+    distance_text = "-" if distance_pct is None else f"{distance_pct:.2f}%"
+    post_trade_shares = max(0, current_shares - shares)
+    reason = (
+        f"现价距离硬止损仅 {distance_text}，先停止补仓和做T；"
+        "按下破、反抽、站稳三条路径等待盘中确认。"
+    )
+    steps = [
+        f"路径1-下破：现价小于等于硬止损 {stop_text} 时，立刻转入止损减仓/硬退出计划，不再等待反T或正T信号。",
+        f"路径2-反抽：若价格反抽到 {rebound_text} 但技术仍未修复，卖出 {shares} 股风控减仓；成交后预计剩余 {post_trade_shares} 股。",
+        f"路径3-站稳：若价格重新站上 {money_text(recover_price)}，且量能确认不再走弱，本轮退出风险降级为观察复核，不主动卖出。",
+        f"在以上任一路径触发前，不补仓、不做T；低于做T阻断价 {near_text} 时，所有T操作继续禁止。",
+    ]
+    failure_conditions = [
+        "没有跌破硬止损，也没有反抽到减仓区时，不提前卖出。",
+        "反抽减仓成交后不立刻买回；等待系统按剩余仓位刷新下一步。",
+        "若盘中数据可信度低或行情延迟超阈值，只保留预案，不按旧价执行。",
+    ]
+    return {
+        "applicable": True,
+        "candidate": "risk_exit",
+        "plan_type": "near_stop_playbook",
+        "status": "near_stop_review",
+        "status_label": "近硬止损盘中预案",
+        "action_label": "止损风险复核",
+        "side": "sell",
+        "side_label": "卖出",
+        "trade_intent": "risk_exit_reduce",
+        "shares": shares,
+        "price_zone": rebound_zone,
+        "target_zone": failure_zone,
+        "min_price": rounded(as_float(rebound_zone[0])),
+        "stop_loss_price": rounded(stop_loss),
+        "current_price": rounded(current),
+        "post_trade_shares": post_trade_shares,
+        "technical_context": {
+            "label": label,
+            "trend": rounded(trend),
+            "risk": rounded(risk),
+            "reversal": rounded(reversal),
+            "volume_confirmation": rounded(volume),
+            "distance_to_stop_pct": rounded(distance_pct),
+            "recover_price": rounded(recover_price),
+        },
+        "reason": reason,
+        "failure_conditions": failure_conditions,
+        "steps": steps,
+        "post_trade_plan": f"盘中只按三条路径处理：跌破 {stop_text} 转退出，反抽到 {rebound_text} 降风险，重新站上 {money_text(recover_price)} 才降级观察。",
+    }
+
+
 def build_manual_execution_plan(
     review_summary: dict[str, Any],
     levels: dict[str, Any],
@@ -1853,11 +1950,15 @@ def build_manual_execution_plan(
     capital_plan: dict[str, Any],
     positive_timing: dict[str, Any],
     intraday: dict[str, Any],
+    state: str = "",
     technical_assessment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     stop_loss_plan = build_stop_loss_risk_plan(levels, position, technical_assessment)
     if stop_loss_plan.get("applicable"):
         return stop_loss_plan
+    near_stop_plan = build_near_stop_risk_plan(state, levels, position, technical_assessment)
+    if near_stop_plan.get("applicable"):
+        return near_stop_plan
 
     if review_summary.get("status") != "manual_candidate":
         return {
@@ -2386,16 +2487,25 @@ def build_price_action_table(
         stop_action = str(stop_plan.get("action_label") or ("止损风险复核" if state == "exit_risk_review" and not stop_ready else "止损/退出"))
         plan_status = str(stop_plan.get("status") or "")
         row_status = "ready" if plan_status == "ready_for_manual_confirm" else "watch"
+        if plan_status == "near_stop_review":
+            row_status = "blocked"
         if not stop_plan:
             row_status = "ready" if stop_ready else "blocked" if state == "exit_risk_review" else "watch"
         row_status_label = (
             "可执行" if row_status == "ready" and stop_plan else
             "等反弹" if plan_status == "wait_rebound_reduce" else
+            "近硬止损" if plan_status == "near_stop_review" else
             "近硬止损" if row_status == "blocked" and state == "exit_risk_review" else
             "已触发" if stop_ready else "未触发"
         )
-        row_price = format_price_zone(stop_plan.get("price_zone")) if stop_plan.get("price_zone") else f"≤ {stop_loss:.2f} 元"
+        row_price = (
+            f"≤ {stop_loss:.2f} / {format_price_zone(stop_plan.get('price_zone'))}"
+            if stop_plan.get("plan_type") == "near_stop_playbook" and stop_plan.get("price_zone") else
+            format_price_zone(stop_plan.get("price_zone")) if stop_plan.get("price_zone") else
+            f"≤ {stop_loss:.2f} 元"
+        )
         row_trigger = (
+            f"三路径：跌破 {stop_loss:.2f} 或反抽到 {format_price_zone(stop_plan.get('price_zone'))}" if stop_plan.get("plan_type") == "near_stop_playbook" and stop_plan.get("price_zone") else
             f"价格进入 {row_price}" if stop_plan.get("plan_type") == "rebound_reduce" else
             f"价格小于等于 {stop_loss:.2f} 元"
         )
@@ -2723,6 +2833,7 @@ def build_card(
         capital_plan,
         positive_timing,
         intraday,
+        state,
         technical_assessment,
     )
     price_action_table = build_price_action_table(

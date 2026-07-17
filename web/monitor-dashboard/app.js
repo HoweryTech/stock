@@ -1460,7 +1460,7 @@ function renderManualExecutionPlan(plan) {
   const fees = plan.estimated_fees || {};
   const metrics = [
     ["计划状态", plan.status_label || "--"],
-    ["计划类型", plan.plan_type === "hard_exit" ? "硬退出" : plan.plan_type === "rebound_reduce" ? "反弹减仓" : plan.plan_type === "risk_reduce" ? "止损减仓" : plan.candidate || "--"],
+    ["计划类型", plan.plan_type === "hard_exit" ? "硬退出" : plan.plan_type === "rebound_reduce" ? "反弹减仓" : plan.plan_type === "risk_reduce" ? "止损减仓" : plan.plan_type === "near_stop_playbook" ? "近硬止损预案" : plan.candidate || "--"],
     ["交易方向", plan.side_label || "--"],
     ["成交意图", plan.trade_intent === "reverse_t_open" ? "反T卖出腿" : plan.trade_intent === "positive_t_open" ? "正T买入腿" : plan.trade_intent === "risk_exit_reduce" ? "风控减仓" : plan.trade_intent === "risk_exit_full" ? "风控清仓" : plan.trade_intent || "--"],
     ["建议数量", plan.shares ? `${plan.shares}股` : "--"],

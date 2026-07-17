@@ -230,7 +230,13 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["state"], "exit_risk_review")
         self.assertEqual(card["price_action_table"]["primary_action"]["action"], "止损风险复核")
         self.assertEqual(card["price_action_table"]["primary_action"]["status_label"], "近硬止损")
-        self.assertFalse(card["manual_execution_plan"]["applicable"])
+        self.assertEqual(card["manual_execution_plan"]["candidate"], "risk_exit")
+        self.assertEqual(card["manual_execution_plan"]["plan_type"], "near_stop_playbook")
+        self.assertEqual(card["manual_execution_plan"]["status"], "near_stop_review")
+        self.assertEqual(card["manual_execution_plan"]["shares"], 500)
+        self.assertTrue(any("路径1-下破" in step for step in card["manual_execution_plan"]["steps"]))
+        self.assertTrue(any("路径2-反抽" in step for step in card["manual_execution_plan"]["steps"]))
+        self.assertTrue(any("路径3-站稳" in step for step in card["manual_execution_plan"]["steps"]))
 
     def test_unconfirmed_imported_stop_reference_does_not_take_exit_priority(self) -> None:
         portfolio = portfolio_result()
