@@ -17,6 +17,7 @@ const state = {
   manualTradeDrafts: new Map(),
   pendingManualTrade: null,
   pendingStopLossConfirmation: null,
+  triggerConfirmations: new Map(),
   triggerRefreshInFlight: false,
   lastTriggerRefreshKey: "",
   lastTriggerRefresh: null,
@@ -269,6 +270,63 @@ function triggerAlertTarget(alert) {
   return alert.target || (alert.active_path === "price_action_ready" ? "action-step-table" : "manual-execution-plan");
 }
 
+function triggerConfirmationWindowMs(path) {
+  if (path === "path1_break") return 30 * 1000;
+  if (path === "path2_rebound" || path === "path3_recover") return 60 * 1000;
+  return 30 * 1000;
+}
+
+function resetTriggerConfirmationForCode(code) {
+  if (!code) return;
+  for (const key of state.triggerConfirmations.keys()) {
+    if (key.startsWith(`${code}:`)) state.triggerConfirmations.delete(key);
+  }
+}
+
+function applyTriggerConfirmationWindow(alert) {
+  if (!alert?.active_path) {
+    resetTriggerConfirmationForCode(alert?.code);
+    return alert;
+  }
+  const key = `${alert.code || ""}:${alert.active_path}`;
+  const now = Date.now();
+  const windowMs = triggerConfirmationWindowMs(alert.active_path);
+  let record = state.triggerConfirmations.get(key);
+  if (!record) {
+    record = {
+      first_seen_ms: now,
+      first_seen_at: new Date(now).toLocaleTimeString("zh-CN", {hour12: false}),
+      path: alert.active_path,
+    };
+    state.triggerConfirmations.set(key, record);
+  }
+  const elapsedMs = Math.max(0, now - record.first_seen_ms);
+  const remainingSeconds = Math.max(0, Math.ceil((windowMs - elapsedMs) / 1000));
+  const common = {
+    ...alert,
+    confirmation_first_seen_at: record.first_seen_at,
+    confirmation_elapsed_seconds: Math.floor(elapsedMs / 1000),
+    confirmation_window_seconds: Math.ceil(windowMs / 1000),
+    confirmation_remaining_seconds: remainingSeconds,
+  };
+  if (elapsedMs < windowMs) {
+    return {
+      ...common,
+      severity: "watch",
+      confirmation_status: "pending",
+      title: `${alert.title || "路径触发"}：等待二次确认`,
+      action_label: `等待二次确认 ${remainingSeconds}s`,
+      message: `${alert.message || "触发条件已出现。"} 二次确认窗口内先不下单；若价格离开触发区，本次触发自动失效。`,
+    };
+  }
+  return {
+    ...common,
+    confirmation_status: "confirmed",
+    action_label: alert.action_label || "二次确认已通过",
+    message: `${alert.message || "触发条件已满足。"} 二次确认已持续 ${Math.ceil(windowMs / 1000)} 秒，允许进入后续刷新和人工复核。`,
+  };
+}
+
 function evaluateNearStopTriggerAlert(alert, card, item) {
   const plan = card?.manual_execution_plan || {};
   if (plan.plan_type !== "near_stop_playbook") return alert;
@@ -332,7 +390,7 @@ function liveIntradayTriggerAlerts() {
       const card = state.decisionCards.get(alert.code);
       const item = snapshotItemForCode(alert.code);
       const plan = card?.manual_execution_plan || {};
-      if (plan.plan_type === "near_stop_playbook") return evaluateNearStopTriggerAlert(alert, card, item);
+      if (plan.plan_type === "near_stop_playbook") return applyTriggerConfirmationWindow(evaluateNearStopTriggerAlert(alert, card, item));
       const current = Number(item?.quote?.latest_price);
       return Number.isFinite(current) ? {...alert, current_price: current} : alert;
     })
@@ -947,8 +1005,9 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
   const automatic = item.action_decision || {};
   const watchRows = (decisionCard?.price_action_table?.rows || []).filter(row => row.status === "watch" || row.status === "reference");
   const queueItem = (state.decisionReport?.priority_queue?.items || []).find(entry => entry.code === item.code);
+  const pendingSuffix = liveTrigger?.confirmation_status === "pending" ? `，剩余约 ${liveTrigger.confirmation_remaining_seconds || 0} 秒` : "";
   const nowText = liveTrigger
-    ? `${liveTrigger.title}：${liveTrigger.action_label || "按触发路径处理"}`
+    ? `${liveTrigger.title}：${liveTrigger.action_label || "按触发路径处理"}${pendingSuffix}`
     : structured.current_action || uniqueTradeConclusion(item, decisionCard, automaticDecision);
   const structuredForbidden = structured.forbidden_actions || [];
   const triggerItems = [
@@ -1062,8 +1121,11 @@ function renderStickyActionBar(item, decisionCard, automaticDecision) {
   const blockers = decisionCard?.blockers || [];
   const levels = decisionCard?.price_levels || {};
   const structured = decision.structured_conclusion || {};
+  const triggerPending = liveTrigger?.confirmation_status === "pending";
   const status = liveTrigger ? (liveTrigger.severity === "action" ? "ready" : "watch") : primary.status || (decision.execution_allowed ? "watch" : "blocked");
-  const statusText = liveTrigger ? (liveTrigger.severity === "action" ? "已触发" : "风险降级") : primary.status_label || (status === "ready" ? "已触发" : status === "blocked" ? "暂不执行" : "等待触发");
+  const statusText = liveTrigger
+    ? triggerPending ? `等待二次确认 ${liveTrigger.confirmation_remaining_seconds || 0}s` : (liveTrigger.severity === "action" ? "已触发" : "风险降级")
+    : primary.status_label || (status === "ready" ? "已触发" : status === "blocked" ? "暂不执行" : "等待触发");
   const conclusionText = uniqueTradeConclusion(item, decisionCard, automaticDecision);
   const priceText = liveTrigger?.current_price == null ? structured.primary_price || primary.price || money(item.quote?.latest_price) : money(liveTrigger.current_price);
   const liveShares = liveTrigger?.active_path === "path2_rebound" ? decisionCard?.manual_execution_plan?.shares : null;
@@ -1768,12 +1830,22 @@ function renderManualExecutionPlan(plan, liveTrigger = null) {
   if (plan.estimated_realized_pnl != null) metrics.push(["预计实现盈亏", money(plan.estimated_realized_pnl)]);
   if (plan.risk_amount != null) metrics.push(["新增风险金额", money(plan.risk_amount)]);
   const steps = plan.steps || [];
-  const liveSteps = triggeredNearStop ? [
-    liveTrigger.message,
-    liveTrigger.active_path === "path1_break" ? "本轮不再等待正T或反T信号；先进入止损减仓/硬退出复核，刷新后按新计划处理。" : "",
-    liveTrigger.active_path === "path2_rebound" ? `若技术仍未修复，复核卖出 ${plan.shares || "--"} 股风控减仓；成交后再写入系统刷新建议。` : "",
-    liveTrigger.active_path === "path3_recover" ? "本轮退出风险降级为观察复核；不主动卖出，也不追买，等待下一轮决策卡确认。" : "",
-  ].filter(Boolean) : [];
+  const triggerPending = liveTrigger?.confirmation_status === "pending";
+  const liveSteps = triggeredNearStop ? (
+    triggerPending
+      ? [
+          liveTrigger.message,
+          `二次确认首次出现时间：${liveTrigger.confirmation_first_seen_at || "--"}；确认窗口 ${liveTrigger.confirmation_window_seconds || "--"} 秒，剩余约 ${liveTrigger.confirmation_remaining_seconds || 0} 秒。`,
+          "确认窗口结束前不下单、不写入成交、不触发自动刷新；如果价格离开触发区，本次触发自动失效。",
+          "确认通过后，页面会切换为对应路径的复核动作，再按新的执行计划处理。",
+        ]
+      : [
+          liveTrigger.message,
+          liveTrigger.active_path === "path1_break" ? "本轮不再等待正T或反T信号；先进入止损减仓/硬退出复核，刷新后按新计划处理。" : "",
+          liveTrigger.active_path === "path2_rebound" ? `若技术仍未修复，复核卖出 ${plan.shares || "--"} 股风控减仓；成交后再写入系统刷新建议。` : "",
+          liveTrigger.active_path === "path3_recover" ? "本轮退出风险降级为观察复核；不主动卖出，也不追买，等待下一轮决策卡确认。" : "",
+        ]
+  ).filter(Boolean) : [];
   const failures = plan.failure_conditions || [];
   const impactItems = [
     plan.post_trade_shares == null ? "" : `成交后剩余 ${num(plan.post_trade_shares, 0)} 股。`,
@@ -1792,7 +1864,8 @@ function renderManualExecutionPlan(plan, liveTrigger = null) {
   const riskConclusion = triggeredNearStop ? liveTrigger.title : plan.action_label || plan.status_label || "--";
   const riskReason = triggeredNearStop ? liveTrigger.message : plan.reason || "触发风控后先降低风险，不用补仓或做T替代止损复核。";
   const riskNow = triggeredNearStop
-    ? liveTrigger.active_path === "path1_break" ? "进入止损减仓/硬退出复核"
+    ? triggerPending ? `等待二次确认，剩余约 ${liveTrigger.confirmation_remaining_seconds || 0} 秒`
+      : liveTrigger.active_path === "path1_break" ? "进入止损减仓/硬退出复核"
       : liveTrigger.active_path === "path2_rebound" ? `复核风控减仓 ${plan.shares || "--"} 股`
       : liveTrigger.active_path === "path3_recover" ? "风险降级观察"
       : liveTrigger.action_label || "按触发路径处理"
@@ -2812,6 +2885,11 @@ function renderEvents() {
   const triggerHtml = triggerAlerts.map(alert => {
     const triggerTags = (alert.triggers || []).map(trigger => trigger.condition || trigger.label).filter(Boolean);
     const currentText = alert.current_price == null ? "" : `现价 ${money(alert.current_price)}`;
+    const confirmationText = alert.confirmation_status === "pending"
+      ? `二次确认剩余 ${alert.confirmation_remaining_seconds || 0}s`
+      : alert.confirmation_status === "confirmed"
+        ? `二次确认已通过 ${alert.confirmation_window_seconds || ""}s`
+        : "";
     return `<article class="event-item event-trigger event-clickable" tabindex="0" data-event-code="${escapeHtml(alert.code || "")}" data-event-target="${escapeHtml(triggerAlertTarget(alert))}">
       <div class="event-time">${escapeHtml(state.snapshot?.generated_at || state.decisionReport?.generated_at || "")}</div>
       <div class="event-title">${escapeHtml(alert.code || "")} ${escapeHtml(alert.name || "")} · ${escapeHtml(alert.title || "盘中触发提醒")}</div>
@@ -2819,6 +2897,7 @@ function renderEvents() {
       <p>${escapeHtml(alert.message || "")}</p>
       <div class="event-changes">
         ${currentText ? `<span class="event-tag">${escapeHtml(currentText)}</span>` : ""}
+        ${confirmationText ? `<span class="event-tag">${escapeHtml(confirmationText)}</span>` : ""}
         ${triggerTags.slice(0, 3).map(tag => `<span class="event-tag">${escapeHtml(tag)}</span>`).join("")}
       </div>
     </article>`;
