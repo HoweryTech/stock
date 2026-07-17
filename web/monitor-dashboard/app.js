@@ -417,6 +417,7 @@ function compactQualityEvidence(item) {
 
 function renderDecisionSummary(item) {
   const card = decisionCardFor(item);
+  const automaticDecision = automaticDecisionFor(item);
   const action = card?.price_action_table?.primary_action || {};
   const actionStatus = action.status || "watch";
   const shares = action.shares ? ` · ${action.shares}股` : "";
@@ -435,9 +436,10 @@ function renderDecisionSummary(item) {
   const actionTone = actionStatus === "ready" ? "ready" : actionStatus === "blocked" ? "blocked" : "watch";
   const blockerText = blockers.length ? blockers[0] : action.note || card?.decision?.next_step || "";
   const evidenceText = evidence.length ? evidence.join("；") : card?.reason || "";
+  const conclusion = card ? uniqueTradeConclusion(item, card, automaticDecision) : automaticDecision.action || adviceFor(item);
   return `<div class="advice-summary">
-    <div class="advice-primary"><span>主建议</span><strong>${escapeHtml(adviceFor(item))}</strong></div>
-    <div class="advice-focus advice-focus-${escapeHtml(actionTone)}"><span>最紧急</span><strong>${escapeHtml(actionText)}</strong></div>
+    <div class="advice-primary advice-unique"><span>唯一结论</span><strong>${escapeHtml(conclusion)}</strong></div>
+    <div class="advice-focus advice-focus-${escapeHtml(actionTone)}"><span>触发/风控</span><strong>${escapeHtml(actionText)}</strong></div>
     ${blockerText ? `<div class="advice-support advice-support-block"><span>阻断/条件</span><em>${escapeHtml(blockerText)}</em></div>` : ""}
     ${evidenceText ? `<div class="advice-support"><span>依据</span><em>${escapeHtml(evidenceText)}</em></div>` : ""}
   </div>`;
