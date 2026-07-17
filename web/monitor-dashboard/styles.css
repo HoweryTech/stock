@@ -213,6 +213,18 @@ th:nth-child(8) { width: 100px; }
 .state-observe { color: var(--blue); background: var(--blue-bg); }
 .state-data_stale { color: var(--muted); background: #eceff2; }
 .advice { line-height: 1.45; }
+.advice-summary { display: grid; gap: 5px; }
+.advice-primary { display: grid; gap: 2px; }
+.advice-primary span, .advice-focus span, .advice-support span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.advice-primary strong { color: var(--text); font-size: 14px; line-height: 1.35; }
+.advice-focus { display: flex; flex-wrap: wrap; gap: 5px 8px; align-items: baseline; font-size: 12px; }
+.advice-focus strong { font-size: 12px; line-height: 1.35; }
+.advice-focus-ready strong { color: var(--red); }
+.advice-focus-blocked strong { color: var(--amber); }
+.advice-focus-watch strong { color: var(--blue); }
+.advice-support { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 7px; align-items: start; color: var(--muted); font-size: 12px; }
+.advice-support em { min-width: 0; font-style: normal; overflow-wrap: anywhere; }
+.advice-support-block em { color: var(--muted); }
 .advice-tag { margin-top: 4px; color: var(--blue); font-size: 12px; font-weight: 600; }
 .unlock-alert-tag { color: var(--amber); }
 .positive-t-ready { color: var(--green); }

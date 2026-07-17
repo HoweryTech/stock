@@ -395,6 +395,47 @@ function priceActionTag(item) {
   return `<div class="advice-tag ${toneClass}">最紧急：${escapeHtml(action.action || "--")} · ${escapeHtml(action.status_label || "--")} · ${escapeHtml(action.price || "--")}${shares}</div>`;
 }
 
+function compactTechnicalEvidence(item) {
+  const assessment = technicalAssessmentFor(item);
+  if (!assessment?.available) return "";
+  const score = assessment.score == null ? "--" : Number(assessment.score).toFixed(1);
+  return `${technicalLabel(assessment)} · ${score}`;
+}
+
+function compactQualityEvidence(item) {
+  const quality = dataQualityFor(item);
+  if (!quality || qualityState(quality) === "unknown") return "";
+  return `${trustLabel(quality)} · ${qualityLabel(quality)}`;
+}
+
+function renderDecisionSummary(item) {
+  const card = decisionCardFor(item);
+  const action = card?.price_action_table?.primary_action || {};
+  const actionStatus = action.status || "watch";
+  const shares = action.shares ? ` · ${action.shares}股` : "";
+  const actionText = action.action
+    ? `${action.action} · ${action.status_label || actionStatus} · ${action.price || "--"}${shares}`
+    : "当前没有触发动作";
+  const blockers = [
+    action.status === "blocked" ? action.note : "",
+    ...(card?.blockers || []),
+    card?.decision?.technical_operation?.reason || "",
+  ].filter(Boolean);
+  const evidence = [
+    compactTechnicalEvidence(item),
+    compactQualityEvidence(item),
+  ].filter(Boolean);
+  const actionTone = actionStatus === "ready" ? "ready" : actionStatus === "blocked" ? "blocked" : "watch";
+  const blockerText = blockers.length ? blockers[0] : action.note || card?.decision?.next_step || "";
+  const evidenceText = evidence.length ? evidence.join("；") : card?.reason || "";
+  return `<div class="advice-summary">
+    <div class="advice-primary"><span>主建议</span><strong>${escapeHtml(adviceFor(item))}</strong></div>
+    <div class="advice-focus advice-focus-${escapeHtml(actionTone)}"><span>最紧急</span><strong>${escapeHtml(actionText)}</strong></div>
+    ${blockerText ? `<div class="advice-support advice-support-block"><span>阻断/条件</span><em>${escapeHtml(blockerText)}</em></div>` : ""}
+    ${evidenceText ? `<div class="advice-support"><span>依据</span><em>${escapeHtml(evidenceText)}</em></div>` : ""}
+  </div>`;
+}
+
 function filteredItems() {
   const items = state.snapshot?.items || [];
   return items.filter(item => {
@@ -520,47 +561,21 @@ function renderRefreshAlert() {
 
 function tableRow(item) {
   const lag = item.quote.quote_lag_seconds;
-  const card = decisionCardFor(item);
-  const unlockAlert = technicalUnlockAlertFor(item);
   const displayState = displayStateFor(item);
-  const reverseTag = isReverseTPriceAlert(item)
-    ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
-    : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
-  const positiveTag = positiveTPlanTag(item);
-  const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
-  const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
-  const reviewTag = postUnlockReviewTag(item);
-  const performanceTag = tClosurePerformanceTag(item);
-  const actionTag = priceActionTag(item);
-  const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
-  const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<tr data-code="${item.code}" tabindex="0">
     <td><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></td>
     <td class="number"><div>${num(item.quote.latest_price)}</div><div class="secondary ${tone(item.quote.change_pct)}">${pct(item.quote.change_pct)}</div></td>
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
     <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><div class="state-tier">${actionTierBadge(item)}</div></td>
-    <td class="advice">${escapeHtml(adviceFor(item))}${actionTag}${cardTag}${unlockTag}${reviewTag}${positiveTag}${performanceTag}${techTag}${dataTag}${reverseTag}</td>
+    <td class="advice">${renderDecisionSummary(item)}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
 }
 
 function mobileCard(item) {
-  const card = decisionCardFor(item);
-  const unlockAlert = technicalUnlockAlertFor(item);
   const displayState = displayStateFor(item);
-  const reverseTag = isReverseTPriceAlert(item)
-    ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
-    : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
-  const positiveTag = positiveTPlanTag(item);
-  const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
-  const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
-  const reviewTag = postUnlockReviewTag(item);
-  const performanceTag = tClosurePerformanceTag(item);
-  const actionTag = priceActionTag(item);
-  const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
-  const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
     <div class="card-top">
       <div><div class="stock-name">${escapeHtml(item.name)}</div><div class="stock-code">${item.code}</div></div>
@@ -570,7 +585,7 @@ function mobileCard(item) {
     <div class="card-row"><span>${actionTierBadge(item)}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
     <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>${escapeHtml(displayState)}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
-    <div class="card-advice">${escapeHtml(adviceFor(item))}${actionTag}${cardTag}${unlockTag}${reviewTag}${positiveTag}${performanceTag}${techTag}${dataTag}${reverseTag}</div>
+    <div class="card-advice">${renderDecisionSummary(item)}</div>
   </article>`;
 }
 
