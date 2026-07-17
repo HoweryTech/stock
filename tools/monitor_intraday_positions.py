@@ -318,6 +318,72 @@ def build_execution_quality_summary(position: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def trade_record_date(record: dict[str, Any]) -> str:
+    text = str(record.get("occurred_at") or "").strip()
+    return text[:10] if len(text) >= 10 else ""
+
+
+def build_daily_trade_rhythm(position: dict[str, Any], *, today: str | None = None) -> dict[str, Any]:
+    today = today or datetime.now().astimezone().date().isoformat()
+    history = position.get("manual_trade_history") or []
+    if not isinstance(history, list):
+        history = []
+    today_trades = [record for record in history if isinstance(record, dict) and trade_record_date(record) == today]
+    buy_count = sum(1 for record in today_trades if record.get("side") == "buy")
+    sell_count = sum(1 for record in today_trades if record.get("side") == "sell")
+    intents = [str(record.get("trade_intent") or "") for record in today_trades]
+    risk_exit_count = sum(1 for intent in intents if intent in {"risk_exit_reduce", "risk_exit_full"})
+    t_open_count = sum(1 for intent in intents if intent in {"reverse_t_open", "positive_t_open"})
+    t_close_count = sum(1 for intent in intents if intent in {"reverse_t_close", "positive_t_close"})
+
+    if risk_exit_count:
+        status = "risk_exit_cooldown"
+        status_label = "风控卖出后冷静"
+        next_action = "今日已执行风控卖出；不立刻买回、不补仓、不新增做T，只允许继续处理已触发的退出风险。"
+        blockers = ["今日已执行风控卖出，禁止立刻反向买回、补仓或新增做T。"]
+        forbidden_actions = ["禁止补仓", "禁止正T买入", "禁止反T回补式追买", "禁止新增反T卖出腿"]
+    elif len(today_trades) >= 2 or t_open_count + t_close_count >= 2:
+        status = "trade_frequency_caution"
+        status_label = "日内操作偏多"
+        next_action = "今日已有多笔成交；后续只允许完成已打开的做T闭环或处理风险，不新增同方向试单。"
+        blockers = ["今日成交次数偏多，禁止继续放大日内操作频率。"]
+        forbidden_actions = ["禁止新增补仓", "禁止加大做T股数"]
+    elif t_open_count or t_close_count:
+        status = "t_trade_watch"
+        status_label = "今日已有做T动作"
+        next_action = "今日已有做T相关成交；先盯闭环条件，不再叠加第二笔同方向计划。"
+        blockers = []
+        forbidden_actions = ["禁止叠加第二笔同方向做T"]
+    elif today_trades:
+        status = "trade_recorded"
+        status_label = "今日已有普通成交"
+        next_action = "今日已有成交记录；后续动作必须重新生成决策卡并确认。"
+        blockers = []
+        forbidden_actions = []
+    else:
+        status = "clear"
+        status_label = "今日未记录成交"
+        next_action = "未触发日内节奏限制，继续按数据质量、技术面和风险门禁判断。"
+        blockers = []
+        forbidden_actions = []
+
+    return {
+        "status": status,
+        "status_label": status_label,
+        "trade_date": today,
+        "trade_count": len(today_trades),
+        "buy_count": buy_count,
+        "sell_count": sell_count,
+        "risk_exit_count": risk_exit_count,
+        "t_open_count": t_open_count,
+        "t_close_count": t_close_count,
+        "recent_trades": today_trades[-5:],
+        "blockers": blockers,
+        "forbidden_actions": forbidden_actions,
+        "next_action": next_action,
+    }
+
+
 def one_side_trade_fees(side: str, price: float, shares: int, costs: dict[str, float]) -> dict[str, float]:
     amount = price * shares
     commission = max(amount * costs["commission_rate"], costs["minimum_commission"])
@@ -1018,6 +1084,7 @@ def analyze_quote(
     )
     t_closure_performance = build_t_closure_performance(position)
     execution_quality_summary = build_execution_quality_summary(position)
+    daily_trade_rhythm = build_daily_trade_rhythm(position)
     action_decision = apply_state_action_tier(build_action_decision(reverse_t_plan, reduction_plan), state, reverse_t_plan, reduction_plan)
 
     return {
@@ -1049,6 +1116,7 @@ def analyze_quote(
         "latest_positive_t_closure": value_at(position, "tracking.latest_positive_t_closure"),
         "latest_execution_quality_review": value_at(position, "tracking.latest_execution_quality_review"),
         "execution_quality_summary": execution_quality_summary,
+        "daily_trade_rhythm": daily_trade_rhythm,
         "t_closure_performance": t_closure_performance,
         "reverse_t_plan": reverse_t_plan,
         "positive_t_plan": positive_t_plan,

@@ -1872,6 +1872,39 @@ function renderPositiveTPlan(plan) {
   );
 }
 
+function renderDailyTradeRhythm(rhythm) {
+  if (!rhythm || !rhythm.status || rhythm.status === "clear") return "";
+  const tone = rhythm.status === "risk_exit_cooldown"
+    ? "exit_risk_review"
+    : rhythm.status === "trade_frequency_caution"
+      ? "hold_no_add"
+      : "observe";
+  const metrics = [
+    ["交易日期", rhythm.trade_date || "--"],
+    ["今日成交", rhythm.trade_count == null ? "--" : `${rhythm.trade_count}笔`],
+    ["买入/卖出", `${rhythm.buy_count ?? 0} / ${rhythm.sell_count ?? 0}`],
+    ["风控卖出", rhythm.risk_exit_count == null ? "--" : `${rhythm.risk_exit_count}笔`],
+    ["做T开腿", rhythm.t_open_count == null ? "--" : `${rhythm.t_open_count}笔`],
+    ["做T平腿", rhythm.t_close_count == null ? "--" : `${rhythm.t_close_count}笔`],
+  ];
+  const forbidden = rhythm.forbidden_actions || [];
+  const blockers = rhythm.blockers || [];
+  const recent = rhythm.recent_trades || [];
+  return detailSection(
+    "日内节奏",
+    `<div class="action-panel action-${tone}">
+      <div class="action-panel-title">${escapeHtml(rhythm.status_label || "日内节奏")}</div>
+      <p>${escapeHtml(rhythm.next_action || "按当前节奏门禁继续观察。")}</p>
+    </div>
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    ${forbidden.length ? `<h4>当前禁止动作</h4><div class="tag-row">${forbidden.map(item => `<span class="tag danger">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+    ${recent.length ? `<h4>今日成交记录</h4><ul class="reason-list">${recent.map(record => `<li>${escapeHtml(`${record.occurred_at || "--"} ${record.side || ""} ${record.trade_intent || ""} ${record.shares || "-"}股 @ ${record.price || "-"}`)}</li>`).join("")}</ul>` : ""}`,
+    "daily-trade-rhythm",
+    {collapsed: false, summary: rhythm.next_action || rhythm.status_label || "日内操作节奏"}
+  );
+}
+
 function renderPositiveTiming(timing, technicalOperation = null) {
   if (!timing || timing.status === "not_applicable") return "";
   const buyZone = timing.buy_zone ? `${num(timing.buy_zone[0])}–${num(timing.buy_zone[1])}元` : "--";
@@ -2607,6 +2640,7 @@ function openDetail(code, options = {}) {
     html += renderMinuteConfirmation(decisionCard.minute_confirmation);
     html += renderDynamicStopLossSection(item, decisionCard);
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan, liveTrigger);
+    html += renderDailyTradeRhythm(decisionCard.daily_trade_rhythm);
   }
   html += detailSection("持仓与行情", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status", {collapsed: true, summary: "现价、成本、仓位和均线"});
   if (decisionCard) {

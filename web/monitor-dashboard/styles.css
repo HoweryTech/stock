@@ -529,6 +529,9 @@ th:nth-child(8) { width: 100px; }
 .action-panel-title { margin-bottom: 7px; font-size: 12px; color: var(--muted); font-weight: 700; }
 .action-panel p { margin: 0 0 8px; }
 .action-panel .reason-list { padding-left: 20px; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.tag { display: inline-flex; align-items: center; min-height: 26px; padding: 4px 8px; border-radius: 6px; background: #eef2ff; color: var(--blue); font-size: 12px; font-weight: 800; }
+.tag.danger { background: #fee2e2; color: #991b1b; }
 .stop-loss-summary {
   margin-bottom: 12px;
   padding: 11px 12px;

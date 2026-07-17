@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 
-from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_execution_quality_summary, build_positive_t_plan, build_reduction_plan, build_reverse_t_plan, build_t_closure_performance, dynamic_price_zone_width, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
+from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_daily_trade_rhythm, build_execution_quality_summary, build_positive_t_plan, build_reduction_plan, build_reverse_t_plan, build_t_closure_performance, dynamic_price_zone_width, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
 
 
 class MonitorIntradayPositionsTest(unittest.TestCase):
@@ -355,6 +355,55 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         self.assertEqual(item["latest_execution_quality_review"]["status"], "good")
         self.assertEqual(item["execution_quality_summary"]["status"], "pass")
         self.assertEqual(item["execution_quality_summary"]["average_score"], 90.0)
+
+    def test_daily_trade_rhythm_blocks_after_risk_exit_today(self) -> None:
+        position = {
+            "manual_trade_history": [
+                {
+                    "id": "MANUAL-RISK-EXIT",
+                    "side": "sell",
+                    "trade_intent": "risk_exit_reduce",
+                    "price": 3.36,
+                    "shares": 500,
+                    "occurred_at": "2026-07-17T10:05:00+08:00",
+                },
+                {
+                    "id": "MANUAL-OLD",
+                    "side": "buy",
+                    "trade_intent": "positive_t_open",
+                    "price": 3.40,
+                    "shares": 100,
+                    "occurred_at": "2026-07-16T10:05:00+08:00",
+                },
+            ],
+        }
+
+        rhythm = build_daily_trade_rhythm(position, today="2026-07-17")
+
+        self.assertEqual(rhythm["status"], "risk_exit_cooldown")
+        self.assertEqual(rhythm["trade_count"], 1)
+        self.assertEqual(rhythm["sell_count"], 1)
+        self.assertEqual(rhythm["risk_exit_count"], 1)
+        self.assertIn("禁止补仓", rhythm["forbidden_actions"])
+        self.assertTrue(any("禁止立刻反向买回" in blocker for blocker in rhythm["blockers"]))
+
+    def test_analyze_quote_exposes_daily_trade_rhythm(self) -> None:
+        position = {
+            "stock": {"code": "000725", "name": "京东方A"},
+            "entry": {"shares": 200, "entry_price": 7.6025, "position_pct_of_total_assets": 4.72},
+            "manual_trade_history": [
+                {"id": "MANUAL-TRADE", "side": "sell", "trade_intent": "reverse_t_open", "occurred_at": date.today().isoformat()}
+            ],
+        }
+        quote = {"code": "000725", "latest_price": 6.25, "change_pct": 1.2, "quote_timestamp": 1000}
+
+        item = analyze_quote(
+            position, quote, self.history(), total_assets=25480, max_stale_seconds=60,
+            costs=self.costs, max_reverse_t_position_ratio_pct=50, now_timestamp=1001,
+        )
+
+        self.assertEqual(item["daily_trade_rhythm"]["status"], "t_trade_watch")
+        self.assertEqual(item["daily_trade_rhythm"]["trade_count"], 1)
 
     def test_open_positive_t_leg_triggers_target_sell_ready(self) -> None:
         position = {

@@ -464,6 +464,42 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("放宽到5%" in reason for reason in card["capital_plan"]["reasons"]))
         self.assertTrue(any("总资产 5.0%" in step for step in card["decision"]["action_steps"]))
 
+    def test_daily_trade_rhythm_blocks_new_positive_t_after_risk_exit(self) -> None:
+        item = intraday_item()
+        item["position"]["shares"] = 100
+        item["position"]["market_value"] = 1000.0
+        item["position"]["live_position_pct"] = 2.0
+        item["daily_trade_rhythm"] = {
+            "status": "risk_exit_cooldown",
+            "status_label": "风控卖出后冷静",
+            "trade_date": "2026-07-16",
+            "trade_count": 1,
+            "risk_exit_count": 1,
+            "blockers": ["今日已执行风控卖出，禁止立刻反向买回、补仓或新增做T。"],
+            "forbidden_actions": ["禁止补仓", "禁止正T买入"],
+            "next_action": "今日已执行风控卖出；不立刻买回、不补仓、不新增做T。",
+        }
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(conclusion="positive_t_candidate"),
+            None,
+            None,
+            None,
+            None,
+            bullish_technical_doc(),
+            positive_minute_bars(),
+            generated_at=datetime(2026, 7, 16, 9, 35, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["daily_trade_rhythm"]["status"], "risk_exit_cooldown")
+        self.assertIn("今日已执行风控卖出，禁止立刻反向买回、补仓或新增做T。", card["blockers"])
+        self.assertEqual(card["manual_execution_plan"]["status"], "blocked")
+        self.assertEqual(card["manual_execution_plan"]["status_label"], "日内节奏冷静期，禁止新增做T")
+        self.assertTrue(any("不补仓" in step for step in card["decision"]["action_steps"]))
+
     def test_positive_t_score_without_confirmation_waits(self) -> None:
         item = intraday_item()
         item["position"]["shares"] = 100

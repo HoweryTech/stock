@@ -1968,6 +1968,7 @@ def build_blockers(
     technical_assessment: dict[str, Any] | None = None,
     t_performance_gate: dict[str, Any] | None = None,
     execution_quality_gate: dict[str, Any] | None = None,
+    daily_trade_rhythm: dict[str, Any] | None = None,
 ) -> list[str]:
     blockers: list[str] = []
     if data_quality_status(data_quality) in QUALITY_BLOCKER_STATUSES:
@@ -1987,6 +1988,8 @@ def build_blockers(
         blockers.extend((t_performance_gate or {}).get("reasons") or ["做T实盘绩效门禁未通过。"])
     if (execution_quality_gate or {}).get("status") == "blocked":
         blockers.extend((execution_quality_gate or {}).get("reasons") or ["近期执行质量评分未通过。"])
+    if (daily_trade_rhythm or {}).get("status") in {"risk_exit_cooldown", "trade_frequency_caution"}:
+        blockers.extend((daily_trade_rhythm or {}).get("blockers") or [(daily_trade_rhythm or {}).get("next_action")])
     if reverse_backtest and reverse_backtest.get("verdict") != "pass":
         blockers.append(reverse_backtest.get("verdict_label") or "反T历史回测未通过。")
     return [item for item in blockers if item]
@@ -2298,6 +2301,7 @@ def build_manual_execution_plan(
     state: str = "",
     technical_assessment: dict[str, Any] | None = None,
     minute_confirmation: dict[str, Any] | None = None,
+    daily_trade_rhythm: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     stop_loss_plan = build_stop_loss_risk_plan(levels, position, technical_assessment)
     if stop_loss_plan.get("applicable"):
@@ -2315,6 +2319,30 @@ def build_manual_execution_plan(
         }
 
     candidate = review_summary.get("candidate")
+    rhythm_status = str((daily_trade_rhythm or {}).get("status") or "")
+    if rhythm_status == "risk_exit_cooldown" and candidate in {"positive_t", "reverse_t"}:
+        return {
+            "applicable": True,
+            "status": "blocked",
+            "status_label": "日内节奏冷静期，禁止新增做T",
+            "candidate": candidate,
+            "steps": [
+                (daily_trade_rhythm or {}).get("next_action") or "今日已执行风控卖出；不立刻反向买回、补仓或新增做T。",
+                "今天只允许继续观察、记录已成交结果，或在价格继续触发风险时执行止损/减仓计划。",
+                "等下一交易日或下一轮完整决策链重新评估后，再考虑新的正T/反T。",
+            ],
+        }
+    if rhythm_status == "trade_frequency_caution" and candidate == "positive_t":
+        return {
+            "applicable": True,
+            "status": "blocked",
+            "status_label": "今日操作偏多，禁止新增正T买入",
+            "candidate": candidate,
+            "steps": [
+                (daily_trade_rhythm or {}).get("next_action") or "今日成交次数偏多，不再新增补仓或正T买入。",
+                "若已有开放中的做T腿，只处理闭环条件；没有闭环条件时继续观察。",
+            ],
+        }
     current = as_float(levels.get("current_price"))
     current_shares = int(as_float(position.get("shares"), 0.0) or 0)
     entry_price = as_float(position.get("entry_price"))
@@ -2605,6 +2633,7 @@ def build_action_steps(
     t_performance_gate: dict[str, Any] | None = None,
     execution_quality_gate: dict[str, Any] | None = None,
     manual_execution_plan: dict[str, Any] | None = None,
+    daily_trade_rhythm: dict[str, Any] | None = None,
 ) -> list[str]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
@@ -2616,8 +2645,24 @@ def build_action_steps(
     estimated_cash = current * shares if current is not None and shares is not None else None
     estimated_pnl = (current - entry_price) * shares if current is not None and entry_price is not None and shares is not None else unrealized_pnl
     loss_word = "亏损" if estimated_pnl is not None and estimated_pnl < 0 else "盈亏"
+    rhythm_status = str((daily_trade_rhythm or {}).get("status") or "")
+    if rhythm_status == "risk_exit_cooldown" and state not in {"exit_risk_review", "risk_reduction_review", "data_insufficient"}:
+        return [
+            (daily_trade_rhythm or {}).get("next_action") or "今日已执行风控卖出，进入日内冷静期。",
+            "现在不补仓、不做正T买入、不做新的反T；避免刚减仓又反向追买。",
+            "只继续监控硬止损、风控减仓触发价和已打开做T腿的闭环条件。",
+            "下一步：等下一轮完整决策卡或下一交易日重新评估趋势、量能、分钟确认后，再决定是否恢复交易动作。",
+        ]
+    if rhythm_status == "trade_frequency_caution" and state in {"positive_t_watch", "reverse_t_watch", "hold_no_add", "observe"}:
+        return [
+            (daily_trade_rhythm or {}).get("next_action") or "今日成交次数偏多，先降频观察。",
+            "不新增补仓，不放大做T股数；只允许完成已打开的做T闭环或继续处理退出风险。",
+            "下一步：等待下一轮触发价或下一交易日重新评估。",
+        ]
     if state == "exit_risk_review":
         steps = ["本轮禁止买入、补仓、做T；只允许处理卖出风险。"]
+        if rhythm_status != "clear":
+            steps.append(f"日内节奏：{(daily_trade_rhythm or {}).get('next_action') or (daily_trade_rhythm or {}).get('status_label')}")
         risk_plan = manual_execution_plan if (manual_execution_plan or {}).get("candidate") == "risk_exit" else {}
         if risk_plan:
             realized = as_float(risk_plan.get("estimated_realized_pnl"))
@@ -3315,7 +3360,17 @@ def build_card(
         t_performance_gate,
         execution_quality_gate,
     )
-    blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment, t_performance_gate, execution_quality_gate)
+    daily_trade_rhythm = intraday.get("daily_trade_rhythm") or {}
+    blockers = build_blockers(
+        intraday,
+        t_check,
+        reverse_backtest,
+        data_quality,
+        technical_assessment,
+        t_performance_gate,
+        execution_quality_gate,
+        daily_trade_rhythm,
+    )
     levels = price_levels(portfolio, t_check, intraday, reverse_forecast, generated_at, technical_assessment)
     technical_operation["post_unlock_review"] = build_post_unlock_review(
         technical_operation,
@@ -3349,6 +3404,7 @@ def build_card(
         state,
         technical_assessment,
         minute_confirmation,
+        daily_trade_rhythm,
     )
     price_action_table = build_price_action_table(
         state,
@@ -3377,6 +3433,7 @@ def build_card(
         t_performance_gate=t_performance_gate,
         execution_quality_gate=execution_quality_gate,
         manual_execution_plan=manual_execution_plan,
+        daily_trade_rhythm=daily_trade_rhythm,
     )
     structured_conclusion = build_structured_conclusion(
         state,
@@ -3426,6 +3483,7 @@ def build_card(
         "t_performance_gate": t_performance_gate,
         "execution_quality_gate": execution_quality_gate,
         "execution_quality_summary": intraday.get("execution_quality_summary") or {},
+        "daily_trade_rhythm": daily_trade_rhythm,
         "t_closure_performance": intraday.get("t_closure_performance") or {},
         "positive_timing": positive_timing,
         "minute_confirmation": minute_confirmation,
