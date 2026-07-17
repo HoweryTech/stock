@@ -148,6 +148,11 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 .queue-main em { color: var(--muted); font-style: normal; font-weight: 500; }
 .queue-main small { color: var(--muted); line-height: 1.35; }
 .queue-main b { line-height: 1.35; }
+.queue-distance { font-style: normal; font-size: 12px; font-weight: 700; line-height: 1.35; }
+.stop-distance-tag { font-weight: 800; }
+.stop-distance-hit { color: var(--red); }
+.stop-distance-near { color: var(--amber); }
+.stop-distance-safe { color: var(--blue); }
 
 .toolbar {
   min-height: 48px;

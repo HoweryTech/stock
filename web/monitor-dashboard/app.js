@@ -409,6 +409,42 @@ function priceActionTag(item) {
   return `<div class="advice-tag ${toneClass}">最紧急：${escapeHtml(action.action || "--")} · ${escapeHtml(action.status_label || "--")} · ${escapeHtml(action.price || "--")}${shares}</div>`;
 }
 
+function stopLossDistanceInfo(card) {
+  const levels = card?.price_levels || {};
+  const current = Number(levels.current_price);
+  const stop = Number(levels.stop_loss_price);
+  if (!levels.stop_loss_confirmed || !Number.isFinite(current) || !Number.isFinite(stop) || stop <= 0) return null;
+  const distancePct = (current - stop) / stop * 100;
+  const absPct = Math.abs(distancePct);
+  const toneClass = distancePct <= 0 ? "stop-distance-hit" : distancePct <= 1 ? "stop-distance-near" : "stop-distance-safe";
+  const label = distancePct <= 0
+    ? `已跌破硬止损 ${absPct.toFixed(2)}%`
+    : `距硬止损 ${distancePct.toFixed(2)}%`;
+  return {label, distancePct, toneClass, current, stop};
+}
+
+function stopLossDistanceTag(card) {
+  const info = stopLossDistanceInfo(card);
+  if (!info) return "";
+  return `<div class="advice-tag stop-distance-tag ${escapeHtml(info.toneClass)}">${escapeHtml(info.label)} · 硬止损 ${money(info.stop)}</div>`;
+}
+
+function detailTargetForCard(card) {
+  const primary = card?.price_action_table?.primary_action || {};
+  const plan = card?.manual_execution_plan || {};
+  const action = String(primary.action || "");
+  if (plan.candidate === "risk_exit" && plan.applicable) return "manual-execution-plan";
+  if (action.includes("止损") || card?.state === "exit_risk_review") return "action-step-table";
+  if (primary.status === "ready") return "action-step-table";
+  if (card?.price_levels?.dynamic_stop_loss_price) return "dynamic-stop-loss";
+  return "";
+}
+
+function detailTargetForCode(code) {
+  if (!code) return "";
+  return detailTargetForCard(state.decisionCards.get(code));
+}
+
 function compactTechnicalEvidence(item) {
   const assessment = technicalAssessmentFor(item);
   if (!assessment?.available) return "";
@@ -428,6 +464,7 @@ function renderDecisionSummary(item) {
   const conclusion = card ? uniqueTradeConclusion(item, card, automaticDecision) : automaticDecision.action || adviceFor(item);
   return `<div class="advice-summary">
     <div class="advice-primary advice-unique"><span>唯一结论</span><strong>${escapeHtml(conclusion)}</strong></div>
+    ${stopLossDistanceTag(card)}
   </div>`;
 }
 
@@ -525,17 +562,23 @@ function renderPriorityQueue() {
       </div>
       <span>${displayItems.length}/${totalCount} 项</span>
     </div>
-    <div class="queue-list">
-      ${displayItems.map((item, index) => `
-        <button class="queue-item queue-${escapeHtml(item.urgency || "low")}" type="button" data-queue-code="${escapeHtml(item.code || "")}">
-          <span class="queue-rank">${index + 1}</span>
-          <span class="queue-main">
-            <strong>${escapeHtml(item.name || "--")} <em>${escapeHtml(item.code || "")}</em></strong>
-            <small>${escapeHtml(item.category_label || "--")} · ${escapeHtml(item.state_label || "--")}</small>
-            <b>${escapeHtml(uniqueConclusionForCode(item.code, item.next_step || item.action_label || item.reason || "--"))}</b>
-          </span>
-        </button>`).join("")}
-    </div>`;
+	    <div class="queue-list">
+	      ${displayItems.map((item, index) => {
+          const card = state.decisionCards.get(item.code);
+          const target = detailTargetForCard(card);
+          const distance = stopLossDistanceInfo(card);
+          return `
+	        <button class="queue-item queue-${escapeHtml(item.urgency || "low")}" type="button" data-queue-code="${escapeHtml(item.code || "")}" data-queue-target="${escapeHtml(target)}">
+	          <span class="queue-rank">${index + 1}</span>
+	          <span class="queue-main">
+	            <strong>${escapeHtml(item.name || "--")} <em>${escapeHtml(item.code || "")}</em></strong>
+	            <small>${escapeHtml(item.category_label || "--")} · ${escapeHtml(item.state_label || "--")}</small>
+	            <b>${escapeHtml(uniqueConclusionForCode(item.code, item.next_step || item.action_label || item.reason || "--"))}</b>
+              ${distance ? `<i class="queue-distance ${escapeHtml(distance.toneClass)}">${escapeHtml(distance.label)} · 硬止损 ${money(distance.stop)}</i>` : ""}
+	          </span>
+	        </button>`;
+        }).join("")}
+	    </div>`;
 }
 
 function renderRefreshAlert() {
@@ -597,9 +640,9 @@ function mobileCard(item) {
 
 function bindPositionOpeners() {
   document.querySelectorAll("[data-code]").forEach(element => {
-    element.addEventListener("click", () => openDetail(element.dataset.code));
+    element.addEventListener("click", () => openDetail(element.dataset.code, { target: detailTargetForCode(element.dataset.code) }));
     element.addEventListener("keydown", event => {
-      if (event.key === "Enter" || event.key === " ") openDetail(element.dataset.code);
+      if (event.key === "Enter" || event.key === " ") openDetail(element.dataset.code, { target: detailTargetForCode(element.dataset.code) });
     });
   });
 }
@@ -739,8 +782,10 @@ function renderStickyActionBar(item, decisionCard, automaticDecision) {
   const reasonText = primary.note || blockers[0] || decision.next_step || automaticDecision.action || "";
   const presetButton = primary.status === "ready" ? priceActionPresetButton(primary, item, decisionCard) : "";
   const statusClass = status === "ready" ? "ready" : status === "blocked" ? "blocked" : "watch";
+  const riskTarget = detailTargetForCard(decisionCard) || "action-step-table";
+  const riskButtonLabel = decisionCard?.state === "exit_risk_review" ? "看止损风险步骤" : "看可操作步骤";
   const fallbackActions = `
-    <button class="secondary-action" type="button" data-detail-target="action-step-table">看可操作步骤</button>
+    <button class="secondary-action" type="button" data-detail-target="${escapeHtml(riskTarget)}">${escapeHtml(riskButtonLabel)}</button>
     ${levels.dynamic_stop_loss_price ? `<button class="secondary-action" type="button" data-detail-target="dynamic-stop-loss">看动态止损</button>` : ""}
     ${blockers.length ? `<button class="secondary-action" type="button" data-detail-target="decision-card">看阻断原因</button>` : ""}`;
   return `<div class="sticky-action-bar action-bar-${escapeHtml(statusClass)}">
@@ -2500,7 +2545,7 @@ document.querySelector("#refreshAlert").addEventListener("click", event => {
 document.querySelector("#priorityQueue").addEventListener("click", event => {
   const item = event.target.closest("[data-queue-code]");
   if (!item) return;
-  openDetail(item.dataset.queueCode);
+  openDetail(item.dataset.queueCode, { target: item.dataset.queueTarget });
 });
 document.querySelector("#eventList").addEventListener("click", event => {
   const item = event.target.closest("[data-event-code]");
