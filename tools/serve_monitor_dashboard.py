@@ -37,6 +37,8 @@ API_FILES = {
 }
 PID_FILE = ROOT / "data" / "metadata" / "intraday-monitor.pid"
 EVENT_FILE = ROOT / "data" / "metadata" / "intraday-monitor.events.jsonl"
+FLOW_HISTORY_FILE = ROOT / "data" / "metadata" / "intraday-flow-history.jsonl"
+ARCHIVE_DIR = ROOT / "data" / "metadata" / "intraday-archive"
 
 
 def dashboard_position_paths() -> list[str]:
@@ -80,6 +82,56 @@ def recent_events(limit: int) -> list[dict[str, object]]:
         except json.JSONDecodeError:
             continue
     return list(reversed(events))
+
+
+def recent_flow_history(limit: int) -> dict[str, object]:
+    if FLOW_HISTORY_FILE.exists():
+        lines = FLOW_HISTORY_FILE.read_text(encoding="utf-8").splitlines()[-limit:]
+        samples: list[dict[str, object]] = []
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            generated_at = event.get("generated_at")
+            for sample in event.get("samples", []) if isinstance(event.get("samples"), list) else []:
+                if isinstance(sample, dict):
+                    samples.append({"generated_at": generated_at, **sample})
+        return {"samples": samples}
+
+    paths = sorted(ARCHIVE_DIR.glob("snapshot-*.json"))[-limit:]
+    latest_path = API_FILES["/api/snapshot"]
+    if latest_path.exists():
+        paths.append(latest_path)
+
+    seen: set[str] = set()
+    samples: list[dict[str, object]] = []
+    for path in paths:
+        data = load_json(path, retries=1) or {}
+        generated_at = data.get("generated_at")
+        if not generated_at:
+            continue
+        key = f"{generated_at}:{path}"
+        if key in seen:
+            continue
+        seen.add(key)
+        for item in data.get("items", []) if isinstance(data.get("items"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            quote = item.get("quote") if isinstance(item.get("quote"), dict) else {}
+            flow = item.get("capital_flow") if isinstance(item.get("capital_flow"), dict) else {}
+            samples.append(
+                {
+                    "generated_at": generated_at,
+                    "code": item.get("code"),
+                    "name": item.get("name"),
+                    "latest_price": quote.get("latest_price"),
+                    "high": quote.get("high"),
+                    "main_net_inflow": flow.get("main_net_inflow"),
+                    "main_net_inflow_ratio_pct": flow.get("main_net_inflow_ratio_pct"),
+                }
+            )
+    return {"samples": samples}
 
 
 def market_wait_refresh_status() -> dict[str, object]:
@@ -194,6 +246,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except ValueError:
                 limit = 20
             self.send_json({"events": recent_events(limit)})
+            return
+        if parsed.path == "/api/flow-history":
+            query = parse_qs(parsed.query)
+            try:
+                limit = min(100, max(3, int(query.get("limit", [30])[0])))
+            except ValueError:
+                limit = 30
+            self.send_json(recent_flow_history(limit))
             return
 
         relative = "index.html" if parsed.path in {"", "/"} else parsed.path.lstrip("/")

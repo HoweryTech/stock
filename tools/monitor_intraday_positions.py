@@ -26,6 +26,14 @@ except ModuleNotFoundError:
     from risk_check import as_float, load_yaml, value_at
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def project_path(value: str | Path) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
 def read_close_history(path: Path) -> dict[str, list[dict[str, Any]]]:
     histories: dict[str, list[tuple[str, float]]] = {}
     with path.open("r", encoding="utf-8-sig", newline="") as file:
@@ -91,6 +99,15 @@ def multi_timeframe_metrics(rows: list[dict[str, Any]], current_price: float | N
 
 def floor_to_tick(price: float, tick: float = 0.01) -> float:
     return round(math.floor((price + 1e-9) / tick) * tick, 2)
+
+
+def dynamic_price_zone_width(anchor_price: float | None, *, ratio_pct: float = 0.18, min_ticks: int = 1, max_ticks: int = 6, tick: float = 0.01) -> float:
+    if anchor_price is None or anchor_price <= 0:
+        return round(min_ticks * tick, 2)
+    raw_width = anchor_price * ratio_pct / 100
+    ticks = math.ceil(raw_width / tick)
+    ticks = max(min_ticks, min(max_ticks, ticks))
+    return round(ticks * tick, 2)
 
 
 def trade_costs(
@@ -276,7 +293,7 @@ def build_positive_t_plan(
         }
 
     target_low = round(buy_price * (1 + target_gain_pct / 100), 2)
-    target_high = round(target_low + 0.02, 2)
+    target_high = round(target_low + dynamic_price_zone_width(target_low), 2)
     buy_fees = as_float(value_at(open_leg, "fees.total_fees"), 0.0) or 0.0
     sell_fees = one_side_trade_fees("sell", target_low, shares, costs)
     estimated_net_profit = (target_low - buy_price) * shares - buy_fees - sell_fees["total_fees"]
@@ -545,7 +562,8 @@ def build_reverse_t_plan(
     required_gap_pct = None
     if high is not None:
         sell_zone_high = round(high, 2)
-        sell_zone_low = max(round(high - 0.02, 2), round(open_price or high, 2))
+        sell_zone_width = dynamic_price_zone_width(high)
+        sell_zone_low = max(round(high - sell_zone_width, 2), round(open_price or high, 2))
         viable = fee_viable_trade(sell_zone_low, max_trade_shares, costs, min_gap_pct=min_gap_pct) if max_trade_shares >= 100 else None
         if viable:
             trade_shares = viable["trade_shares"]
@@ -1025,6 +1043,26 @@ def append_event(path: Path, snapshot: dict[str, Any]) -> None:
         file.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
+def append_flow_history(path: Path, snapshot: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "generated_at": snapshot["generated_at"],
+        "samples": [
+            {
+                "code": item.get("code"),
+                "name": item.get("name"),
+                "latest_price": value_at(item, "quote.latest_price"),
+                "high": value_at(item, "quote.high"),
+                "main_net_inflow": value_at(item, "capital_flow.main_net_inflow"),
+                "main_net_inflow_ratio_pct": value_at(item, "capital_flow.main_net_inflow_ratio_pct"),
+            }
+            for item in snapshot.get("items", [])
+        ],
+    }
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+
 def ensure_single_instance(pid_path: Path) -> None:
     if pid_path.exists():
         try:
@@ -1059,6 +1097,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--latest-json", default="data/metadata/intraday-monitor.latest.json")
     parser.add_argument("--latest-markdown", default="reports/intraday-monitor.latest.md")
     parser.add_argument("--event-log", default="data/metadata/intraday-monitor.events.jsonl")
+    parser.add_argument("--flow-history-log", default="data/metadata/intraday-flow-history.jsonl")
     parser.add_argument("--archive-dir", default="data/metadata/intraday-archive")
     parser.add_argument("--pid-file", default="data/metadata/intraday-monitor.pid")
     parser.add_argument("--once", action="store_true")
@@ -1068,7 +1107,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    pid_path = Path(args.pid_file)
+    pid_path = project_path(args.pid_file)
     ensure_single_instance(pid_path)
     stop_event = threading.Event()
 
@@ -1077,8 +1116,9 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
-    paths = expand_position_paths(args.positions)
-    profile_path = Path(args.profile)
+    position_patterns = [str(project_path(pattern)) for pattern in args.positions]
+    paths = expand_position_paths(position_patterns)
+    profile_path = project_path(args.profile)
     profile = load_yaml(profile_path) if profile_path.exists() else {}
     max_position_pct = as_float(value_at(profile, "risk.max_position_pct_per_stock"), args.max_position_pct) or args.max_position_pct
     warning_position_pct = as_float(value_at(profile, "risk.warning_position_pct_per_stock"), args.warning_position_pct)
@@ -1093,10 +1133,11 @@ def main() -> int:
         "minimum_net_profit": minimum_net_profit,
         "verified": args.cost_model_verified,
     }
-    latest_json = Path(args.latest_json)
-    latest_markdown = Path(args.latest_markdown)
-    event_log = Path(args.event_log)
-    archive_dir = Path(args.archive_dir)
+    latest_json = project_path(args.latest_json)
+    latest_markdown = project_path(args.latest_markdown)
+    event_log = project_path(args.event_log)
+    flow_history_log = project_path(args.flow_history_log)
+    archive_dir = project_path(args.archive_dir)
     previous_signature: dict[str, Any] | None = None
     last_archive = 0.0
     iteration = 0
@@ -1106,7 +1147,7 @@ def main() -> int:
             try:
                 snapshot = build_snapshot(
                     paths,
-                    Path(args.daily_bars),
+                    project_path(args.daily_bars),
                     total_assets=args.total_assets,
                     max_stale_seconds=args.max_stale_seconds,
                     costs=costs,
@@ -1117,6 +1158,7 @@ def main() -> int:
                 )
                 write_json(latest_json, snapshot)
                 atomic_write(latest_markdown, render_markdown(snapshot))
+                append_flow_history(flow_history_log, snapshot)
                 signature = state_signature(snapshot)
                 if signature != previous_signature:
                     append_event(event_log, snapshot)

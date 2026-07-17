@@ -163,6 +163,24 @@ class CheckTTradeOpportunityTest(unittest.TestCase):
         self.assertEqual(result["conclusion"], "blocked")
         self.assertTrue(any(item["code"] == "near_stop_loss" for item in result["blockers"]))
 
+    def test_unconfirmed_imported_stop_loss_is_warning_not_hard_blocker(self) -> None:
+        position = copy.deepcopy(self.position)
+        position["strategy"]["source"] = "imported_holding"
+        position["risk"]["stop_loss_price"] = 10.5
+        position["risk"]["observation_items"] = ["止损价采用“当前价下方5%”作为当前存量仓位风险边界，需在下一次人工复核中确认。"]
+        closes = [
+            10.0, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9,
+            11.0, 11.1, 11.2, 11.3, 11.4, 11.2, 11.0, 10.85, 10.75, 10.7,
+        ]
+
+        result = check_t_opportunity(self.profile, position, read_bars(self.write_bars(closes), "600000"))
+        blocker_codes = {item["code"] for item in result["blockers"]}
+        warning_codes = {item["code"] for item in result["warnings"]}
+
+        self.assertNotIn("near_stop_loss", blocker_codes)
+        self.assertIn("unconfirmed_stop_loss_reference", warning_codes)
+        self.assertFalse(result["calculations"]["stop_loss_confirmed"])
+
     def test_uses_profile_near_stop_block_threshold(self) -> None:
         profile = copy.deepcopy(self.profile)
         profile["t_trading"] = {"near_stop_block_pct": 1.0}

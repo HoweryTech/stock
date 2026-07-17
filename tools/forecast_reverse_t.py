@@ -24,6 +24,7 @@ except ModuleNotFoundError:
 
 
 MAX_PREDICTED_BUYBACK_GAP_PCT = 5.0
+BASE_FORECAST_PROBABILITY_THRESHOLD = 60.0
 
 
 def average(values: list[float]) -> float:
@@ -48,6 +49,36 @@ def quantile(values: list[float], level: float) -> float:
     if lower == upper:
         return ordered[lower]
     return ordered[lower] * (upper - index) + ordered[upper] * (index - lower)
+
+
+def probability_thresholds(sample_count: int, neighbor_count: int) -> dict[str, Any]:
+    adjustment = 0.0
+    reasons: list[str] = []
+    if sample_count < 180:
+        adjustment += 6.0
+        reasons.append("样本量不足180，预测门槛上调。")
+    elif sample_count < 260:
+        adjustment += 3.0
+        reasons.append("样本量低于260，预测门槛小幅上调。")
+    elif sample_count >= 500:
+        adjustment -= 3.0
+        reasons.append("样本量超过500，允许小幅降低预警门槛。")
+    if neighbor_count < 30:
+        adjustment += 3.0
+        reasons.append("相似样本少于30，预测门槛上调。")
+    elif neighbor_count >= 80:
+        adjustment -= 1.0
+        reasons.append("相似样本不少于80，门槛小幅放宽。")
+    threshold = round(max(55.0, min(68.0, BASE_FORECAST_PROBABILITY_THRESHOLD + adjustment)), 2)
+    if not reasons:
+        reasons.append("样本量和相似样本数量处于常规区间，使用基础门槛。")
+    return {
+        "minimum_reach_probability_pct": threshold,
+        "minimum_roundtrip_probability_pct": threshold,
+        "base_probability_threshold_pct": BASE_FORECAST_PROBABILITY_THRESHOLD,
+        "adjustment_pct": round(adjustment, 2),
+        "reasons": reasons,
+    }
 
 
 def feature_vector(bars: list[dict[str, Any]], index: int) -> list[float] | None:
@@ -149,9 +180,12 @@ def forecast(code: str, name: str, bars: list[dict[str, Any]], shares: int, cost
     reach_probability = len(reached) / len(nearest) * 100
     roundtrip_probability = len(roundtrips) / len(reached) * 100 if reached else 0
     joint_probability = len(roundtrips) / len(nearest) * 100
-    if reach_probability >= 60 and roundtrip_probability >= 60:
+    thresholds = probability_thresholds(len(samples), len(nearest))
+    reach_threshold = thresholds["minimum_reach_probability_pct"]
+    roundtrip_threshold = thresholds["minimum_roundtrip_probability_pct"]
+    if reach_probability >= reach_threshold and roundtrip_probability >= roundtrip_threshold:
         status, label = "early_warning", "指标预测反T区间预警"
-    elif reach_probability >= 50:
+    elif reach_probability >= max(50.0, reach_threshold - 10.0):
         status, label = "watch", "指标预测区间仍需观察"
     else:
         status, label = "low_probability", "未来30分钟到达概率偏低"
@@ -167,6 +201,7 @@ def forecast(code: str, name: str, bars: list[dict[str, Any]], shares: int, cost
         "estimated_net_profit_at_limit": viable["fees"]["net_profit"],
         "max_buyback_gap_pct": MAX_PREDICTED_BUYBACK_GAP_PCT,
         "sample_count": len(samples), "neighbor_count": len(nearest),
+        "probability_policy": thresholds,
         "indicators": {"model": "nearest_5minute_patterns", "features": ["returns", "range_position", "MACD", "BOLL", "RSI", "volume_ratio", "ATR", "time_of_day"]},
         "execution_allowed": False,
         "note": "概率预测仅用于提前预警；必须同时通过历史回测和实时确认才可进入人工候选。",
@@ -212,7 +247,12 @@ def build_report(position_paths: list[Path], begin: str, end: str, costs: dict[s
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source": "eastmoney_5minute_kline", "items": items, "errors": errors,
-        "policy": {"execution_allowed": False, "horizon_minutes": 30, "minimum_reach_probability_pct": 60, "minimum_roundtrip_probability_pct": 60},
+        "policy": {
+            "execution_allowed": False,
+            "horizon_minutes": 30,
+            "base_probability_threshold_pct": BASE_FORECAST_PROBABILITY_THRESHOLD,
+            "threshold_mode": "dynamic_by_sample_count_and_neighbor_count",
+        },
     }
 
 

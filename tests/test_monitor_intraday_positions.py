@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 
-from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_positive_t_plan, build_reduction_plan, build_reverse_t_plan, build_t_closure_performance, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
+from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_positive_t_plan, build_reduction_plan, build_reverse_t_plan, build_t_closure_performance, dynamic_price_zone_width, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
 
 
 class MonitorIntradayPositionsTest(unittest.TestCase):
@@ -78,14 +78,15 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         )
         self.assertEqual(plan["status"], "candidate")
         self.assertEqual(plan["trade_shares"], 200)
-        self.assertEqual(plan["buyback_max_price"], 3.21)
+        self.assertEqual(plan["sell_zone"], [3.3, 3.31])
+        self.assertEqual(plan["buyback_max_price"], 3.22)
         self.assertGreater(plan["required_gap_pct"], 2.0)
         self.assertGreaterEqual(plan["cost_estimate"]["net_profit"], 5.0)
         self.assertTrue(plan["failure_as_reduction_acceptable"])
         self.assertEqual(plan["blocker_details"], [])
         self.assertIn("可以进入反T人工候选", plan["next_action"])
-        self.assertTrue(any("第1步" in step and "3.29-3.31" in step for step in plan["execution_steps"]))
-        self.assertTrue(any("3.21" in step and "买回同等" in step for step in plan["execution_steps"]))
+        self.assertTrue(any("第1步" in step and "3.30-3.31" in step for step in plan["execution_steps"]))
+        self.assertTrue(any("3.22" in step and "买回同等" in step for step in plan["execution_steps"]))
         self.assertTrue(any("当天最多执行一轮" in step for step in plan["execution_steps"]))
 
     def test_small_position_is_not_suitable_for_reverse_t(self) -> None:
@@ -108,10 +109,14 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
         quote = {"latest_price": 13.66, "open": 12.96, "high": 13.68, "low": 12.7, "change_pct": 4.59}
         plan = build_reverse_t_plan(self.position, quote, stale=False, costs=self.costs, timeframe={"alignment": "insufficient"})
         self.assertEqual(plan["status"], "not_suitable")
-        self.assertEqual(plan["sell_zone"], [13.66, 13.68])
+        self.assertEqual(plan["sell_zone"], [13.65, 13.68])
         self.assertIsNotNone(plan["buyback_max_price"])
         self.assertGreaterEqual(plan["cost_estimate"]["net_profit"], 5.0)
         self.assertTrue(any(blocker["code"] == "timeframe_insufficient" for blocker in plan["blocker_details"]))
+
+    def test_dynamic_price_zone_width_scales_with_anchor_price(self) -> None:
+        self.assertEqual(dynamic_price_zone_width(3.31), 0.01)
+        self.assertEqual(dynamic_price_zone_width(13.68), 0.03)
 
     def test_fee_blocked_reverse_t_explains_missing_buyback(self) -> None:
         quote = {"latest_price": 6.32, "open": 6.2, "high": 6.36, "low": 6.1, "change_pct": 1.5}

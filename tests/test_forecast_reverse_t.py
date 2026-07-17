@@ -1,6 +1,6 @@
 import unittest
 
-from tools.forecast_reverse_t import build_samples, feature_vector, forecast, quantile
+from tools.forecast_reverse_t import build_samples, feature_vector, forecast, probability_thresholds, quantile
 
 
 class ForecastReverseTTest(unittest.TestCase):
@@ -43,6 +43,14 @@ class ForecastReverseTTest(unittest.TestCase):
         self.assertEqual(result["status"], "fee_blocked")
         self.assertIn("predicted_sell_zone", result)
         self.assertIsNone(result["predicted_buyback_max_price"])
+
+    def test_probability_thresholds_tighten_when_samples_are_thin(self):
+        thin = probability_thresholds(150, 20)
+        normal = probability_thresholds(300, 60)
+        rich = probability_thresholds(600, 90)
+
+        self.assertGreater(thin["minimum_reach_probability_pct"], normal["minimum_reach_probability_pct"])
+        self.assertLess(rich["minimum_reach_probability_pct"], normal["minimum_reach_probability_pct"])
 
 
 if __name__ == "__main__":

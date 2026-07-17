@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from datetime import datetime
@@ -93,6 +94,27 @@ def code_from_path(path: str | None) -> str | None:
 
 def rounded(value: float | None) -> float | None:
     return None if value is None else round(value, 4)
+
+
+def dynamic_price_zone_width(anchor_price: float | None, *, ratio_pct: float = 0.18, min_ticks: int = 1, max_ticks: int = 6, tick: float = 0.01) -> float:
+    if anchor_price is None or anchor_price <= 0:
+        return round(min_ticks * tick, 2)
+    raw_width = anchor_price * ratio_pct / 100
+    ticks = math.ceil(raw_width / tick)
+    ticks = max(min_ticks, min(max_ticks, ticks))
+    return round(ticks * tick, 2)
+
+
+def positive_t_score_threshold(confirmation_count: int, technical_operation: dict[str, Any]) -> float:
+    threshold = POSITIVE_T_SCORE_THRESHOLD
+    tier = str(technical_operation.get("tier") or "")
+    if tier == "watch_candidate" and confirmation_count >= 3:
+        threshold -= 3.0
+    elif tier in {"not_available", "observe_only"}:
+        threshold += 3.0
+    if confirmation_count < 2:
+        threshold += 3.0
+    return round(max(60.0, min(72.0, threshold)), 1)
 
 
 def item_code(item: dict[str, Any], *paths: str) -> str | None:
@@ -1140,16 +1162,18 @@ def build_positive_timing(
         buy_low_candidates.append(recent_low)
     buy_low = min(buy_high, max(buy_low_candidates))
     target_low = max(current, buy_high * 1.012)
-    status = "confirmed" if score >= POSITIVE_T_SCORE_THRESHOLD and confirmation_count >= 2 and technical_supported else "watch"
+    threshold = positive_t_score_threshold(confirmation_count, technical_operation)
+    target_high = target_low + dynamic_price_zone_width(target_low)
+    status = "confirmed" if score >= threshold and confirmation_count >= 2 and technical_supported else "watch"
     blockers: list[dict[str, str]] = []
-    if score < POSITIVE_T_SCORE_THRESHOLD:
+    if score < threshold:
         blockers.append(
             positive_t_blocker(
                 "score_below_threshold",
                 "分时评分",
-                f"{score:.1f} / {POSITIVE_T_SCORE_THRESHOLD}",
+                f"{score:.1f} / {threshold}",
                 "分时趋势、回踩幅度、动能、量能和资金流的综合分还没有达到买入确认线。",
-                f"继续观察，只有评分达到 {POSITIVE_T_SCORE_THRESHOLD:.0f} 分及以上才允许进入正T买入区间。",
+                f"继续观察，只有评分达到动态确认线 {threshold:.0f} 分及以上才允许进入正T买入区间。",
             )
         )
     if confirmation_count < 2:
@@ -1180,10 +1204,11 @@ def build_positive_timing(
         "available": True,
         "status": status,
         "score": rounded(score),
-        "threshold": POSITIVE_T_SCORE_THRESHOLD,
+        "threshold": threshold,
+        "base_threshold": POSITIVE_T_SCORE_THRESHOLD,
         "latest_timestamp": day_bars[-1].get("timestamp"),
         "buy_zone": [rounded(buy_low), rounded(buy_high)] if status == "confirmed" else None,
-        "target_sell_zone": [rounded(target_low), rounded(target_low + 0.02)] if status == "confirmed" else None,
+        "target_sell_zone": [rounded(target_low), rounded(target_high)] if status == "confirmed" else None,
         "signals": signals[:8],
         "blockers": blockers,
         "next_action": next_action,
@@ -1200,6 +1225,7 @@ def build_positive_timing(
             "bullish_volume_candle": bullish_volume_candle,
             "flow_confirmed": flow_confirmed,
             "confirmation_count": confirmation_count,
+            "dynamic_score_threshold": threshold,
             "technical_label": technical_label or None,
             "technical_supported": technical_supported,
             "technical_operation_tier": technical_operation.get("tier"),
@@ -1276,11 +1302,12 @@ def price_levels(
     calculations = (portfolio or {}).get("calculations", {})
     t_calculations = (t_check or {}).get("calculations", {})
     stop_loss = as_float(calculations.get("stop_loss_price"))
+    stop_loss_confirmed = bool(calculations.get("stop_loss_confirmed", stop_loss is not None))
     warning_pct = as_float(calculations.get("near_stop_warning_pct"), 3.0) or 3.0
     block_pct = as_float(t_calculations.get("near_stop_block_pct"), 1.0) or 1.0
     near_warning_price = None
     near_block_price = None
-    if stop_loss is not None:
+    if stop_loss is not None and stop_loss_confirmed:
         near_warning_price = stop_loss / (1 - warning_pct / 100)
         near_block_price = stop_loss / (1 - block_pct / 100)
     forecast_sell_zone = value_at(reverse_forecast or {}, "predicted_sell_zone")
@@ -1301,6 +1328,7 @@ def price_levels(
     return {
         "current_price": rounded(as_float(value_at(intraday, "quote.latest_price"))),
         "stop_loss_price": rounded(stop_loss),
+        "stop_loss_confirmed": stop_loss_confirmed,
         "near_stop_warning_price": rounded(near_warning_price),
         "near_stop_block_price": rounded(near_block_price),
         "ma5": rounded(as_float(value_at(intraday, "technicals.ma5") or t_calculations.get("ma_short"))),
@@ -1721,7 +1749,7 @@ def build_capital_plan(
         added_risk_pct = added_risk / float(total_assets) * 100 if added_risk is not None else None
     post_add_pct = current_position_pct + ((estimated_buy_amount or 0.0) / float(total_assets) * 100)
     target_low = max(current, buy_zone_high * (1 + policy["min_target_gap_pct"] / 100))
-    target_high = target_low + 0.02
+    target_high = target_low + dynamic_price_zone_width(target_low)
     if isinstance(timing_target_zone, list) and len(timing_target_zone) == 2:
         target_low = as_float(timing_target_zone[0], target_low) or target_low
         target_high = as_float(timing_target_zone[1], target_high) or target_high
@@ -1783,6 +1811,7 @@ def build_action_steps(
 ) -> list[str]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
+    stop_loss_confirmed = bool(levels.get("stop_loss_confirmed", stop_loss is not None))
     near_block = as_float(levels.get("near_stop_block_price"))
     shares = whole_lot_shares((position or {}).get("shares"))
     entry_price = as_float((position or {}).get("entry_price"))
@@ -1964,6 +1993,7 @@ def build_price_action_table(
 ) -> dict[str, Any]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
+    stop_loss_confirmed = bool(levels.get("stop_loss_confirmed", stop_loss is not None))
     near_block = as_float(levels.get("near_stop_block_price"))
     position = intraday.get("position") or {}
     shares = whole_lot_shares(position.get("shares"))
@@ -1986,7 +2016,7 @@ def build_price_action_table(
         )
     )
 
-    if stop_loss is not None:
+    if stop_loss is not None and stop_loss_confirmed:
         stop_ready = current is not None and current <= stop_loss
         rows.append(
             action_table_row(
@@ -1999,6 +2029,20 @@ def build_price_action_table(
                 shares=shares,
                 note="触发后优先处理退出风险；禁止补仓、禁止做T摊低成本。",
                 priority=price_action_priority("止损/退出", "ready" if stop_ready else "watch"),
+            )
+        )
+    elif stop_loss is not None:
+        rows.append(
+            action_table_row(
+                "止损复核",
+                f"参考价 {stop_loss:.2f} 未确认",
+                f"{stop_loss:.2f} 元",
+                "人工复核，不直接卖出",
+                status="watch",
+                status_label="未确认",
+                shares=None,
+                note="该止损价来自导入草案，不能作为硬退出触发；先重新确认有效止损或持有逻辑。",
+                priority=45,
             )
         )
 

@@ -41,7 +41,7 @@ def portfolio_result(code: str = "600000", *, actions=None, warnings=None) -> di
     }
 
 
-def t_result(code: str = "600000", *, conclusion: str = "watch_only", blockers=None) -> dict:
+def t_result(code: str = "600000", *, conclusion: str = "watch_only", blockers=None, warnings=None) -> dict:
     return {
         "items": [
             {
@@ -52,7 +52,7 @@ def t_result(code: str = "600000", *, conclusion: str = "watch_only", blockers=N
                     "market_setup": "positive_t_candidate" if conclusion == "positive_t_candidate" else "no_clear_t_setup",
                     "conclusion": conclusion,
                     "blockers": blockers or [],
-                    "warnings": [],
+                    "warnings": warnings or [],
                     "calculations": {
                         "latest_close": 10.0,
                         "ma_short": 9.9,
@@ -177,6 +177,30 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("成交后的下一步计划" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("做T阻断价" in step for step in card["decision"]["action_steps"]))
         self.assertIn("距离止损不足1%。", card["blockers"])
+
+    def test_unconfirmed_imported_stop_reference_does_not_take_exit_priority(self) -> None:
+        portfolio = portfolio_result()
+        result = portfolio["positions"][0]["result"]
+        result["warnings"] = [{"code": "unconfirmed_stop_loss_reference", "message": "导入草案止损未确认。"}]
+        result["calculations"]["stop_loss_price"] = 10.5
+        result["calculations"]["stop_loss_confirmed"] = False
+        report = build_report(
+            {"items": [intraday_item()]},
+            portfolio,
+            t_result(warnings=[{"code": "unconfirmed_stop_loss_reference", "message": "导入草案止损未确认。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            None,
+            generated_at=datetime(2026, 7, 16, 9, 30, 0),
+        )
+
+        card = report["cards"][0]
+        actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+
+        self.assertNotEqual(card["state"], "exit_risk_review")
+        self.assertIn("止损复核", actions)
+        self.assertNotIn("止损/退出", actions)
+        self.assertEqual(actions["止损复核"]["status_label"], "未确认")
 
     def test_positive_t_candidate_is_watch_only(self) -> None:
         item = intraday_item()

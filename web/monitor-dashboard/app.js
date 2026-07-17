@@ -7,6 +7,7 @@ const state = {
   decisionReport: null,
   refreshCheck: null,
   events: [],
+  flowHistory: new Map(),
   filter: "all",
   search: "",
   selectedCode: null,
@@ -39,6 +40,71 @@ const compactMoney = value => {
 };
 const tone = value => Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "";
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
+
+function linearSlope(values) {
+  const n = values.length;
+  if (n < 2) return 0;
+  const meanX = (n - 1) / 2;
+  const meanY = values.reduce((sum, value) => sum + value, 0) / n;
+  let numerator = 0;
+  let denominator = 0;
+  values.forEach((value, index) => {
+    numerator += (index - meanX) * (value - meanY);
+    denominator += (index - meanX) ** 2;
+  });
+  return denominator ? numerator / denominator : 0;
+}
+
+function flowTrendFor(code) {
+  const samples = (state.flowHistory.get(code) || [])
+    .filter(sample => Number.isFinite(Number(sample.main_net_inflow_ratio_pct)))
+    .slice(-6);
+  if (samples.length < 3) {
+    return {available: false, retreating: false, label: "主力净流入历史样本不足。"};
+  }
+  const values = samples.map(sample => Number(sample.main_net_inflow_ratio_pct));
+  const latest = values.at(-1);
+  const peak = Math.max(...values);
+  const slope = linearSlope(values);
+  const downSteps = values.slice(1).filter((value, index) => value < values[index]).length;
+  const relativeDropPct = peak === 0 ? 0 : ((peak - latest) / Math.max(Math.abs(peak), 1)) * 100;
+  const retreating = latest < peak && slope < -0.15 && downSteps >= Math.ceil((values.length - 1) * 0.5) && relativeDropPct >= 15;
+  return {
+    available: true,
+    retreating,
+    latest,
+    peak,
+    slope,
+    downSteps,
+    sampleCount: values.length,
+    relativeDropPct,
+    label: retreating
+      ? `主力净流入从阶段高点${pct(peak)}回落到${pct(latest)}，斜率${slope.toFixed(2)}个百分点/样本。`
+      : `主力净流入${pct(latest)}，近${values.length}个样本尚未形成稳定回落。`,
+  };
+}
+
+function pricePullbackFor(item) {
+  const latest = Number(item.quote?.latest_price);
+  const high = Number(item.quote?.high);
+  const zone = item.reverse_t_plan?.sell_zone || [];
+  if (!Number.isFinite(latest) || !Number.isFinite(high) || high <= 0) {
+    return {confirmed: false, label: "价格样本不足，无法判断高位回落。"};
+  }
+  const zoneLow = Number(zone[0]);
+  const zoneHigh = Number(zone[1]);
+  const zoneWidthPct = Number.isFinite(zoneLow) && Number.isFinite(zoneHigh) && zoneHigh > 0
+    ? Math.max(0, ((zoneHigh - zoneLow) / zoneHigh) * 100)
+    : 0;
+  const pullbackPct = ((high - latest) / high) * 100;
+  const requiredPct = Math.max(0.08, zoneWidthPct * 0.5);
+  return {
+    confirmed: latest < high && pullbackPct >= requiredPct,
+    pullbackPct,
+    requiredPct,
+    label: `高点回落${pct(pullbackPct)}，动态确认线${pct(requiredPct)}。`,
+  };
+}
 
 const technicalLabels = {
   bullish: "技术偏多",
@@ -234,9 +300,11 @@ function automaticDecisionFor(item) {
     const latest = Number(item.quote.latest_price);
     const mainFlow = Number(item.capital_flow?.main_net_inflow_ratio_pct);
     const inZone = reverse.sell_zone && latest >= Number(reverse.sell_zone[0]) && latest <= Number(reverse.sell_zone[1]);
-    const turnedDown = reverse.sell_zone && latest <= Number(reverse.sell_zone[1]) - 0.01;
+    const pullback = pricePullbackFor(item);
+    const flowTrend = flowTrendFor(item.code);
     const flowConfirmed = Number.isFinite(mainFlow) && mainFlow <= 3;
-    const executionTriggered = reduction.position_limit_verified && inZone && turnedDown && flowConfirmed && item.state !== "data_stale";
+    const flowEasing = Number.isFinite(mainFlow) && mainFlow <= 6 && flowTrend.retreating;
+    const executionTriggered = reduction.position_limit_verified && inZone && pullback.confirmed && (flowConfirmed || flowEasing) && item.state !== "data_stale";
     if (!reduction.position_limit_verified) {
       return {
         level: "禁止执行",
@@ -250,17 +318,17 @@ function automaticDecisionFor(item) {
         level: "执行信号",
         headline: "现在执行第一笔减仓100股",
         action: `以不低于${num(reverse.sell_zone[0])}元的限价卖出100股，本信号仅在当前监控周期有效；成交后不回补。`,
-        reasons: [`价格已进入${zone}并从高点回落。`, `主力净流入占比${pct(mainFlow)}，已低于3%确认线。`, `总目标仍为累计减仓${reduction.minimum_reduction_shares}股。`],
+        reasons: [`价格已进入${zone}，${pullback.label}`, flowConfirmed ? `主力净流入占比${pct(mainFlow)}，已低于3%确认线。` : flowTrend.label, `总目标仍为累计减仓${reduction.minimum_reduction_shares}股。`],
       };
     }
     const unmetConditions = [];
     if (!inZone) unmetConditions.push(`现价${num(latest)}元尚未进入${zone}。`);
-    if (inZone && !turnedDown) unmetConditions.push(`现价仍在当日高点附近，尚未从区间高点回落至少0.01元。`);
-    if (!flowConfirmed) unmetConditions.push(`主力净流入占比${pct(mainFlow)}，尚未降至3%以下。`);
+    if (inZone && !pullback.confirmed) unmetConditions.push(`现价仍在当日高点附近，${pullback.label}`);
+    if (!flowConfirmed && !flowEasing) unmetConditions.push(`${flowTrend.label} 3%-6%区间内只有形成相对回落才放行，6%以上视为强拉升。`);
     return {
       level: "待触发计划",
       headline: `减仓计划待触发：目标${reduction.minimum_reduction_shares}股`,
-      action: `当前不卖。价格进入${zone}并从高点回落、主力净流入占比降至3%以下时，才触发第一笔卖出100股；减仓成交后不回补。`,
+      action: `当前不卖。价格进入${zone}后，需要价格相对高点回落，并且主力净流入低于3%或在3%-6%区间形成连续回落；减仓成交后不回补。`,
       reasons: [...unmetConditions, `完成后预计剩余${reduction.remaining_shares}股，仓位约${pct(reduction.post_reduction_position_pct)}。`, ...(flags.map(flag => flag.message))],
     };
   }
@@ -1397,16 +1465,23 @@ function openDetail(code, options = {}) {
   const reverseAudit = item.reverse_t_plan;
   if (reverseAudit?.sell_zone && item.quote.high && item.quote.latest_price) {
     const pullbackFromHigh = (Number(item.quote.high) - Number(item.quote.latest_price)) / Number(item.quote.high) * 100;
+    const pullback = pricePullbackFor(item);
+    const flowTrend = flowTrendFor(item.code);
+    const mainFlow = Number(item.capital_flow?.main_net_inflow_ratio_pct);
+    const flowWeak = Number.isFinite(mainFlow) && mainFlow <= 3;
+    const flowEasing = Number.isFinite(mainFlow) && mainFlow <= 6 && flowTrend.retreating;
     const leftSellZone = Number(item.quote.latest_price) < Number(reverseAudit.sell_zone[0]);
     const auditReasons = [];
-    if (Number(item.capital_flow?.main_net_inflow_ratio_pct) >= 3) auditReasons.push(`主力净流入占比${pct(item.capital_flow.main_net_inflow_ratio_pct)}高于3%转弱线。`);
+    if (!flowWeak && !flowEasing) auditReasons.push(`${flowTrend.label} 3%-6%区间内需要相对回落确认，6%以上仍视为强拉升。`);
     if (!backtest || backtest.verdict !== "rule_observation_only") auditReasons.push(backtest?.verdict_label || "尚无通过门禁的回测结果。");
     if (leftSellZone) auditReasons.push(`现价已低于卖出观察区下限${num(reverseAudit.sell_zone[0])}元，当前卖点已经过去。`);
     if (reverseAudit.buyback_max_price != null && Number(item.quote.latest_price) > Number(reverseAudit.buyback_max_price)) auditReasons.push(`现价尚未降至参考回补上限${num(reverseAudit.buyback_max_price)}元。`);
-    const auditStatus = pullbackFromHigh >= 0.5 ? "已检测到冲高回落" : "尚未形成明显高点回落";
+    const auditStatus = pullback.confirmed ? "已检测到动态高点回落" : "尚未形成动态高点回落";
     const auditMetrics = [
       ["当日最高", money(item.quote.high)], ["当前价格", money(item.quote.latest_price)],
-      ["高点回落", pct(pullbackFromHigh)], ["卖出观察区", `${num(reverseAudit.sell_zone[0])}–${num(reverseAudit.sell_zone[1])}元`],
+      ["高点回落", pct(pullbackFromHigh)], ["动态回落确认线", pct(pullback.requiredPct)],
+      ["主力净流入占比", pct(mainFlow)], ["资金流趋势", flowWeak ? "低于3%确认" : flowEasing ? "3%-6%相对回落" : "未确认转弱"],
+      ["卖出观察区", `${num(reverseAudit.sell_zone[0])}–${num(reverseAudit.sell_zone[1])}元`],
     ];
     html += detailSection("反T机会审计", `<p><strong>${auditStatus}</strong></p><div class="metric-grid">${auditMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>${auditReasons.length ? `<h4>未发出执行提醒的原因</h4><ul class="reason-list">${auditReasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`);
   }
@@ -1603,7 +1678,7 @@ async function loadData() {
         return fallback;
       }
     };
-    const [snapshot, research, backtests, forecasts, decisionCards, refreshCheck, status, events] = await Promise.all([
+    const [snapshot, research, backtests, forecasts, decisionCards, refreshCheck, status, events, flowHistory] = await Promise.all([
       fetchJson("/api/snapshot", null, true),
       fetchJson("/api/research", { items: [] }),
       fetchJson("/api/reverse-t-backtest", { items: [] }),
@@ -1612,6 +1687,7 @@ async function loadData() {
       fetchJson("/api/market-wait-refresh", null),
       fetchJson("/api/status", { running: false }),
       fetchJson("/api/events?limit=20", { events: [] }),
+      fetchJson("/api/flow-history?limit=30", { samples: [] }),
     ]);
     state.snapshot = snapshot;
     state.research = new Map((research.items || []).map(item => [item.code, item]));
@@ -1621,6 +1697,13 @@ async function loadData() {
     state.decisionCards = new Map((decisionCards.cards || []).map(card => [card.code, card]));
     state.refreshCheck = refreshCheck;
     state.events = events.events || [];
+    state.flowHistory = new Map();
+    (flowHistory.samples || []).forEach(sample => {
+      if (!sample.code) return;
+      const list = state.flowHistory.get(sample.code) || [];
+      list.push(sample);
+      state.flowHistory.set(sample.code, list);
+    });
     updateHeader(status);
     renderRefreshAlert();
     renderSummary();

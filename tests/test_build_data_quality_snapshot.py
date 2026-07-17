@@ -6,7 +6,7 @@ from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
 
-from tools.build_data_quality_snapshot import build_report, classify_market_session, render_markdown
+from tools.build_data_quality_snapshot import build_report, classify_market_session, dynamic_consistency_diff_pct, render_markdown
 from tools.new_trade_plan import write_yaml
 
 
@@ -248,6 +248,10 @@ class DataQualitySnapshotTest(unittest.TestCase):
         self.assertEqual(item["source_consistency"]["status"], "conflict")
         self.assertEqual(item["data_trust"]["level"], "low")
         self.assertIn("一致性", item["data_trust"]["reasons"][0])
+
+    def test_dynamic_consistency_threshold_allows_more_tick_noise_for_low_price_names(self) -> None:
+        self.assertEqual(dynamic_consistency_diff_pct(3.0, 3.04, 1.0), 1.4)
+        self.assertEqual(dynamic_consistency_diff_pct(60.0, 60.5, 1.0), 0.8)
 
 
 if __name__ == "__main__":

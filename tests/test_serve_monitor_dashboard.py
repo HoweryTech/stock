@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.serve_monitor_dashboard import API_FILES, dashboard_position_paths, handle_manual_trade, load_json, market_wait_refresh_status, monitor_status, recent_events
+from tools.serve_monitor_dashboard import API_FILES, dashboard_position_paths, handle_manual_trade, load_json, market_wait_refresh_status, monitor_status, recent_events, recent_flow_history
 
 
 class ServeMonitorDashboardTest(unittest.TestCase):
@@ -17,6 +17,39 @@ class ServeMonitorDashboardTest(unittest.TestCase):
 
         with patch("tools.serve_monitor_dashboard.EVENT_FILE", FakePath()):
             self.assertEqual([item["id"] for item in recent_events(2)], [2, 1])
+
+    def test_recent_flow_history_reads_archives_and_latest(self) -> None:
+        class FakeArchiveDir:
+            def glob(self, pattern):
+                return [Path("/tmp/snapshot-1.json")]
+
+        def fake_load_json(path, retries=3, delay=0.05):
+            return {
+                "generated_at": "2026-07-17T09:30:00+08:00",
+                "items": [
+                    {
+                        "code": "000001",
+                        "name": "测试股",
+                        "quote": {"latest_price": 10.0, "high": 10.2},
+                        "capital_flow": {"main_net_inflow": 1000, "main_net_inflow_ratio_pct": 5.5},
+                    }
+                ],
+            }
+
+        class ExistingLatest:
+            def exists(self):
+                return False
+
+        with (
+            patch("tools.serve_monitor_dashboard.FLOW_HISTORY_FILE", ExistingLatest()),
+            patch("tools.serve_monitor_dashboard.ARCHIVE_DIR", FakeArchiveDir()),
+            patch("tools.serve_monitor_dashboard.API_FILES", {**API_FILES, "/api/snapshot": ExistingLatest()}),
+            patch("tools.serve_monitor_dashboard.load_json", side_effect=fake_load_json),
+        ):
+            report = recent_flow_history(10)
+
+        self.assertEqual(report["samples"][0]["code"], "000001")
+        self.assertEqual(report["samples"][0]["main_net_inflow_ratio_pct"], 5.5)
 
     def test_monitor_status_without_pid(self) -> None:
         class MissingPath:

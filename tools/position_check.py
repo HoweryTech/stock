@@ -28,6 +28,12 @@ def validate_position(profile: dict[str, Any], position: dict[str, Any], near_st
     current_price = as_float(value_at(position, "tracking.current_price"))
     entry_price = as_float(value_at(position, "entry.entry_price"))
     stop_loss_price = as_float(value_at(position, "risk.stop_loss_price"))
+    stop_loss_confirmed = bool(value_at(position, "risk.stop_loss_confirmed"))
+    imported_draft_stop = (
+        value_at(position, "strategy.source") == "imported_holding"
+        and any("需在下一次人工复核中确认" in str(item) for item in value_at(position, "risk.observation_items") or [])
+    )
+    hard_stop_loss = stop_loss_price is not None and (stop_loss_confirmed or not imported_draft_stop)
     position_pct = as_float(value_at(position, "entry.position_pct_of_total_assets"))
     industry_pct = as_float(value_at(position, "portfolio_context.industry_position_pct"), position_pct)
     total_pct = as_float(value_at(position, "portfolio_context.total_position_pct"), position_pct)
@@ -42,7 +48,9 @@ def validate_position(profile: dict[str, Any], position: dict[str, Any], near_st
         info.append(CheckItem("missing_observation_items", "持仓缺少观察项。"))
 
     distance_to_stop_pct = None
-    if current_price is not None and stop_loss_price is not None:
+    if current_price is not None and stop_loss_price is not None and not hard_stop_loss:
+        warnings.append(CheckItem("unconfirmed_stop_loss_reference", f"止损价 {stop_loss_price:.2f} 只是导入草案参考，未人工确认，不能作为硬退出触发。"))
+    elif current_price is not None and hard_stop_loss:
         if current_price <= stop_loss_price:
             actions.append(
                 CheckItem(
@@ -99,6 +107,7 @@ def validate_position(profile: dict[str, Any], position: dict[str, Any], near_st
             "entry_price": entry_price,
             "current_price": current_price,
             "stop_loss_price": stop_loss_price,
+            "stop_loss_confirmed": hard_stop_loss,
             "distance_to_stop_pct": distance_to_stop_pct,
             "near_stop_warning_pct": effective_near_stop_pct,
             "position_pct_of_total_assets": position_pct,

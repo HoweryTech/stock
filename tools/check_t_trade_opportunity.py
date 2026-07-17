@@ -143,6 +143,12 @@ def check_t_opportunity(
 
     latest_close = as_float(metrics.get("latest_close"))
     stop_loss_price = as_float(value_at(position, "risk.stop_loss_price"))
+    stop_loss_confirmed = bool(value_at(position, "risk.stop_loss_confirmed"))
+    imported_draft_stop = (
+        value_at(position, "strategy.source") == "imported_holding"
+        and any("需在下一次人工复核中确认" in str(item) for item in value_at(position, "risk.observation_items") or [])
+    )
+    hard_stop_loss = stop_loss_price is not None and (stop_loss_confirmed or not imported_draft_stop)
     position_pct = as_float(value_at(position, "entry.position_pct_of_total_assets"), 0.0) or 0.0
     current_price = as_float(value_at(position, "tracking.current_price"))
     max_stock_pct = as_float(value_at(profile, "risk.max_position_pct_per_stock"), 100.0) or 100.0
@@ -159,7 +165,9 @@ def check_t_opportunity(
         warnings.append(CheckItem("limit_up", "最新交易日涨停，正T买入腿不应追价。"))
 
     distance_to_stop_pct = None
-    if latest_close is not None and stop_loss_price is not None:
+    if latest_close is not None and stop_loss_price is not None and not hard_stop_loss:
+        warnings.append(CheckItem("unconfirmed_stop_loss_reference", f"止损价 {stop_loss_price:.2f} 只是导入草案参考，未人工确认；不作为硬止损，但禁止用补仓或做T替代复核。"))
+    elif latest_close is not None and hard_stop_loss:
         if latest_close <= stop_loss_price:
             blockers.append(CheckItem("stop_loss_triggered", f"最新收盘价 {latest_close:.2f} 已触发止损价 {stop_loss_price:.2f}，不做T。"))
         else:
@@ -236,6 +244,7 @@ def check_t_opportunity(
 
     metrics["distance_to_stop_pct"] = distance_to_stop_pct
     metrics["near_stop_block_pct"] = effective_near_stop_pct
+    metrics["stop_loss_confirmed"] = hard_stop_loss
     metrics["bars_count"] = len(bars)
 
     return {

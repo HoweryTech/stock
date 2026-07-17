@@ -249,6 +249,22 @@ def price_diff_pct(base: float | None, other: float | None) -> float | None:
     return (other / base - 1) * 100
 
 
+def dynamic_consistency_diff_pct(reference_price: float | None, quote_price: float | None, base_pct: float) -> float:
+    prices = [price for price in (reference_price, quote_price) if price is not None and price > 0]
+    anchor = min(prices) if prices else None
+    if anchor is None:
+        return round(base_pct, 4)
+    if anchor < 5:
+        adjustment = 0.4
+    elif anchor < 10:
+        adjustment = 0.2
+    elif anchor >= 50:
+        adjustment = -0.2
+    else:
+        adjustment = 0.0
+    return round(max(0.6, min(2.0, base_pct + adjustment)), 4)
+
+
 def date_part(value: str | None) -> str | None:
     if not value:
         return None
@@ -277,8 +293,9 @@ def source_consistency(quote: dict[str, Any], daily: dict[str, Any], minute: dic
             }
         )
     else:
-        minute_status = "pass" if abs(minute_diff or 0.0) <= max_diff_pct else "conflict"
-        message = f"东方财富现价与分钟线最新收盘价差 {minute_diff:.2f}%。"
+        minute_threshold = dynamic_consistency_diff_pct(minute_close, quote_price, max_diff_pct)
+        minute_status = "pass" if abs(minute_diff or 0.0) <= minute_threshold else "conflict"
+        message = f"东方财富现价与分钟线最新收盘价差 {minute_diff:.2f}%，动态容忍 {minute_threshold:.2f}%。"
         checks.append(
             {
                 "source": "minute",
@@ -287,6 +304,7 @@ def source_consistency(quote: dict[str, Any], daily: dict[str, Any], minute: dic
                 "reference_price": minute_close,
                 "reference_timestamp": minute.get("latest_timestamp"),
                 "diff_pct": round(minute_diff or 0.0, 4),
+                "allowed_diff_pct": minute_threshold,
                 "message": message,
             }
         )
@@ -317,8 +335,9 @@ def source_consistency(quote: dict[str, Any], daily: dict[str, Any], minute: dic
             }
         )
     else:
-        daily_status = "pass" if abs(daily_diff or 0.0) <= max_diff_pct else "conflict"
-        message = f"东方财富现价与日线最新收盘价差 {daily_diff:.2f}%。"
+        daily_threshold = dynamic_consistency_diff_pct(daily_close, quote_price, max_diff_pct)
+        daily_status = "pass" if abs(daily_diff or 0.0) <= daily_threshold else "conflict"
+        message = f"东方财富现价与日线最新收盘价差 {daily_diff:.2f}%，动态容忍 {daily_threshold:.2f}%。"
         checks.append(
             {
                 "source": "daily",
@@ -327,6 +346,7 @@ def source_consistency(quote: dict[str, Any], daily: dict[str, Any], minute: dic
                 "reference_price": daily_close,
                 "reference_date": daily_date,
                 "diff_pct": round(daily_diff or 0.0, 4),
+                "allowed_diff_pct": daily_threshold,
                 "message": message,
             }
         )
