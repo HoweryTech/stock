@@ -377,7 +377,8 @@ th:nth-child(8) { width: 100px; }
 .detail-section-manual-trade,
 .detail-section-manual-execution-plan,
 .detail-section-reverse-t-plan,
-.detail-section-positive-t-plan { border-left-color: var(--amber); background: linear-gradient(90deg, rgba(255, 248, 230, 0.82), rgba(255, 255, 255, 0)); }
+.detail-section-positive-t-plan,
+.detail-section-dynamic-stop-loss { border-left-color: var(--amber); background: linear-gradient(90deg, rgba(255, 248, 230, 0.82), rgba(255, 255, 255, 0)); }
 .detail-section-technical-assessment,
 .detail-section-data-quality,
 .detail-section-realtime-status { border-left-color: var(--green); background: linear-gradient(90deg, rgba(232, 246, 237, 0.72), rgba(255, 255, 255, 0)); }
@@ -438,6 +439,37 @@ th:nth-child(8) { width: 100px; }
 .action-panel-title { margin-bottom: 7px; font-size: 12px; color: var(--muted); font-weight: 700; }
 .action-panel p { margin: 0 0 8px; }
 .action-panel .reason-list { padding-left: 20px; }
+.stop-loss-summary {
+  margin-bottom: 12px;
+  padding: 11px 12px;
+  border: 1px solid #e2bd58;
+  border-left: 4px solid var(--amber);
+  border-radius: 6px;
+  background: var(--amber-bg);
+}
+.stop-loss-summary span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.stop-loss-summary strong { display: block; line-height: 1.4; }
+.stop-loss-summary p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.stop-candidate-list { display: grid; gap: 8px; }
+.stop-candidate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, auto);
+  gap: 6px 12px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line-strong);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.stop-candidate-selected { border-left-color: var(--amber); background: rgba(255, 246, 221, 0.72); }
+.stop-candidate > div:first-child { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.stop-candidate strong { line-height: 1.35; }
+.stop-candidate span { padding: 2px 7px; border-radius: 4px; color: var(--muted); background: #eef1f4; font-size: 12px; font-weight: 700; }
+.stop-candidate-selected span { color: var(--amber); background: var(--amber-bg); }
+.stop-candidate dl { margin: 0; text-align: right; }
+.stop-candidate dt { color: var(--muted); font-size: 11px; }
+.stop-candidate dd { margin: 2px 0 0; font-weight: 800; font-variant-numeric: tabular-nums; }
+.stop-candidate p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .reverse-plan-summary {
   margin-bottom: 12px;
   padding: 11px 12px;

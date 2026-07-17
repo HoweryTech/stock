@@ -640,6 +640,7 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
   const readingOrder = [
     ["先看执行分层", "execution-layers"],
     ["再看结论", "decision-card"],
+    ["再看动态止损", "dynamic-stop-loss"],
     ["再看价格动作表", "price-action-table"],
     ["需要成交才看手工更新", "manual-trade"],
     ["想知道为什么再看技术/数据", "technical-assessment"],
@@ -883,6 +884,61 @@ function renderReverseTForecastSection(forecast, decisionCard) {
 
 function metricGrid(metrics) {
   return `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>`;
+}
+
+function stopLossSourceLabel(source) {
+  return {
+    draft_or_confirmed: "持仓草案/已确认止损",
+    entry_risk_budget: "成本风险预算",
+    ma20_buffer: "20日均线缓冲",
+    recent_low_buffer: "近期低点缓冲",
+    atr_buffer: "ATR波动缓冲",
+  }[source] || source || "--";
+}
+
+function renderDynamicStopLossSection(decisionCard) {
+  const levels = decisionCard?.price_levels || {};
+  const candidates = levels.dynamic_stop_loss_candidates || [];
+  if (!levels.dynamic_stop_loss_price && !levels.stop_loss_price && !candidates.length) return "";
+  const selectedPrice = Number(levels.dynamic_stop_loss_price);
+  const selectedSource = levels.dynamic_stop_loss_source;
+  const confirmed = Boolean(levels.stop_loss_confirmed);
+  const candidateRows = candidates.length ? candidates.map(candidate => {
+    const price = Number(candidate.price);
+    const selected = Number.isFinite(price) && Number.isFinite(selectedPrice) && Math.abs(price - selectedPrice) < 0.005 && candidate.source === selectedSource;
+    return `<div class="stop-candidate${selected ? " stop-candidate-selected" : ""}">
+      <div>
+        <strong>${escapeHtml(stopLossSourceLabel(candidate.source))}</strong>
+        <span>${selected ? "当前采用" : "候选"}</span>
+      </div>
+      <dl><dt>价格</dt><dd>${money(candidate.price)}</dd></dl>
+      <p>${escapeHtml(candidate.reason || "")}</p>
+    </div>`;
+  }).join("") : `<p class="secondary">当前没有足够数据生成候选价。</p>`;
+  const metrics = [
+    ["动态复核价", money(levels.dynamic_stop_loss_price)],
+    ["采用来源", stopLossSourceLabel(selectedSource)],
+    ["止损草案价", money(levels.stop_loss_price)],
+    ["确认状态", confirmed ? "已确认，可作为硬风控" : "未确认，仅作风险复核"],
+    ["当前价", money(levels.current_price)],
+    ["20日均线", money(levels.ma20)],
+    ["近期低点", money(levels.recent_low)],
+  ];
+  const message = confirmed
+    ? "该止损价已确认；触发后会进入退出风险优先流程。"
+    : "未人工确认前，动态复核价只用于提醒你重新评估风险，不会自动变成卖出指令。";
+  return detailSection(
+    "动态止损复核",
+    `<div class="stop-loss-summary">
+      <span>当前复核结论</span>
+      <strong>${escapeHtml(message)}</strong>
+      ${levels.dynamic_stop_loss_reason ? `<p>${escapeHtml(levels.dynamic_stop_loss_reason)}</p>` : ""}
+    </div>
+    ${metricGrid(metrics)}
+    <h4>候选价来源</h4>
+    <div class="stop-candidate-list">${candidateRows}</div>`,
+    "dynamic-stop-loss"
+  );
 }
 
 function renderReverseTPriceAlertSection(item, decisionCard) {
@@ -1988,6 +2044,7 @@ function openDetail(code, options = {}) {
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`,
       "decision-card"
     );
+    html += renderDynamicStopLossSection(decisionCard);
     html += renderPriceActionTable(decisionCard.price_action_table, item, decisionCard);
     html += manualTradeSection(item);
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
