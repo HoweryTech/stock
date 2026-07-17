@@ -651,8 +651,7 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
     ["执行许可", decision.execution_allowed ? "允许人工确认" : "禁止直接执行"],
   ];
   const readingOrder = [
-    ["先看价格动作表", "price-action-table"],
-    ["再看执行分层", "execution-layers"],
+    ["先看可操作步骤表", "action-step-table"],
     ["再看动态止损", "dynamic-stop-loss"],
     ["需要成交才看手工更新", "manual-trade"],
     ["想知道为什么再展开辅助信息", "technical-assessment"],
@@ -673,7 +672,7 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
       </div>
       <div class="decision-focus-card decision-focus-block">
         <span>为什么不能做</span>
-        ${blockerItems.length ? `<ul class="reason-list">${blockerItems.slice(0, 5).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<p class="secondary">当前没有额外阻断；仍需按价格动作表人工确认。</p>`}
+        ${blockerItems.length ? `<ul class="reason-list">${blockerItems.slice(0, 5).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<p class="secondary">当前没有额外阻断；仍需按可操作步骤表人工确认。</p>`}
       </div>
       <div class="decision-focus-card decision-focus-effect">
         <span>做了会怎样</span>
@@ -704,7 +703,7 @@ function uniqueTradeConclusion(item, decisionCard, automaticDecision) {
     return `现在先复核风险：现价接近动态止损复核价 ${primary.price || dynamicStop}，未确认前不直接卖出、不补仓、不做T。`;
   }
   if (decision.execution_allowed) {
-    return `现在只进入人工观察：${decision.action_label || primary.action || "等待触发"}；未到价格动作表触发线前不下单${stopSuffix}。`;
+    return `现在只进入人工观察：${decision.action_label || primary.action || "等待触发"}；未到可操作步骤表触发线前不下单${stopSuffix}。`;
   }
   if (primary.status === "blocked") {
     return `现在不交易：${primary.action || decision.action_label || "条件被阻断"}；先处理阻断原因${stopSuffix}。`;
@@ -727,7 +726,7 @@ function renderStickyActionBar(item, decisionCard, automaticDecision) {
   const presetButton = primary.status === "ready" ? priceActionPresetButton(primary, item, decisionCard) : "";
   const statusClass = status === "ready" ? "ready" : status === "blocked" ? "blocked" : "watch";
   const fallbackActions = `
-    <button class="secondary-action" type="button" data-detail-target="price-action-table">看价格动作表</button>
+    <button class="secondary-action" type="button" data-detail-target="action-step-table">看可操作步骤</button>
     ${levels.dynamic_stop_loss_price ? `<button class="secondary-action" type="button" data-detail-target="dynamic-stop-loss">看动态止损</button>` : ""}
     ${blockers.length ? `<button class="secondary-action" type="button" data-detail-target="decision-card">看阻断原因</button>` : ""}`;
   return `<div class="sticky-action-bar action-bar-${escapeHtml(statusClass)}">
@@ -753,41 +752,57 @@ function groupedExecutionRows(table) {
   };
 }
 
-function renderExecutionLayerRows(rows, item, decisionCard) {
-  if (!rows.length) return `<p class="secondary">当前没有对应动作。</p>`;
+function renderActionStepRows(rows, primary, item, decisionCard) {
+  if (!rows.length) return `<p class="secondary">当前没有对应步骤。</p>`;
+  const sameAction = (left, right) => left && right
+    && left.action === right.action
+    && left.price === right.price
+    && left.status === right.status
+    && String(left.shares || "") === String(right.shares || "");
   return rows.map(row => {
     const preset = priceActionPresetButton(row, item, decisionCard);
-    return `<div class="execution-row execution-row-${escapeHtml(row.status || "unknown")}">
-      <div>
+    const isPrimary = sameAction(row, primary);
+    return `<div class="action-step-row action-step-row-${escapeHtml(row.status || "unknown")}${isPrimary ? " action-step-primary" : ""}">
+      <div class="action-step-main">
+        <span>${isPrimary ? "当前主步骤" : "候选步骤"}</span>
         <strong>${escapeHtml(row.action || "--")}</strong>
         <p>${escapeHtml(row.trigger || row.note || "--")}</p>
       </div>
-      <dl><dt>价格</dt><dd>${escapeHtml(row.price || "--")}</dd></dl>
-      <dl><dt>数量</dt><dd>${row.shares ? `${escapeHtml(row.shares)}股` : "--"}</dd></dl>
-      <dl><dt>状态</dt><dd>${escapeHtml(row.status_label || row.status || "--")}</dd></dl>
-      <div class="execution-row-action">${preset || `<button class="secondary-action" type="button" data-detail-target="price-action-table">看明细</button>`}</div>
-      ${row.note ? `<p class="execution-note">${escapeHtml(row.note)}</p>` : ""}
+      <div class="action-step-metrics">
+        <dl><dt>价格</dt><dd>${escapeHtml(row.price || "--")}</dd></dl>
+        <dl><dt>数量</dt><dd>${row.shares ? `${escapeHtml(row.shares)}股` : "--"}</dd></dl>
+        <dl><dt>状态</dt><dd>${escapeHtml(row.status_label || row.status || "--")}</dd></dl>
+      </div>
+      <div class="action-step-operation">
+        <span>${escapeHtml(row.operation || "--")}</span>
+        ${preset || `<button class="secondary-action" type="button" data-detail-target="decision-card">看阻断原因</button>`}
+      </div>
+      ${row.note ? `<p class="action-step-note">${escapeHtml(row.note)}</p>` : ""}
       ${row.status === "ready" ? renderPresetConsequencePreview(row, item, decisionCard) : ""}
     </div>`;
   }).join("");
 }
 
-function renderExecutionLayers(item, decisionCard) {
-  const groups = groupedExecutionRows(decisionCard?.price_action_table);
+function renderActionStepTable(table, item, decisionCard = null) {
+  const rows = table?.rows || [];
+  if (!rows.length) return "";
+  const primary = table?.primary_action || rows[0];
+  const groups = groupedExecutionRows(table);
   const layerDefs = [
     ["现在可做", "ready", "满足触发条件后，仍需确认券商真实成交，再写入系统。"],
-    ["到价再做", "watch", "价格或条件还未到位，只观察触发线，不提前下单。"],
-    ["禁止做", "blocked", "当前规则明确阻断，先看原因，不做补仓或做T动作。"],
+    ["等待触发", "watch", "价格或条件还未到位，只观察触发线，不提前下单。"],
+    ["禁止执行", "blocked", "当前规则明确阻断，不做补仓、卖出或做T动作。"],
   ];
   return detailSection(
-    "执行分层",
-    `<div class="execution-layers">${layerDefs.map(([label, key, hint]) => `
-      <div class="execution-layer execution-layer-${key}">
-        <div class="execution-layer-title"><strong>${label}</strong><span>${groups[key].length}项</span></div>
+    "可操作步骤表",
+    `<p class="secondary">${escapeHtml(table.summary || "按触发价执行；未触发前只观察。")}</p>
+    <div class="action-step-groups">${layerDefs.map(([label, key, hint]) => `
+      <div class="action-step-group action-step-group-${key}">
+        <div class="action-step-group-title"><strong>${label}</strong><span>${groups[key].length}项</span></div>
         <p class="secondary">${hint}</p>
-        ${renderExecutionLayerRows(groups[key], item, decisionCard)}
+        ${renderActionStepRows(groups[key], primary, item, decisionCard)}
       </div>`).join("")}</div>`,
-    "execution-layers"
+    "action-step-table"
   );
 }
 
@@ -923,7 +938,7 @@ function renderReverseTForecastSection(forecast, decisionCard) {
     ];
   const title = stale ? "旧反T概率预测（已过期）" : "下一次反T概率预测";
   const message = stale
-    ? `该预测生成于 ${forecast.as_of || "--"}，不是当前交易日数据；不能作为下一次反T建议区间。没有当日有效预测时，盘中高点区间只作为参考，不进入价格动作表。`
+    ? `该预测生成于 ${forecast.as_of || "--"}，不是当前交易日数据；不能作为下一次反T建议区间。没有当日有效预测时，盘中高点区间只作为参考，不进入可操作步骤表。`
     : forecast.note || "预测仅用于提前预警，不代表价格必然到达。";
   const badge = stale ? '<span class="forecast-stale-badge">已过期</span>' : "";
   return detailSection(
@@ -1071,7 +1086,7 @@ function renderReverseTPlanSection(item, decisionCard, technicalOperation) {
       <div class="reverse-plan-block reverse-plan-block-${executableTone}">
         <h4>可执行建议</h4>
         ${metricGrid(executableMetrics)}
-        ${!hasEffectiveForecast ? `<p class="secondary">没有当日有效建议区间时，价格动作表不会给出“反T卖出/反T回补”。</p>` : ""}
+        ${!hasEffectiveForecast ? `<p class="secondary">没有当日有效建议区间时，可操作步骤表不会给出“反T卖出/反T回补”。</p>` : ""}
       </div>
       <div class="reverse-plan-block reverse-plan-block-reference">
         <h4>参考审计</h4>
@@ -1096,24 +1111,24 @@ function priceActionPresetData(row, item, decisionCard = null) {
   const shares = Number(row.shares || 0);
   if (!currentPrice || !shares) return "";
   if (row.action === "止损/退出") {
-    return {side: "sell", price: currentPrice, shares, tradeIntent: "", linkedTradeId: "", note: "价格动作表：止损/退出已触发，按真实成交确认写入", label: "填入止损卖出", danger: true};
+    return {side: "sell", price: currentPrice, shares, tradeIntent: "", linkedTradeId: "", note: "可操作步骤表：止损/退出已触发，按真实成交确认写入", label: "填入止损卖出", danger: true};
   }
   if (row.action === "正T买入") {
     const plan = decisionCard?.manual_execution_plan || {};
     const maxPrice = plan.max_price == null ? currentPrice : Number(plan.max_price);
     const buyPrice = Math.min(currentPrice, maxPrice);
-    return {side: "buy", price: buyPrice, shares: Number(plan.shares || shares), tradeIntent: "positive_t_open", linkedTradeId: "", note: "价格动作表：正T买入已触发，打开正T买入腿", label: "填入正T买入"};
+    return {side: "buy", price: buyPrice, shares: Number(plan.shares || shares), tradeIntent: "positive_t_open", linkedTradeId: "", note: "可操作步骤表：正T买入已触发，打开正T买入腿", label: "填入正T买入"};
   }
   if (row.action === "反T卖出") {
     const plan = decisionCard?.manual_execution_plan || {};
-    return {side: "sell", price: currentPrice, shares: Number(plan.shares || shares), tradeIntent: "reverse_t_open", linkedTradeId: "", note: "价格动作表：反T卖出已触发，打开反T卖出腿", label: "填入反T卖出"};
+    return {side: "sell", price: currentPrice, shares: Number(plan.shares || shares), tradeIntent: "reverse_t_open", linkedTradeId: "", note: "可操作步骤表：反T卖出已触发，打开反T卖出腿", label: "填入反T卖出"};
   }
   if (row.action === "反T回补") {
     const plan = item.reverse_t_plan || {};
     const buybackPrice = plan.buyback_max_price == null ? currentPrice : Math.min(currentPrice, Number(plan.buyback_max_price));
     const openLegId = plan.open_reverse_t_leg?.id || "";
     if (!openLegId) return "";
-    return {side: "buy", price: buybackPrice, shares, tradeIntent: "reverse_t_close", linkedTradeId: openLegId, note: "价格动作表：反T回补已触发，关闭开放反T卖出腿", label: "填入反T回补"};
+    return {side: "buy", price: buybackPrice, shares, tradeIntent: "reverse_t_close", linkedTradeId: openLegId, note: "可操作步骤表：反T回补已触发，关闭开放反T卖出腿", label: "填入反T回补"};
   }
   if (row.action === "正T目标卖出") {
     const plan = item.positive_t_plan || {};
@@ -1121,7 +1136,7 @@ function priceActionPresetData(row, item, decisionCard = null) {
     const targetPrice = Array.isArray(zone) && zone.length >= 2 ? Number(zone[0]) : currentPrice;
     const openLegId = plan.open_positive_t_leg?.id || "";
     if (!openLegId) return "";
-    return {side: "sell", price: targetPrice, shares, tradeIntent: "positive_t_close", linkedTradeId: openLegId, note: "价格动作表：正T目标卖出已触发，关闭开放正T买入腿", label: "填入正T卖出"};
+    return {side: "sell", price: targetPrice, shares, tradeIntent: "positive_t_close", linkedTradeId: openLegId, note: "可操作步骤表：正T目标卖出已触发，关闭开放正T买入腿", label: "填入正T卖出"};
   }
   return "";
 }
@@ -1173,73 +1188,6 @@ function renderPresetConsequencePreview(row, item, decisionCard = null) {
     <p><strong>做T腿影响：</strong>${escapeHtml(tradeIntentEffectLabel(payload.trade_intent))}</p>
     <p><strong>下一步：</strong>${escapeHtml(nextPlanAfterManualTrade(item, payload, impact))}</p>
   </div>`;
-}
-
-function renderPriceActionTable(table, item, decisionCard = null) {
-  const rows = table?.rows || [];
-  if (!rows.length) return "";
-  const primary = table?.primary_action || rows[0];
-  const sameAction = (left, right) => left && right
-    && left.action === right.action
-    && left.price === right.price
-    && left.status === right.status
-    && String(left.shares || "") === String(right.shares || "");
-  const secondaryRows = rows.filter((row, index) => index !== 0 || !sameAction(row, primary)).filter(row => !sameAction(row, primary));
-  const statusClass = status => ({
-    ready: "positive",
-    watch: "positive-t-wait",
-    blocked: "negative",
-    reference: "secondary",
-  }[status] || "secondary");
-  const primaryPreset = priceActionPresetButton(primary, item, decisionCard);
-  const primaryTone = primary.status === "ready" ? "ready" : primary.status === "blocked" ? "blocked" : "watch";
-  const primaryPreview = primary.status === "ready" ? renderPresetConsequencePreview(primary, item, decisionCard) : "";
-  const renderRows = actionRows => actionRows.map(row => `
-    <tr class="action-row-${escapeHtml(row.status || "unknown")}">
-      <td><strong>${escapeHtml(row.action || "--")}</strong></td>
-      <td>${escapeHtml(row.trigger || "--")}</td>
-      <td class="number">${escapeHtml(row.price || "--")}</td>
-      <td>${escapeHtml(row.operation || "--")}</td>
-      <td class="${statusClass(row.status)}">${escapeHtml(row.status_label || row.status || "--")}</td>
-      <td class="number">${row.shares ? `${escapeHtml(row.shares)}股` : "--"}</td>
-      <td>${priceActionPresetButton(row, item, decisionCard)}</td>
-    </tr>
-    ${row.note ? `<tr class="action-note"><td></td><td colspan="6">${escapeHtml(row.note)}</td></tr>` : ""}`
-  ).join("");
-  const secondaryDetails = secondaryRows.length ? `
-    <details class="secondary-action-details">
-      <summary>其他观察/限制项（${secondaryRows.length}）</summary>
-      <div class="action-table-wrap">
-        <table class="action-table">
-          <thead><tr><th>动作</th><th>触发条件</th><th>价格</th><th>操作</th><th>状态</th><th>数量</th><th>确认</th></tr></thead>
-          <tbody>${renderRows(secondaryRows)}</tbody>
-        </table>
-      </div>
-    </details>` : "";
-  return detailSection(
-    "价格动作表",
-    `<p class="secondary">${escapeHtml(table.summary || "按触发价执行；未触发前只观察。")}</p>
-    <div class="primary-price-action primary-price-action-${escapeHtml(primaryTone)}">
-      <div class="primary-price-main">
-        <span>当前只关注这个动作</span>
-        <strong>${escapeHtml(primary.action || "--")}</strong>
-        <p>${escapeHtml(primary.trigger || primary.note || "--")}</p>
-      </div>
-      <div class="primary-price-metrics">
-        <dl><dt>价格</dt><dd>${escapeHtml(primary.price || "--")}</dd></dl>
-        <dl><dt>状态</dt><dd class="${statusClass(primary.status)}">${escapeHtml(primary.status_label || primary.status || "--")}</dd></dl>
-        <dl><dt>数量</dt><dd>${primary.shares ? `${escapeHtml(primary.shares)}股` : "--"}</dd></dl>
-      </div>
-      <div class="primary-price-operation">
-        <span>${escapeHtml(primary.operation || "--")}</span>
-        ${primaryPreset || `<button class="secondary-action" type="button" data-detail-target="decision-card">看阻断原因</button>`}
-      </div>
-      ${primary.note ? `<p class="primary-price-note">${escapeHtml(primary.note)}</p>` : ""}
-      ${primaryPreview}
-    </div>
-    ${secondaryDetails}`,
-    "price-action-table"
-  );
 }
 
 function renderTechnicalOperationBlock(operation, mode) {
@@ -2039,8 +1987,7 @@ function openDetail(code, options = {}) {
   if (decisionCard) {
     html += renderStickyActionBar(item, decisionCard, automaticDecision);
     html += renderDecisionBrief(item, decisionCard, automaticDecision);
-    html += renderPriceActionTable(decisionCard.price_action_table, item, decisionCard);
-    html += renderExecutionLayers(item, decisionCard);
+    html += renderActionStepTable(decisionCard.price_action_table, item, decisionCard);
   }
   html += detailSection("持仓与行情", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status", {collapsed: true, summary: "现价、成本、仓位和均线"});
   if (decisionCard) {
