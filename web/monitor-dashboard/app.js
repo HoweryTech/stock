@@ -450,6 +450,18 @@ async function maybeRefreshTriggeredDecisionChain() {
           active_path: alert.active_path,
           current_price: alert.current_price,
           title: alert.title,
+          confirmation_status: alert.confirmation_status,
+          confirmation_first_seen_at: alert.confirmation_first_seen_at,
+          confirmation_window_seconds: alert.confirmation_window_seconds,
+          confirmation_elapsed_seconds: alert.confirmation_elapsed_seconds,
+          confirmation: {
+            status: alert.confirmation_status || "confirmed",
+            first_seen_at: alert.confirmation_first_seen_at || "",
+            window_seconds: alert.confirmation_window_seconds || null,
+            elapsed_seconds: alert.confirmation_elapsed_seconds || null,
+            confirmed_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+            confirmed_price: alert.current_price,
+          },
         })),
       }),
     });
@@ -464,6 +476,7 @@ async function maybeRefreshTriggeredDecisionChain() {
       generated_at: result.generated_at || "",
       state_counts: result.state_counts || {},
       diffs: result.diffs || [],
+      trigger_action_snapshots: result.trigger_action_snapshots || [],
       message: "已根据盘中触发路径刷新完整决策链。",
     };
     await loadData();
@@ -2904,12 +2917,22 @@ function renderEvents() {
   }).join("");
   const triggerHistoryHtml = triggerHistory.map(event => {
     const diffs = event.diffs || [];
+    const actionSnapshots = event.trigger_action_snapshots || [];
     const firstDiff = diffs[0] || {};
     const triggerNames = (event.triggers || []).map(trigger => `${trigger.name || trigger.code || "--"} ${trigger.active_path || ""}`.trim()).join("；");
+    const snapshotItems = actionSnapshots.slice(0, 3).map(snapshot => {
+      const confirmation = snapshot.confirmation || {};
+      const after = snapshot.after || {};
+      const confirmationText = confirmation.window_seconds
+        ? `确认窗口 ${confirmation.window_seconds}s，确认价 ${money(confirmation.confirmed_price)}`
+        : `确认价 ${money(snapshot.current_price)}`;
+      return `${snapshot.name || snapshot.code || "--"}：${confirmationText}；刷新后 ${after.label || "--"}`;
+    });
     return `<article class="event-item event-trigger-history event-clickable" tabindex="0" data-event-code="${escapeHtml(firstDiff.code || (event.triggers || [])[0]?.code || "")}" data-event-target="decision-card">
       <div class="event-time">${escapeHtml(event.generated_at || event.requested_at || "")}</div>
       <div class="event-title">自动刷新历史 · ${escapeHtml(triggerNames || "盘中触发")}</div>
       <div class="event-action event-action-watch">${escapeHtml(`${event.trigger_count || 0} 条触发已刷新`)}</div>
+      ${snapshotItems.length ? `<ol class="event-checklist">${snapshotItems.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : ""}
       ${diffs.length ? `<ol class="event-checklist">${diffs.slice(0, 3).map(diff => `<li>${escapeHtml(diff.message || "")}</li>`).join("")}</ol>` : `<p class="secondary">已刷新决策链，等待下一轮触发。</p>`}
     </article>`;
   }).join("");

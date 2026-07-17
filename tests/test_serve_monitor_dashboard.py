@@ -325,7 +325,25 @@ class ServeMonitorDashboardTest(unittest.TestCase):
             patch("tools.serve_monitor_dashboard.run_refresh_commands", return_value=[{"returncode": 0}]) as refresh,
             patch("tools.serve_monitor_dashboard.append_jsonl") as append_event,
         ):
-            result = handle_intraday_trigger_refresh({"triggers": [{"code": "000723", "active_path": "path1_break"}]})
+            result = handle_intraday_trigger_refresh(
+                {
+                    "triggers": [
+                        {
+                            "code": "000723",
+                            "active_path": "path1_break",
+                            "current_price": 3.31,
+                            "confirmation": {
+                                "status": "confirmed",
+                                "first_seen_at": "10:00:01",
+                                "window_seconds": 30,
+                                "elapsed_seconds": 31,
+                                "confirmed_at": "10:00:32",
+                                "confirmed_price": 3.31,
+                            },
+                        }
+                    ]
+                }
+            )
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["trigger_count"], 1)
@@ -334,6 +352,11 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertIn("刷新前", result["diffs"][0]["message"])
         self.assertIn("止损减仓", result["diffs"][0]["message"])
         self.assertEqual(result["event"]["trigger_count"], 1)
+        self.assertEqual(result["trigger_action_snapshots"][0]["confirmation"]["window_seconds"], 30)
+        self.assertEqual(result["trigger_action_snapshots"][0]["confirmation"]["confirmed_price"], 3.31)
+        self.assertEqual(result["trigger_action_snapshots"][0]["before"]["plan_type"], "near_stop_playbook")
+        self.assertEqual(result["trigger_action_snapshots"][0]["after"]["plan_type"], "risk_reduce")
+        self.assertEqual(result["event"]["trigger_action_snapshots"][0]["after"]["manual_plan_status_label"], "止损减仓计划")
         append_event.assert_called_once()
         refresh.assert_called_once_with(30000.0)
 

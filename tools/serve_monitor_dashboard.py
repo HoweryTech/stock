@@ -300,7 +300,18 @@ def compact_decision_summary(card: dict[str, Any] | None) -> dict[str, Any]:
         "status": status,
         "plan_type": manual_plan.get("plan_type"),
         "plan_status": manual_plan.get("status"),
+        "manual_plan_status_label": manual_plan.get("status_label"),
+        "manual_plan_action_label": manual_plan.get("action_label"),
+        "manual_plan_side": manual_plan.get("side"),
+        "manual_plan_trade_intent": manual_plan.get("trade_intent"),
+        "manual_plan_price_zone": manual_plan.get("price_zone"),
+        "manual_plan_post_trade_shares": manual_plan.get("post_trade_shares"),
+        "manual_plan_steps": list(manual_plan.get("steps") or [])[:5] if isinstance(manual_plan.get("steps"), list) else [],
         "primary_status": primary.get("status"),
+        "primary_action": primary.get("action"),
+        "primary_status_label": primary.get("status_label"),
+        "primary_operation": primary.get("operation"),
+        "primary_trigger": primary.get("trigger"),
         "shares": shares,
         "price": price,
         "label": "；".join(label_parts),
@@ -345,6 +356,43 @@ def build_trigger_refresh_diffs(
             }
         )
     return diffs
+
+
+def build_trigger_action_snapshots(
+    triggers: list[object],
+    before_report: dict[str, object] | None,
+    after_report: dict[str, object] | None,
+) -> list[dict[str, Any]]:
+    snapshots: list[dict[str, Any]] = []
+    before_cards = (before_report or {}).get("cards")
+    after_cards = (after_report or {}).get("cards")
+    for trigger in triggers:
+        if not isinstance(trigger, dict):
+            continue
+        code = str(trigger.get("code") or "")
+        if not code:
+            continue
+        confirmation = trigger.get("confirmation") if isinstance(trigger.get("confirmation"), dict) else {}
+        snapshots.append(
+            {
+                "code": code,
+                "name": trigger.get("name"),
+                "active_path": trigger.get("active_path"),
+                "title": trigger.get("title"),
+                "current_price": trigger.get("current_price"),
+                "confirmation": {
+                    "status": confirmation.get("status") or trigger.get("confirmation_status"),
+                    "first_seen_at": confirmation.get("first_seen_at") or trigger.get("confirmation_first_seen_at"),
+                    "window_seconds": confirmation.get("window_seconds") or trigger.get("confirmation_window_seconds"),
+                    "elapsed_seconds": confirmation.get("elapsed_seconds") or trigger.get("confirmation_elapsed_seconds"),
+                    "confirmed_at": confirmation.get("confirmed_at"),
+                    "confirmed_price": confirmation.get("confirmed_price") or trigger.get("current_price"),
+                },
+                "before": compact_decision_summary(find_code_item(before_cards, code)),
+                "after": compact_decision_summary(find_code_item(after_cards, code)),
+            }
+        )
+    return snapshots
 
 
 def intent_label(intent: str) -> str:
@@ -481,6 +529,7 @@ def handle_intraday_trigger_refresh(payload: dict[str, object]) -> dict[str, obj
     refresh = run_refresh_commands(total_assets)
     refreshed_report = load_json(API_FILES["/api/decision-cards"]) or {}
     diffs = build_trigger_refresh_diffs(triggers, before_report, refreshed_report)
+    action_snapshots = build_trigger_action_snapshots(triggers, before_report, refreshed_report)
     event = {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "requested_at": requested_at,
@@ -489,6 +538,7 @@ def handle_intraday_trigger_refresh(payload: dict[str, object]) -> dict[str, obj
         "decision_generated_at": refreshed_report.get("generated_at"),
         "state_counts": refreshed_report.get("state_counts") or {},
         "diffs": diffs,
+        "trigger_action_snapshots": action_snapshots,
     }
     append_jsonl(TRIGGER_REFRESH_EVENT_FILE, event)
     return {
@@ -498,6 +548,7 @@ def handle_intraday_trigger_refresh(payload: dict[str, object]) -> dict[str, obj
         "generated_at": refreshed_report.get("generated_at"),
         "state_counts": refreshed_report.get("state_counts") or {},
         "diffs": diffs,
+        "trigger_action_snapshots": action_snapshots,
         "event": event,
     }
 
