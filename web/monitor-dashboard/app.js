@@ -298,6 +298,18 @@ function isReverseTPriceAlert(item) {
   return Boolean(item.reverse_t_plan?.price_in_sell_zone) && item.state !== "data_stale";
 }
 
+function positiveTPlanTag(item) {
+  const plan = item.positive_t_plan || {};
+  if (!["target_sell_ready", "failure_review", "target_sell_wait"].includes(plan.status)) return "";
+  const label = {
+    target_sell_ready: "正T目标卖出触发",
+    failure_review: "正T失败复核",
+    target_sell_wait: "正T等待目标",
+  }[plan.status] || plan.status_label || plan.status;
+  const toneClass = plan.status === "target_sell_ready" ? "positive-t-ready" : plan.status === "failure_review" ? "positive-t-fail" : "positive-t-wait";
+  return `<div class="advice-tag ${toneClass}">${escapeHtml(label)} · ${escapeHtml(plan.next_action || "")}</div>`;
+}
+
 function filteredItems() {
   const items = state.snapshot?.items || [];
   return items.filter(item => {
@@ -395,6 +407,7 @@ function tableRow(item) {
   const reverseTag = isReverseTPriceAlert(item)
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
+  const positiveTag = positiveTPlanTag(item);
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
   const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
   const reviewTag = postUnlockReviewTag(item);
@@ -406,7 +419,7 @@ function tableRow(item) {
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
     <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><div class="state-tier">${actionTierBadge(item)}</div></td>
-    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${techTag}${dataTag}${reverseTag}</td>
+    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${positiveTag}${techTag}${dataTag}${reverseTag}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
@@ -419,6 +432,7 @@ function mobileCard(item) {
   const reverseTag = isReverseTPriceAlert(item)
     ? `<div class="advice-tag">已到反T卖出观察区 · 回补参考${money(item.reverse_t_plan.buyback_max_price)}</div>`
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
+  const positiveTag = positiveTPlanTag(item);
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
   const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
   const reviewTag = postUnlockReviewTag(item);
@@ -433,7 +447,7 @@ function mobileCard(item) {
     <div class="card-row"><span>${actionTierBadge(item)}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
     <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>${escapeHtml(displayState)}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
-    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${techTag}${dataTag}${reverseTag}</div>
+    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${positiveTag}${techTag}${dataTag}${reverseTag}</div>
   </article>`;
 }
 
@@ -636,6 +650,33 @@ function renderManualExecutionPlan(plan) {
       <p class="secondary">这是人工确认计划，不会自动下单；只有券商软件真实成交后，才在本系统写入成交。</p>
     </div>`,
     "manual-execution-plan"
+  );
+}
+
+function renderPositiveTPlan(plan) {
+  if (!plan || plan.status === "not_applicable") return "";
+  const targetZone = Array.isArray(plan.target_sell_zone) && plan.target_sell_zone.length >= 2
+    ? `${num(plan.target_sell_zone[0])}-${num(plan.target_sell_zone[1])}元`
+    : "--";
+  const metrics = [
+    ["状态", plan.status_label || plan.status],
+    ["买入价", money(plan.buy_price)],
+    ["新增股数", plan.trade_shares ? `${plan.trade_shares}股` : "--"],
+    ["目标卖出区", targetZone],
+    ["失败价", money(plan.failure_price)],
+    ["目标价扣费收益", money(plan.estimated_net_profit_at_target)],
+    ["买入费用", money(plan.buy_fees)],
+    ["预计卖出费用", money(plan.estimated_sell_fees?.total_fees)],
+  ];
+  const steps = plan.execution_steps || plan.instructions || [];
+  const blockers = plan.blockers || [];
+  return detailSection(
+    "正T闭环跟踪",
+    `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    ${plan.next_action ? `<div class="action-panel action-${plan.status === "target_sell_ready" ? "positive_t_watch" : plan.status === "failure_review" ? "exit_risk_review" : "observe"}"><div class="action-panel-title">下一步动作</div><p>${escapeHtml(plan.next_action)}</p></div>` : ""}
+    ${steps.length ? `<h4>操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
+    ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}`,
+    "positive-t-plan"
   );
 }
 
@@ -1146,6 +1187,7 @@ function openDetail(code, options = {}) {
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
     );
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
+    html += renderPositiveTPlan(item.positive_t_plan);
     html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);
     html += renderCapitalPlan(decisionCard.capital_plan);
     html += detailSection(

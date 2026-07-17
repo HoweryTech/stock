@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 
-from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_reduction_plan, build_reverse_t_plan, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
+from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_positive_t_plan, build_reduction_plan, build_reverse_t_plan, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
 
 
 class MonitorIntradayPositionsTest(unittest.TestCase):
@@ -183,6 +183,62 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
 
         self.assertEqual(item["latest_reverse_t_closure"]["buy_trade_id"], "MANUAL-CLOSE-000725")
         self.assertEqual(item["latest_reverse_t_closure"]["status"], "closed_profitable")
+
+    def test_open_positive_t_leg_triggers_target_sell_ready(self) -> None:
+        position = {
+            "stock": {"code": "000725", "name": "京东方A"},
+            "entry": {"shares": 300, "entry_price": 8.13, "position_pct_of_total_assets": 7.18},
+            "risk": {"stop_loss_price": 5.9},
+            "manual_trade_history": [
+                {
+                    "id": "MANUAL-POSITIVE-OPEN-000725",
+                    "side": "buy",
+                    "trade_intent": "positive_t_open",
+                    "price": 6.10,
+                    "shares": 100,
+                    "occurred_at": "2026-07-16T10:00:00+08:00",
+                    "fees": {"total_fees": 5.0},
+                }
+            ],
+        }
+        quote = {"latest_price": 6.18, "quote_timestamp": 1000}
+
+        plan = build_positive_t_plan(position, quote, stale=False, costs=self.costs)
+
+        self.assertEqual(plan["status"], "target_sell_ready")
+        self.assertEqual(plan["trade_shares"], 100)
+        self.assertEqual(plan["target_sell_zone"], [6.17, 6.19])
+        self.assertEqual(plan["open_positive_t_leg"]["id"], "MANUAL-POSITIVE-OPEN-000725")
+        self.assertTrue(any("卖出新增的 100 股" in step for step in plan["execution_steps"]))
+
+    def test_open_positive_t_leg_triggers_failure_review(self) -> None:
+        position = {
+            "entry": {"shares": 300, "entry_price": 8.13},
+            "risk": {"stop_loss_price": 5.95},
+            "manual_trade_history": [
+                {"id": "MANUAL-POSITIVE-OPEN", "side": "buy", "trade_intent": "positive_t_open", "price": 6.10, "shares": 100}
+            ],
+        }
+        quote = {"latest_price": 5.94}
+
+        plan = build_positive_t_plan(position, quote, stale=False, costs=self.costs)
+
+        self.assertEqual(plan["status"], "failure_review")
+        self.assertEqual(plan["failure_price"], 5.95)
+        self.assertIn("不要继续补仓", plan["next_action"])
+
+    def test_closed_positive_t_leg_is_not_reopened(self) -> None:
+        position = {
+            "entry": {"shares": 200, "entry_price": 8.13},
+            "manual_trade_history": [
+                {"id": "MANUAL-POSITIVE-OPEN", "side": "buy", "trade_intent": "positive_t_open", "price": 6.10, "shares": 100},
+                {"id": "MANUAL-POSITIVE-CLOSE", "side": "sell", "trade_intent": "positive_t_close", "linked_trade_id": "MANUAL-POSITIVE-OPEN", "price": 6.18, "shares": 100},
+            ],
+        }
+
+        plan = build_positive_t_plan(position, {"latest_price": 6.2}, stale=False, costs=self.costs)
+
+        self.assertEqual(plan["status"], "not_applicable")
 
     def test_reduction_plan_rounds_to_board_lots(self) -> None:
         position = {"entry": {"shares": 1000}}

@@ -211,7 +211,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--total-assets", type=float, default=25480.0)
     parser.add_argument("--occurred-at")
     parser.add_argument("--note")
-    parser.add_argument("--trade-intent", choices=["", "positive_t_open", "reverse_t_open", "reverse_t_close"], default="")
+    parser.add_argument("--trade-intent", choices=["", "positive_t_open", "positive_t_close", "reverse_t_open", "reverse_t_close"], default="")
     parser.add_argument("--linked-trade-id", default="")
     parser.add_argument("--source", choices=["cli", "dashboard"], default="cli")
     parser.add_argument("--commission-rate", type=float, default=0.0003)

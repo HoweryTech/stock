@@ -138,6 +138,128 @@ def latest_open_reverse_t_leg(position: dict[str, Any]) -> dict[str, Any] | None
     return candidates[-1] if candidates else None
 
 
+def latest_open_positive_t_leg(position: dict[str, Any]) -> dict[str, Any] | None:
+    history = position.get("manual_trade_history") or []
+    if not isinstance(history, list):
+        return None
+    closed_ids = {
+        str(record.get("linked_trade_id"))
+        for record in history
+        if record.get("side") == "sell" and record.get("trade_intent") == "positive_t_close" and record.get("linked_trade_id")
+    }
+    candidates = [
+        record for record in history
+        if record.get("side") == "buy"
+        and record.get("trade_intent") == "positive_t_open"
+        and str(record.get("id") or "") not in closed_ids
+    ]
+    return candidates[-1] if candidates else None
+
+
+def one_side_trade_fees(side: str, price: float, shares: int, costs: dict[str, float]) -> dict[str, float]:
+    amount = price * shares
+    commission = max(amount * costs["commission_rate"], costs["minimum_commission"])
+    stamp_duty = amount * costs["stamp_duty_rate"] if side == "sell" else 0.0
+    transfer_fee = amount * costs["transfer_fee_rate"]
+    return {
+        "commission": round(commission, 4),
+        "stamp_duty": round(stamp_duty, 4),
+        "transfer_fee": round(transfer_fee, 4),
+        "total_fees": round(commission + stamp_duty + transfer_fee, 4),
+    }
+
+
+def build_positive_t_plan(
+    position: dict[str, Any],
+    quote: dict[str, Any],
+    *,
+    stale: bool,
+    costs: dict[str, float],
+    target_gain_pct: float = 1.2,
+    fallback_stop_pct: float = 3.0,
+) -> dict[str, Any]:
+    open_leg = latest_open_positive_t_leg(position)
+    if not open_leg:
+        return {"status": "not_applicable", "status_label": "没有开放中的正T买入腿", "execution_steps": []}
+
+    shares = int(as_float(open_leg.get("shares"), 0.0) or 0.0)
+    buy_price = as_float(open_leg.get("price"))
+    current = as_float(quote.get("latest_price"))
+    stop_loss = as_float(value_at(position, "risk.stop_loss_price"))
+    fallback_stop = buy_price * (1 - fallback_stop_pct / 100) if buy_price is not None else None
+    failure_price = max(value for value in [stop_loss, fallback_stop] if value is not None) if any(value is not None for value in [stop_loss, fallback_stop]) else None
+    if buy_price is None or shares <= 0:
+        return {
+            "status": "invalid_open_leg",
+            "status_label": "正T买入腿记录不完整",
+            "open_positive_t_leg": {"id": open_leg.get("id"), "buy_price": buy_price, "shares": shares, "occurred_at": open_leg.get("occurred_at")},
+            "execution_steps": ["不生成目标卖出计划；先人工复核正T买入成交记录。"],
+        }
+
+    target_low = round(buy_price * (1 + target_gain_pct / 100), 2)
+    target_high = round(target_low + 0.02, 2)
+    buy_fees = as_float(value_at(open_leg, "fees.total_fees"), 0.0) or 0.0
+    sell_fees = one_side_trade_fees("sell", target_low, shares, costs)
+    estimated_net_profit = (target_low - buy_price) * shares - buy_fees - sell_fees["total_fees"]
+    blockers: list[str] = []
+    if stale:
+        blockers.append("行情过期，不能判断正T目标卖出或失败条件。")
+    if current is None:
+        blockers.append("缺少现价，不能判断正T目标卖出或失败条件。")
+
+    if blockers:
+        status = "data_wait"
+        status_label = "等待行情刷新"
+        next_action = "刷新实时行情后再判断正T买入腿是否到达目标卖出或失败条件。"
+    elif failure_price is not None and current <= failure_price:
+        status = "failure_review"
+        status_label = "正T失败复核"
+        next_action = f"现价 {current:.2f} 已不高于失败价 {failure_price:.2f}；不要继续补仓，先复核是否止损新增仓位或转普通持仓。"
+    elif current >= target_low:
+        status = "target_sell_ready"
+        status_label = "正T目标卖出触发"
+        next_action = f"现价 {current:.2f} 已进入目标卖出区；可卖出新增的 {shares} 股完成正T闭环。"
+    else:
+        status = "target_sell_wait"
+        status_label = "等待正T目标卖出"
+        next_action = f"继续等待 {target_low:.2f}-{target_high:.2f} 元目标卖出区；未到目标不急于卖出。"
+
+    execution_steps = [
+        f"第1步：确认这笔正T买入腿已真实成交：{buy_price:.2f} 元买入 {shares} 股。",
+        f"第2步：只在价格进入 {target_low:.2f}-{target_high:.2f} 元目标区时，卖出新增的 {shares} 股；未到目标不卖。",
+        f"第3步：若按 {target_low:.2f} 元卖出，扣除买入和卖出费用后预计净收益约 {estimated_net_profit:.2f} 元。",
+        f"第4步：如果价格跌到 {failure_price:.2f} 元或更低，不继续补仓；先做失败复核。" if failure_price is not None else "第4步：缺少止损价时，不扩大正T仓位；收盘前必须人工复核。",
+        "第5步：当天收盘前仍未到目标卖出区时，刷新系统并决定是否转为普通持仓，不继续追加同方向买入。",
+    ]
+    if status == "target_sell_ready":
+        execution_steps.insert(2, "当前已经到达目标区；先卖出新增股数，再在系统里记录为正T卖出闭环。")
+    elif status == "failure_review":
+        execution_steps.insert(2, "当前已经触发失败复核；不要用继续买入来摊低这笔正T买入腿。")
+
+    return {
+        "status": status,
+        "status_label": status_label,
+        "trade_shares": shares,
+        "buy_price": round(buy_price, 4),
+        "target_sell_zone": [target_low, target_high],
+        "failure_price": None if failure_price is None else round(failure_price, 4),
+        "estimated_net_profit_at_target": round(estimated_net_profit, 4),
+        "buy_fees": round(buy_fees, 4),
+        "estimated_sell_fees": sell_fees,
+        "open_positive_t_leg": {
+            "id": open_leg.get("id"),
+            "buy_price": buy_price,
+            "shares": shares,
+            "occurred_at": open_leg.get("occurred_at"),
+            "fees": open_leg.get("fees"),
+        },
+        "blockers": blockers,
+        "next_action": next_action,
+        "execution_steps": execution_steps,
+        "instructions": execution_steps,
+    }
+
+
 def fee_aware_buyback_price(sell_price: float, shares: int, costs: dict[str, float], *, max_gap_pct: float = 8.0) -> dict[str, Any] | None:
     gap_pct = 0.1
     while gap_pct <= max_gap_pct + 1e-9:
@@ -654,6 +776,12 @@ def analyze_quote(
         preferred_reduction_shares=reduction_plan.get("minimum_reduction_shares") if reduction_plan.get("status") == "actionable" else None,
         max_trade_ratio_pct=max_reverse_t_position_ratio_pct,
     )
+    positive_t_plan = build_positive_t_plan(
+        position,
+        quote,
+        stale="stale_quote" in signal_codes,
+        costs=costs,
+    )
     action_decision = apply_state_action_tier(build_action_decision(reverse_t_plan, reduction_plan), state, reverse_t_plan, reduction_plan)
 
     return {
@@ -683,6 +811,7 @@ def analyze_quote(
         "signals": signals,
         "latest_reverse_t_closure": value_at(position, "tracking.latest_reverse_t_closure"),
         "reverse_t_plan": reverse_t_plan,
+        "positive_t_plan": positive_t_plan,
         "reduction_plan": reduction_plan,
         "action_decision": action_decision,
         "guardrails": {"add_allowed": False, "t_trade_allowed": False, "auto_order": False},
@@ -791,6 +920,8 @@ def state_signature(snapshot: dict[str, Any]) -> dict[str, Any]:
             "signals": sorted(signal["code"] for signal in item["signals"]),
             "reverse_t_status": item.get("reverse_t_plan", {}).get("status"),
             "reverse_t_price_alert": bool(item.get("reverse_t_plan", {}).get("price_in_sell_zone")),
+            "positive_t_status": item.get("positive_t_plan", {}).get("status"),
+            "positive_t_target_ready": item.get("positive_t_plan", {}).get("status") == "target_sell_ready",
             "latest_reverse_t_closure": (item.get("latest_reverse_t_closure") or {}).get("buy_trade_id"),
             "reduction_status": item.get("reduction_plan", {}).get("status"),
         }
