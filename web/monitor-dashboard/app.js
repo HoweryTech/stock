@@ -1068,32 +1068,66 @@ function renderPresetConsequencePreview(row, item, decisionCard = null) {
 function renderPriceActionTable(table, item, decisionCard = null) {
   const rows = table?.rows || [];
   if (!rows.length) return "";
+  const primary = table?.primary_action || rows[0];
+  const sameAction = (left, right) => left && right
+    && left.action === right.action
+    && left.price === right.price
+    && left.status === right.status
+    && String(left.shares || "") === String(right.shares || "");
+  const secondaryRows = rows.filter((row, index) => index !== 0 || !sameAction(row, primary)).filter(row => !sameAction(row, primary));
   const statusClass = status => ({
     ready: "positive",
     watch: "positive-t-wait",
     blocked: "negative",
     reference: "secondary",
   }[status] || "secondary");
+  const primaryPreset = priceActionPresetButton(primary, item, decisionCard);
+  const primaryTone = primary.status === "ready" ? "ready" : primary.status === "blocked" ? "blocked" : "watch";
+  const primaryPreview = primary.status === "ready" ? renderPresetConsequencePreview(primary, item, decisionCard) : "";
+  const renderRows = actionRows => actionRows.map(row => `
+    <tr class="action-row-${escapeHtml(row.status || "unknown")}">
+      <td><strong>${escapeHtml(row.action || "--")}</strong></td>
+      <td>${escapeHtml(row.trigger || "--")}</td>
+      <td class="number">${escapeHtml(row.price || "--")}</td>
+      <td>${escapeHtml(row.operation || "--")}</td>
+      <td class="${statusClass(row.status)}">${escapeHtml(row.status_label || row.status || "--")}</td>
+      <td class="number">${row.shares ? `${escapeHtml(row.shares)}股` : "--"}</td>
+      <td>${priceActionPresetButton(row, item, decisionCard)}</td>
+    </tr>
+    ${row.note ? `<tr class="action-note"><td></td><td colspan="6">${escapeHtml(row.note)}</td></tr>` : ""}`
+  ).join("");
+  const secondaryDetails = secondaryRows.length ? `
+    <details class="secondary-action-details">
+      <summary>其他观察/限制项（${secondaryRows.length}）</summary>
+      <div class="action-table-wrap">
+        <table class="action-table">
+          <thead><tr><th>动作</th><th>触发条件</th><th>价格</th><th>操作</th><th>状态</th><th>数量</th><th>确认</th></tr></thead>
+          <tbody>${renderRows(secondaryRows)}</tbody>
+        </table>
+      </div>
+    </details>` : "";
   return detailSection(
     "价格动作表",
     `<p class="secondary">${escapeHtml(table.summary || "按触发价执行；未触发前只观察。")}</p>
-    <div class="action-table-wrap">
-      <table class="action-table">
-        <thead><tr><th>动作</th><th>触发条件</th><th>价格</th><th>操作</th><th>状态</th><th>数量</th><th>确认</th></tr></thead>
-        <tbody>${rows.map(row => `
-          <tr class="action-row-${escapeHtml(row.status || "unknown")}">
-            <td><strong>${escapeHtml(row.action || "--")}</strong></td>
-            <td>${escapeHtml(row.trigger || "--")}</td>
-            <td class="number">${escapeHtml(row.price || "--")}</td>
-            <td>${escapeHtml(row.operation || "--")}</td>
-            <td class="${statusClass(row.status)}">${escapeHtml(row.status_label || row.status || "--")}</td>
-            <td class="number">${row.shares ? `${escapeHtml(row.shares)}股` : "--"}</td>
-            <td>${priceActionPresetButton(row, item, decisionCard)}</td>
-          </tr>
-          ${row.note ? `<tr class="action-note"><td></td><td colspan="6">${escapeHtml(row.note)}</td></tr>` : ""}`
-        ).join("")}</tbody>
-      </table>
-    </div>`,
+    <div class="primary-price-action primary-price-action-${escapeHtml(primaryTone)}">
+      <div class="primary-price-main">
+        <span>当前只关注这个动作</span>
+        <strong>${escapeHtml(primary.action || "--")}</strong>
+        <p>${escapeHtml(primary.trigger || primary.note || "--")}</p>
+      </div>
+      <div class="primary-price-metrics">
+        <dl><dt>价格</dt><dd>${escapeHtml(primary.price || "--")}</dd></dl>
+        <dl><dt>状态</dt><dd class="${statusClass(primary.status)}">${escapeHtml(primary.status_label || primary.status || "--")}</dd></dl>
+        <dl><dt>数量</dt><dd>${primary.shares ? `${escapeHtml(primary.shares)}股` : "--"}</dd></dl>
+      </div>
+      <div class="primary-price-operation">
+        <span>${escapeHtml(primary.operation || "--")}</span>
+        ${primaryPreset || `<button class="secondary-action" type="button" data-detail-target="decision-card">看阻断原因</button>`}
+      </div>
+      ${primary.note ? `<p class="primary-price-note">${escapeHtml(primary.note)}</p>` : ""}
+      ${primaryPreview}
+    </div>
+    ${secondaryDetails}`,
     "price-action-table"
   );
 }

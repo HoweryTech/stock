@@ -406,6 +406,33 @@ th:nth-child(8) { width: 100px; }
 .action-table .action-row-ready td { background: var(--red-bg); }
 .action-table .action-row-blocked td { background: #fff8e6; }
 .action-table .action-note td { padding-top: 0; color: var(--muted); background: var(--surface); }
+.primary-price-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(210px, 0.8fr);
+  gap: 10px 14px;
+  margin: 10px 0 12px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.primary-price-action-ready { border-left-color: var(--red); background: var(--red-bg); }
+.primary-price-action-watch { border-left-color: var(--blue); background: var(--blue-bg); }
+.primary-price-action-blocked { border-left-color: var(--amber); background: var(--amber-bg); }
+.primary-price-main span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.primary-price-main strong { display: block; font-size: 17px; line-height: 1.35; }
+.primary-price-main p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.primary-price-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.primary-price-metrics dl { margin: 0; padding: 8px 9px; border: 1px solid rgba(186, 194, 204, 0.8); border-radius: 5px; background: rgba(255, 255, 255, 0.62); }
+.primary-price-metrics dt { color: var(--muted); font-size: 11px; }
+.primary-price-metrics dd { margin: 2px 0 0; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.primary-price-operation { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 9px; }
+.primary-price-operation span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.primary-price-note { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.secondary-action-details { margin-top: 10px; }
+.secondary-action-details summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 700; }
+.secondary-action-details .action-table-wrap { margin-top: 8px; }
 .danger-lite-action { border-color: var(--red); color: var(--red); }
 .action-panel { margin: 14px 0; padding: 12px 13px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
 .action-panel-title { margin-bottom: 7px; font-size: 12px; color: var(--muted); font-weight: 700; }
