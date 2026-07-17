@@ -267,7 +267,8 @@ th:nth-child(8) { width: 100px; }
   z-index: 30;
   top: 0;
   right: 0;
-  width: min(520px, 92vw);
+  width: min(880px, 92vw);
+  max-width: 960px;
   height: 100vh;
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -281,7 +282,7 @@ th:nth-child(8) { width: 100px; }
 .detail-header p { margin: 0 0 3px; color: var(--muted); font-size: 12px; }
 .detail-header h2 { margin: 0; font-size: 20px; }
 .close-button { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--muted); font-size: 24px; line-height: 1; }
-#detailContent { padding: 18px 20px 36px; }
+#detailContent { padding: 20px 24px 40px; }
 .detail-refresh-notice {
   display: flex;
   align-items: center;
@@ -618,6 +619,9 @@ th:nth-child(8) { width: 100px; }
   .card-top, .card-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
   .card-row { margin-top: 10px; color: var(--muted); }
   .card-advice { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); line-height: 1.5; }
+  .detail-panel { width: 100vw; max-width: none; }
+  #detailContent { padding: 16px 14px 32px; }
+  .detail-header { padding: 14px 14px; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
   .decision-brief-grid { grid-template-columns: 1fr; }
   .detail-refresh-notice { align-items: stretch; flex-direction: column; }
