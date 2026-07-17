@@ -240,6 +240,8 @@ def intent_label(intent: str) -> str:
         "reverse_t_close": "反T回补",
         "positive_t_open": "正T买入腿",
         "positive_t_close": "正T目标卖出",
+        "risk_exit_reduce": "风控减仓",
+        "risk_exit_full": "风控清仓",
     }.get(intent, "普通手工成交")
 
 
@@ -263,6 +265,10 @@ def build_post_trade_tracking(update: dict[str, Any], snapshot: dict[str, object
         next_steps.append("已记录反T卖出腿；未到系统回补上限前不要追价买回。")
     elif trade.get("trade_intent") == "positive_t_open":
         next_steps.append("已记录正T买入腿；未到目标卖出区不急于卖出，跌破失败价先复核。")
+    elif trade.get("trade_intent") == "risk_exit_reduce":
+        next_steps.append("已记录风控减仓；刷新后只按剩余仓位重新评估，不用这笔卖出立刻做T买回。")
+    elif trade.get("trade_intent") == "risk_exit_full":
+        next_steps.append("已记录风控清仓；该股后续只进入观察，除非重新生成新的买入计划。")
 
     if shares_after <= 0:
         next_steps.append("该股持仓已归零；后续只观察，不再围绕该股做T，除非重新生成买入计划。")

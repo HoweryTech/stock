@@ -163,14 +163,19 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertFalse(card["decision"]["execution_allowed"])
         self.assertIn("禁止做T", card["decision"]["next_step"])
         exit_actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
-        self.assertEqual(card["price_action_table"]["rows"][0]["action"], "止损/退出")
-        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "止损/退出")
-        self.assertEqual(exit_actions["止损/退出"]["status"], "ready")
-        self.assertEqual(exit_actions["止损/退出"]["operation"], "卖出风险仓位")
+        self.assertEqual(card["price_action_table"]["rows"][0]["action"], "止损减仓")
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "止损减仓")
+        self.assertEqual(exit_actions["止损减仓"]["status"], "ready")
+        self.assertEqual(exit_actions["止损减仓"]["operation"], "卖出风险仓位")
+        self.assertEqual(exit_actions["止损减仓"]["shares"], 500)
+        self.assertEqual(card["manual_execution_plan"]["candidate"], "risk_exit")
+        self.assertEqual(card["manual_execution_plan"]["plan_type"], "risk_reduce")
+        self.assertEqual(card["manual_execution_plan"]["shares"], 500)
+        self.assertEqual(card["manual_execution_plan"]["post_trade_shares"], 500)
         self.assertEqual(exit_actions["做T阻断"]["status"], "blocked")
         self.assertIn("禁止买入、补仓、做T", card["decision"]["action_steps"][0])
-        self.assertTrue(any("操作后果" in step for step in card["decision"]["action_steps"]))
-        self.assertTrue(any("仓位后果" in step for step in card["decision"]["action_steps"]))
+        self.assertTrue(any("当前计划" in step for step in card["decision"]["action_steps"]))
+        self.assertFalse(any("全仓卖出后该股持仓变为0股" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("交易/卖出" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("卖出数量输入" in step for step in card["decision"]["action_steps"]))
         self.assertTrue(any("卖出价格输入" in step for step in card["decision"]["action_steps"]))
@@ -180,6 +185,31 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(report["priority_queue"]["top_items"][0]["code"], "600000")
         self.assertEqual(report["priority_queue"]["top_items"][0]["category"], "risk_exit")
         self.assertEqual(report["priority_queue"]["top_items"][0]["urgency"], "high")
+
+    def test_stop_loss_with_reversal_uses_rebound_reduce_plan(self) -> None:
+        portfolio = portfolio_result()
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 10.1
+        report = build_report(
+            {"items": [intraday_item()]},
+            portfolio,
+            t_result(blockers=[{"code": "near_stop_loss", "message": "距离止损不足1%。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            None,
+            technical_indicators=slightly_bearish_technical_doc(),
+            generated_at=datetime(2026, 7, 16, 9, 30, 0),
+        )
+
+        card = report["cards"][0]
+        actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+
+        self.assertEqual(card["manual_execution_plan"]["plan_type"], "rebound_reduce")
+        self.assertEqual(card["manual_execution_plan"]["status"], "wait_rebound_reduce")
+        self.assertEqual(card["manual_execution_plan"]["shares"], 500)
+        self.assertIn("反弹减仓", actions)
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "反弹减仓")
+        self.assertEqual(actions["反弹减仓"]["status_label"], "等反弹")
+        self.assertTrue(any("只等待价格反弹到" in step for step in card["manual_execution_plan"]["steps"]))
 
     def test_unconfirmed_imported_stop_reference_does_not_take_exit_priority(self) -> None:
         portfolio = portfolio_result()

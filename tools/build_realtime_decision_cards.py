@@ -1716,6 +1716,136 @@ def estimate_trade_fees(side: str, price: float | None, shares: int | float | No
     }
 
 
+def risk_exit_reduce_shares(current_shares: int) -> int:
+    if current_shares <= 0:
+        return 0
+    if current_shares <= 100:
+        return current_shares
+    half = whole_lot_shares(current_shares * 0.5) or 100
+    return min(current_shares, max(100, half))
+
+
+def build_stop_loss_risk_plan(
+    levels: dict[str, Any],
+    position: dict[str, Any],
+    technical_assessment: dict[str, Any] | None,
+) -> dict[str, Any]:
+    current = as_float(levels.get("current_price"))
+    stop_loss = as_float(levels.get("stop_loss_price"))
+    stop_loss_confirmed = bool(levels.get("stop_loss_confirmed", stop_loss is not None))
+    current_shares = int(as_float(position.get("shares"), 0.0) or 0)
+    if current is None or stop_loss is None or not stop_loss_confirmed or current > stop_loss or current_shares <= 0:
+        return {"applicable": False, "status": "not_applicable", "steps": []}
+
+    scores = (technical_assessment or {}).get("dimension_scores") or {}
+    trend = as_float(scores.get("trend"), 0.0) or 0.0
+    risk = as_float(scores.get("risk"), 0.0) or 0.0
+    reversal = as_float(scores.get("reversal"), 0.0) or 0.0
+    volume = as_float(scores.get("volume_confirmation"), 0.0) or 0.0
+    label = str((technical_assessment or {}).get("label") or "")
+    drawdown_from_stop_pct = (stop_loss - current) / stop_loss * 100 if stop_loss else 0.0
+    reduce_shares = risk_exit_reduce_shares(current_shares)
+
+    if current_shares <= 100 or (drawdown_from_stop_pct >= 3.0 and trend <= -15 and volume <= 0):
+        plan_type = "hard_exit"
+        status = "ready_for_manual_confirm"
+        status_label = "硬退出计划"
+        action_label = "硬退出"
+        shares = current_shares
+        min_price = current
+        price_zone = [rounded(current), rounded(current)]
+        reason = "跌破止损后继续偏弱，且风险已经超出可等待范围。"
+    elif drawdown_from_stop_pct <= 2.0 and reversal >= 6 and risk > -30:
+        plan_type = "rebound_reduce"
+        status = "wait_rebound_reduce"
+        status_label = "等反弹减仓计划"
+        action_label = "反弹减仓"
+        shares = reduce_shares
+        rebound_low = max(current * 1.008, min(stop_loss, current * 1.015))
+        rebound_high = max(rebound_low, stop_loss * 1.01)
+        price_zone = [rounded(rebound_low), rounded(rebound_high)]
+        min_price = as_float(price_zone[0])
+        reason = "跌破止损但有反转迹象，不追杀；等反弹到压力区先降低风险仓位。"
+    else:
+        plan_type = "risk_reduce"
+        status = "ready_for_manual_confirm"
+        status_label = "止损减仓计划"
+        action_label = "止损减仓"
+        shares = reduce_shares
+        min_price = current
+        price_zone = [rounded(current), rounded(current)]
+        reason = "跌破硬止损后先减掉约半仓风险，不默认一次清仓。"
+
+    entry_price = as_float(position.get("entry_price"))
+    fee_price = min_price or current
+    fees = estimate_trade_fees("sell", fee_price, shares)
+    estimated_cash = fee_price * shares - float(fees["total_fees"] or 0.0) if fee_price is not None else None
+    realized_pnl = None
+    if fee_price is not None and entry_price is not None:
+        realized_pnl = (fee_price - entry_price) * shares - float(fees["total_fees"] or 0.0)
+    post_trade_shares = max(0, current_shares - shares)
+    loss_text = money_text(realized_pnl)
+    stop_text = money_text(stop_loss)
+    zone_text = format_price_zone(price_zone)
+    failure_conditions = [
+        f"价格没有到 {zone_text} 时，不为了补仓或做T扩大风险。",
+        "卖出后若马上反弹，不追高买回；等待系统用剩余仓位重新评估。",
+        "卖出后若继续跌破止损，不做正T摊低成本，下一轮继续按风险仓位处理。",
+    ]
+    if plan_type == "rebound_reduce":
+        steps = [
+            f"先不补仓、不做T；只等待价格反弹到 {zone_text}。",
+            f"进入区间后打开券商交易软件，进入“交易/卖出”，卖出数量输入 {shares} 股。",
+            f"卖出价格输入 {zone_text} 内的限价；低于 {money_text(min_price)} 不卖这笔反弹减仓单。",
+            f"成交前确认这是风控减仓，不是反T卖出腿；成交后在本系统写入卖出成交。",
+            f"成交后剩余约 {post_trade_shares} 股，继续观察是否重新站回止损价 {stop_text}。",
+        ]
+        post_trade_plan = f"若反弹减仓成交，先把风险仓位降到 {post_trade_shares} 股；后续只有重新站回 {stop_text} 且量能确认，才重新评估做T或加仓。"
+    else:
+        steps = [
+            "打开券商交易软件，进入“交易/卖出”，不要选择买入或融资加仓。",
+            f"卖出数量输入 {shares} 股；这不是默认清仓，成交后预计剩余 {post_trade_shares} 股。",
+            f"卖出价格输入现价附近限价；若价格继续快速下破 {stop_text}，不等待做T信号。",
+            f"提交前核对方向为“卖出”、数量为 {shares} 股；预计本次实现盈亏约 {loss_text}，预估费用约 {money_text(as_float(fees.get('total_fees')))}。",
+            "成交后立即在本系统写入卖出成交并刷新建议；刷新前不新增买入。",
+        ]
+        post_trade_plan = f"成交后系统按剩余 {post_trade_shares} 股重算止损和做T资格；若仍低于止损且技术未修复，下一轮继续降风险，而不是补仓摊低成本。"
+
+    return {
+        "applicable": True,
+        "candidate": "risk_exit",
+        "plan_type": plan_type,
+        "status": status,
+        "status_label": status_label,
+        "action_label": action_label,
+        "side": "sell",
+        "side_label": "卖出",
+        "trade_intent": "risk_exit_reduce" if plan_type != "hard_exit" else "risk_exit_full",
+        "shares": shares,
+        "price_zone": price_zone,
+        "target_zone": None,
+        "min_price": rounded(min_price),
+        "stop_loss_price": rounded(stop_loss),
+        "current_price": rounded(current),
+        "estimated_amount": rounded(estimated_cash),
+        "estimated_fees": fees,
+        "estimated_realized_pnl": rounded(realized_pnl),
+        "post_trade_shares": post_trade_shares,
+        "technical_context": {
+            "label": label,
+            "trend": rounded(trend),
+            "risk": rounded(risk),
+            "reversal": rounded(reversal),
+            "volume_confirmation": rounded(volume),
+            "drawdown_from_stop_pct": rounded(drawdown_from_stop_pct),
+        },
+        "reason": reason,
+        "failure_conditions": failure_conditions,
+        "steps": steps,
+        "post_trade_plan": post_trade_plan,
+    }
+
+
 def build_manual_execution_plan(
     review_summary: dict[str, Any],
     levels: dict[str, Any],
@@ -1723,7 +1853,12 @@ def build_manual_execution_plan(
     capital_plan: dict[str, Any],
     positive_timing: dict[str, Any],
     intraday: dict[str, Any],
+    technical_assessment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    stop_loss_plan = build_stop_loss_risk_plan(levels, position, technical_assessment)
+    if stop_loss_plan.get("applicable"):
+        return stop_loss_plan
+
     if review_summary.get("status") != "manual_candidate":
         return {
             "applicable": False,
@@ -2009,6 +2144,7 @@ def build_action_steps(
     technical_operation: dict[str, Any] | None = None,
     t_performance_gate: dict[str, Any] | None = None,
     execution_quality_gate: dict[str, Any] | None = None,
+    manual_execution_plan: dict[str, Any] | None = None,
 ) -> list[str]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
@@ -2022,6 +2158,20 @@ def build_action_steps(
     loss_word = "亏损" if estimated_pnl is not None and estimated_pnl < 0 else "盈亏"
     if state == "exit_risk_review":
         steps = ["本轮禁止买入、补仓、做T；只允许处理卖出风险。"]
+        risk_plan = manual_execution_plan if (manual_execution_plan or {}).get("candidate") == "risk_exit" else {}
+        if risk_plan:
+            realized = as_float(risk_plan.get("estimated_realized_pnl"))
+            remaining = risk_plan.get("post_trade_shares")
+            steps.append(
+                f"当前计划：{risk_plan.get('action_label') or '风控卖出'} {risk_plan.get('shares') or '-'} 股；"
+                f"执行后预计剩余 {remaining if remaining is not None else '-'} 股，预计确认盈亏约 {money_text(realized)}。"
+            )
+            steps.extend(str(step) for step in risk_plan.get("steps", []))
+            if risk_plan.get("post_trade_plan"):
+                steps.append(f"成交后的下一步计划：{risk_plan['post_trade_plan']}")
+            if near_block is not None:
+                steps.append(f"做T阻断价：{near_block:.2f}；低于或接近该价时，正T/反T/补仓全部保持禁止。")
+            return steps
         if current is not None and stop_loss is not None:
             if current <= stop_loss:
                 steps.extend(
@@ -2163,6 +2313,8 @@ def price_action_priority(action: str, status: str) -> int:
     if status == "ready":
         return {
             "止损/退出": 100,
+            "硬退出": 100,
+            "止损减仓": 98,
             "反T回补": 95,
             "正T目标卖出": 90,
             "正T买入": 82,
@@ -2178,6 +2330,7 @@ def price_action_priority(action: str, status: str) -> int:
         }.get(action, 60)
     if status == "watch":
         return {
+            "反弹减仓": 79,
             "反T回补": 58,
             "正T目标卖出": 55,
             "正T买入": 50,
@@ -2228,17 +2381,34 @@ def build_price_action_table(
 
     if stop_loss is not None and stop_loss_confirmed:
         stop_ready = current is not None and current <= stop_loss
+        stop_plan = manual_execution_plan if manual_execution_plan.get("candidate") == "risk_exit" else {}
+        stop_action = str(stop_plan.get("action_label") or "止损/退出")
+        plan_status = str(stop_plan.get("status") or "")
+        row_status = "ready" if plan_status == "ready_for_manual_confirm" else "watch"
+        if not stop_plan:
+            row_status = "ready" if stop_ready else "watch"
+        row_status_label = (
+            "可执行" if row_status == "ready" and stop_plan else
+            "等反弹" if plan_status == "wait_rebound_reduce" else
+            "已触发" if stop_ready else "未触发"
+        )
+        row_price = format_price_zone(stop_plan.get("price_zone")) if stop_plan.get("price_zone") else f"≤ {stop_loss:.2f} 元"
+        row_trigger = (
+            f"价格进入 {row_price}" if stop_plan.get("plan_type") == "rebound_reduce" else
+            f"价格小于等于 {stop_loss:.2f} 元"
+        )
+        row_shares = int(stop_plan.get("shares") or 0) or shares
         rows.append(
             action_table_row(
-                "止损/退出",
-                f"价格小于等于 {stop_loss:.2f} 元",
-                f"≤ {stop_loss:.2f} 元",
+                stop_action,
+                row_trigger,
+                row_price,
                 "卖出风险仓位",
-                status="ready" if stop_ready else "watch",
-                status_label="已触发" if stop_ready else "未触发",
-                shares=shares,
-                note="触发后优先处理退出风险；禁止补仓、禁止做T摊低成本。",
-                priority=price_action_priority("止损/退出", "ready" if stop_ready else "watch"),
+                status=row_status,
+                status_label=row_status_label,
+                shares=row_shares,
+                note=str(stop_plan.get("reason") or "触发后优先处理退出风险；禁止补仓、禁止做T摊低成本。"),
+                priority=price_action_priority(stop_action, row_status),
             )
         )
     elif stop_loss is not None:
@@ -2401,8 +2571,10 @@ def queue_category(card: dict[str, Any]) -> tuple[str, str, int]:
     primary_action = str(primary.get("action") or "")
     primary_status = str(primary.get("status") or "")
     review_status = str(value_at(card, "post_unlock_review_summary.status") or "")
-    if primary_action == "止损/退出" and primary_status == "ready":
+    if primary_action in {"止损/退出", "止损减仓", "硬退出"} and primary_status == "ready":
         return "risk_exit", "优先处理卖出风险", 100
+    if primary_action == "反弹减仓":
+        return "risk_exit", "等待反弹减仓", 98
     if state == "exit_risk_review":
         return "risk_exit", "优先处理卖出风险", 95
     if state in {"data_stale", "market_wait", "data_insufficient"}:
@@ -2547,6 +2719,7 @@ def build_card(
         capital_plan,
         positive_timing,
         intraday,
+        technical_assessment,
     )
     price_action_table = build_price_action_table(
         state,
@@ -2597,6 +2770,7 @@ def build_card(
                 technical_operation=technical_operation,
                 t_performance_gate=t_performance_gate,
                 execution_quality_gate=execution_quality_gate,
+                manual_execution_plan=manual_execution_plan,
             ),
             "technical_operation": technical_operation,
         },

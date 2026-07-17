@@ -1281,8 +1281,11 @@ function priceActionPresetData(row, item, decisionCard = null) {
   const currentPrice = item?.quote?.latest_price == null ? null : Number(item.quote.latest_price);
   const shares = Number(row.shares || 0);
   if (!currentPrice || !shares) return "";
-  if (row.action === "止损/退出") {
-    return {side: "sell", price: currentPrice, shares, tradeIntent: "", linkedTradeId: "", note: "可操作步骤表：止损/退出已触发，按真实成交确认写入", label: "填入止损卖出", danger: true};
+  if (["止损/退出", "止损减仓", "硬退出"].includes(row.action)) {
+    const plan = decisionCard?.manual_execution_plan || {};
+    const tradeIntent = plan.trade_intent || (row.action === "硬退出" ? "risk_exit_full" : "risk_exit_reduce");
+    const label = row.action === "硬退出" ? "填入硬退出卖出" : row.action === "止损减仓" ? "填入止损减仓" : "填入止损卖出";
+    return {side: "sell", price: currentPrice, shares: Number(plan.shares || shares), tradeIntent, linkedTradeId: "", note: `可操作步骤表：${row.action}已触发，按真实成交确认写入`, label, danger: true};
   }
   if (row.action === "正T买入") {
     const plan = decisionCard?.manual_execution_plan || {};
@@ -1325,6 +1328,8 @@ function tradeIntentEffectLabel(intent) {
     reverse_t_close: "关闭开放反T卖出腿，刷新后复算持仓成本。",
     positive_t_open: "打开正T买入腿，后续只卖新增股数。",
     positive_t_close: "关闭开放正T买入腿，完成本轮正T闭环。",
+    risk_exit_reduce: "记录风控减仓，成交后按剩余仓位重新评估止损和做T资格。",
+    risk_exit_full: "记录风控清仓，成交后该股持仓归零，只保留观察。",
   }[intent] || "普通成交写入，不自动关闭做T腿。";
 }
 
@@ -1409,8 +1414,9 @@ function renderManualExecutionPlan(plan) {
   const fees = plan.estimated_fees || {};
   const metrics = [
     ["计划状态", plan.status_label || "--"],
+    ["计划类型", plan.plan_type === "hard_exit" ? "硬退出" : plan.plan_type === "rebound_reduce" ? "反弹减仓" : plan.plan_type === "risk_reduce" ? "止损减仓" : plan.candidate || "--"],
     ["交易方向", plan.side_label || "--"],
-    ["成交意图", plan.trade_intent === "reverse_t_open" ? "反T卖出腿" : plan.trade_intent === "positive_t_open" ? "正T买入腿" : plan.trade_intent || "--"],
+    ["成交意图", plan.trade_intent === "reverse_t_open" ? "反T卖出腿" : plan.trade_intent === "positive_t_open" ? "正T买入腿" : plan.trade_intent === "risk_exit_reduce" ? "风控减仓" : plan.trade_intent === "risk_exit_full" ? "风控清仓" : plan.trade_intent || "--"],
     ["建议数量", plan.shares ? `${plan.shares}股` : "--"],
     ["价格区间", priceZone],
     ["目标区间", targetZone],
@@ -1431,9 +1437,11 @@ function renderManualExecutionPlan(plan) {
         <button class="primary-action" type="button" data-manual-preset data-code="${escapeHtml(state.selectedCode || "")}" data-side="${escapeHtml(plan.side)}" data-price="${escapeHtml(Number(fillPrice).toFixed(2))}" data-shares="${escapeHtml(plan.shares)}" data-trade-intent="${escapeHtml(plan.trade_intent || "")}" data-note="${escapeHtml(`${plan.status_label || "人工候选计划"}：按系统计划填入，券商真实成交后确认写入`)}">填入这笔计划</button>
       </div>`
     : "";
+  const sectionTitle = plan.candidate === "risk_exit" ? "退出风控执行计划" : "人工候选交易计划";
   return detailSection(
-    "人工候选交易计划",
+    sectionTitle,
     `<div class="manual-plan manual-plan-${escapeHtml(plan.status || "watch")}">
+      ${plan.reason ? `<div class="action-panel action-exit_risk_review"><div class="action-panel-title">当前结论</div><p>${escapeHtml(plan.reason)}</p></div>` : ""}
       <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
       ${steps.length ? `<h4>傻瓜式操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
       ${failures.length ? `<h4>失败条件</h4><ul class="reason-list">${failures.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
@@ -1777,6 +1785,8 @@ function renderManualTradeConfirmation(item, payload, impact, checks) {
     reverse_t_close: "反T回补",
     positive_t_open: "正T买入腿",
     positive_t_close: "正T目标卖出",
+    risk_exit_reduce: "风控减仓",
+    risk_exit_full: "风控清仓",
   }[payload.trade_intent] || "普通手工成交";
   const metrics = [
     ["证券", `${item.code} ${item.name}`],
