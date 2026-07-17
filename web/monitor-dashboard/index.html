@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>持仓监控台</title>
-  <link rel="stylesheet" href="/styles.css?v=20260716-action-tier">
+  <link rel="stylesheet" href="/styles.css?v=20260717-review-chain">
 </head>
 <body>
   <header class="app-header">
@@ -40,6 +40,8 @@
         <button class="filter" data-filter="data_insufficient">数据不足</button>
         <button class="filter" data-filter="positive_t_watch">正T观察</button>
         <button class="filter" data-filter="reverse_t">反T观察</button>
+        <button class="filter" data-filter="post_unlock_candidate">人工候选</button>
+        <button class="filter" data-filter="post_unlock_blocked">复核阻断</button>
         <button class="filter" data-filter="technical_unlock">接近解锁</button>
         <button class="filter" data-filter="no_add_watch">禁止补仓</button>
         <button class="filter" data-filter="observe">观察</button>
@@ -102,6 +104,6 @@
   </section>
   <div class="scrim" id="scrim" hidden></div>
 
-  <script src="/app.js?v=20260716-action-tier" defer></script>
+  <script src="/app.js?v=20260717-review-chain" defer></script>
 </body>
 </html>

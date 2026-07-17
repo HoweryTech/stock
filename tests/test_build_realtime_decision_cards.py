@@ -239,6 +239,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(card["decision"]["technical_operation"]["allow_buy_watch"])
         self.assertEqual(card["decision"]["technical_operation"]["post_unlock_review"]["status"], "manual_candidate")
         self.assertEqual(card["decision"]["technical_operation"]["post_unlock_review"]["candidate"], "positive_t")
+        self.assertEqual(card["post_unlock_review_summary"]["status"], "manual_candidate")
+        self.assertEqual(card["post_unlock_review_summary"]["candidate"], "positive_t")
+        self.assertEqual(report["post_unlock_review_alerts"][0]["action_label"], "正T人工候选")
         self.assertEqual(card["capital_plan"]["single_add_tier"], "strong")
         self.assertEqual(card["capital_plan"]["effective_single_add_pct_total_assets"], 5.0)
         self.assertEqual(card["capital_plan"]["max_additional_capital"], 2500.0)
@@ -299,10 +302,44 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(card["technical_assessment"]["summary"])
         self.assertFalse(card["decision"]["technical_operation"]["allow_buy_watch"])
         self.assertEqual(card["decision"]["technical_operation"]["post_unlock_review"]["status"], "technical_locked")
+        self.assertEqual(card["post_unlock_review_summary"]["title"], "技术未解锁")
+        self.assertEqual(report["post_unlock_review_alerts"], [])
         self.assertFalse(card["positive_timing"]["metrics"]["technical_supported"])
         self.assertTrue(any(blocker["code"] == "technical_operation_blocked" for blocker in card["positive_timing"]["blockers"]))
         self.assertEqual(card["positive_timing"]["metrics"]["technical_operation_tier"], "risk_control_first")
         self.assertFalse(card["capital_plan"]["applicable"])
+
+    def test_post_unlock_review_alert_reports_data_quality_block(self) -> None:
+        item = intraday_item()
+        item["position"]["shares"] = 100
+        item["position"]["market_value"] = 1000.0
+        item["position"]["live_position_pct"] = 2.0
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(conclusion="positive_t_candidate"),
+            None,
+            None,
+            None,
+            {
+                "items": [
+                    {
+                        "code": "600000",
+                        "overall_status": "insufficient",
+                        "data_trust": {"level": "low"},
+                    }
+                ]
+            },
+            bullish_technical_doc(),
+            positive_minute_bars(),
+            generated_at=datetime(2026, 7, 16, 9, 38, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["post_unlock_review_summary"]["status"], "blocked_after_unlock")
+        self.assertIn("数据质量", card["post_unlock_review_summary"]["blocking_checks"])
+        self.assertEqual(report["post_unlock_review_alerts"][0]["action_label"], "复核阻断，只观察")
 
     def test_positive_t_candidate_without_intraday_confirmation_waits(self) -> None:
         item = intraday_item()

@@ -609,6 +609,7 @@ def build_technical_unlock_alert(card: dict[str, Any]) -> dict[str, Any] | None:
         "min_gap": rounded(min_gap),
         "conditions": conditions,
         "matched_conditions": active_conditions,
+        "post_unlock_review": card.get("post_unlock_review_summary") or {},
     }
 
 
@@ -721,6 +722,68 @@ def build_post_unlock_review(
         candidate = None
         next_step = "技术面改善后，还需要等待正T或反T候选结构出现。"
     return {"status": status, "status_label": label, "candidate": candidate, "checks": checks, "next_step": next_step}
+
+
+def build_post_unlock_review_summary(review: dict[str, Any]) -> dict[str, Any]:
+    status = str(review.get("status") or "unknown")
+    checks = review.get("checks") or []
+    blocking_checks = [item for item in checks if item.get("status") == "block"]
+    waiting_checks = [item for item in checks if item.get("status") == "warn"]
+    passed_checks = [item for item in checks if item.get("status") == "pass"]
+    tone = {
+        "manual_candidate": "candidate",
+        "blocked_after_unlock": "block",
+        "technical_locked": "locked",
+        "watch_only": "watch",
+    }.get(status, "watch")
+    if status == "manual_candidate":
+        title = "人工候选"
+    elif status == "blocked_after_unlock":
+        title = "复核阻断"
+    elif status == "technical_locked":
+        title = "技术未解锁"
+    else:
+        title = "复核观察"
+    return {
+        "status": status,
+        "status_label": review.get("status_label") or title,
+        "title": title,
+        "tone": tone,
+        "candidate": review.get("candidate"),
+        "next_step": review.get("next_step") or "",
+        "blocking_checks": [item.get("label") or item.get("code") for item in blocking_checks],
+        "waiting_checks": [item.get("label") or item.get("code") for item in waiting_checks],
+        "passed_check_count": len(passed_checks),
+        "blocked_check_count": len(blocking_checks),
+        "waiting_check_count": len(waiting_checks),
+    }
+
+
+def build_post_unlock_review_alert(card: dict[str, Any]) -> dict[str, Any] | None:
+    summary = card.get("post_unlock_review_summary") or {}
+    status = summary.get("status")
+    if status not in {"manual_candidate", "blocked_after_unlock"}:
+        return None
+    severity = "action" if status == "manual_candidate" else "watch"
+    title = "自动复核进入人工候选" if status == "manual_candidate" else "自动复核仍被阻断"
+    candidate_label = {"positive_t": "正T", "reverse_t": "反T"}.get(str(summary.get("candidate") or ""), "交易")
+    if status == "manual_candidate":
+        message = f"{candidate_label}候选已通过自动复核链；仍需人工确认价格、数量、费用和失败后果，不能自动下单。"
+        action_label = f"{candidate_label}人工候选"
+    else:
+        blockers = "、".join(str(item) for item in summary.get("blocking_checks") or [] if item)
+        message = f"技术条件已进入观察，但复核链仍被{blockers or '关键条件'}阻断；本轮不买入、不卖出做T。"
+        action_label = "复核阻断，只观察"
+    return {
+        "code": card.get("code"),
+        "name": card.get("name"),
+        "type": "post_unlock_review",
+        "severity": severity,
+        "title": title,
+        "action_label": action_label,
+        "message": message,
+        "review": summary,
+    }
 
 
 def build_technical_assessment(technical_indicators: dict[str, Any] | None) -> dict[str, Any]:
@@ -1628,6 +1691,7 @@ def build_card(
         reverse_backtest,
         intraday,
     )
+    post_unlock_review_summary = build_post_unlock_review_summary(technical_operation["post_unlock_review"])
     capital_plan = build_capital_plan(
         state,
         levels,
@@ -1678,6 +1742,7 @@ def build_card(
         "price_levels": levels,
         "capital_plan": capital_plan,
         "positive_timing": positive_timing,
+        "post_unlock_review_summary": post_unlock_review_summary,
         "position": intraday.get("position", {}),
         "market_context": {
             "quote_lag_seconds": value_at(intraday, "quote.quote_lag_seconds"),
@@ -1756,6 +1821,10 @@ def build_report(
         (alert for card in cards if (alert := build_technical_unlock_alert(card))),
         key=lambda alert: (0 if alert.get("type") == "technical_unlocked" else 1, as_float(alert.get("min_gap"), 9999.0) or 9999.0, str(alert.get("code") or "")),
     )
+    post_unlock_review_alerts = sorted(
+        (alert for card in cards if (alert := build_post_unlock_review_alert(card))),
+        key=lambda alert: (0 if alert.get("severity") == "action" else 1, str(alert.get("code") or "")),
+    )
     return {
         "generated_at": (generated_at or datetime.now().astimezone()).isoformat(timespec="seconds"),
         "source": {
@@ -1772,6 +1841,7 @@ def build_report(
         "card_count": len(cards),
         "state_counts": dict(sorted(state_counts.items())),
         "technical_unlock_alerts": technical_unlock_alerts,
+        "post_unlock_review_alerts": post_unlock_review_alerts,
         "cards": sorted(cards, key=lambda card: (-decision_priority(card["state"]), str(card["code"]))),
     }
 
@@ -1836,6 +1906,9 @@ def render_markdown(report: dict[str, Any]) -> str:
         note = technical_decision_note(card.get("technical_assessment") or {})
         if note:
             lines.append(f"- 技术判断：{note}")
+        review_summary = card.get("post_unlock_review_summary") or {}
+        if review_summary:
+            lines.append(f"- 解锁后复核：{review_summary.get('status_label')}；下一步：{review_summary.get('next_step') or '-'}")
         if card["blockers"]:
             lines.append("- 阻断：")
             lines.extend(f"  - {item}" for item in card["blockers"][:4])

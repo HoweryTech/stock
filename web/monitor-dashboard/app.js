@@ -156,6 +156,18 @@ function technicalUnlockAlertFor(item) {
   return (state.decisionReport?.technical_unlock_alerts || []).find(alert => alert.code === item.code);
 }
 
+function postUnlockReviewFor(item) {
+  return decisionCardFor(item)?.post_unlock_review_summary || {};
+}
+
+function postUnlockReviewTag(item) {
+  const review = postUnlockReviewFor(item);
+  if (!review.status) return "";
+  const label = review.status_label || review.title || review.status;
+  const nextStep = review.next_step || "";
+  return `<div class="review-line review-line-${escapeHtml(review.tone || "watch")}"><span>${escapeHtml(label)}</span>${nextStep ? `<em>${escapeHtml(nextStep)}</em>` : ""}</div>`;
+}
+
 function technicalAssessmentFor(item) {
   return decisionCardFor(item)?.technical_assessment || {};
 }
@@ -291,8 +303,11 @@ function filteredItems() {
   return items.filter(item => {
     const card = decisionCardFor(item);
     const decisionState = card?.state;
+    const reviewStatus = card?.post_unlock_review_summary?.status;
     const matchesFilter = state.filter === "all"
       || (state.filter === "technical_unlock" ? Boolean(technicalUnlockAlertFor(item)) : false)
+      || (state.filter === "post_unlock_candidate" ? reviewStatus === "manual_candidate" : false)
+      || (state.filter === "post_unlock_blocked" ? reviewStatus === "blocked_after_unlock" : false)
       || (state.filter === "reverse_t" ? (decisionState === "reverse_t_watch" || isReverseTWatch(item)) : decisionState === state.filter || item.state === state.filter);
     const query = state.search.trim().toLowerCase();
     const matchesSearch = !query || item.code.includes(query) || String(item.name).toLowerCase().includes(query);
@@ -323,6 +338,8 @@ function renderSummary() {
   const technicalStrong = decisionCards.filter(card => ["bullish", "slightly_bullish"].includes(card.technical_assessment?.label)).length;
   const positiveT = decisionCards.filter(card => card.state === "positive_t_watch").length;
   const reverseTByCard = decisionCards.filter(card => card.state === "reverse_t_watch").length;
+  const reviewCandidates = decisionCards.filter(card => card.post_unlock_review_summary?.status === "manual_candidate").length;
+  const reviewBlocked = decisionCards.filter(card => card.post_unlock_review_summary?.status === "blocked_after_unlock").length;
   const maxLag = Math.max(0, ...items.map(item => Number(item.quote.quote_lag_seconds || 0)));
   const reverseT = items.filter(isReverseTWatch).length;
   const forecastAlerts = items.filter(item => state.forecasts.get(item.code)?.status === "early_warning").length;
@@ -336,6 +353,7 @@ function renderSummary() {
     ["数据可信", `${trustHigh} 高 / ${trustLow} 低`, `${qualityStale} 过期 · ${qualityBlocked} 阻断`],
     ["技术面", `${technicalStrong} 偏多 / ${technicalWeak} 偏弱`, `${unlockAlerts} 只接近解锁`],
     ["T观察", `${positiveT} 正T / ${reverseTByCard || reverseT} 反T`, `${priceAlerts} 只价格提醒 · ${forecastAlerts} 只概率预警`],
+    ["复核链", `${reviewCandidates} 候选 / ${reviewBlocked} 阻断`, "自动复核后仍需人工确认"],
     ["最大延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
   ];
   document.querySelector("#summaryBand").innerHTML = blocks.map(([label, value, sub]) => `
@@ -379,6 +397,7 @@ function tableRow(item) {
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
   const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
+  const reviewTag = postUnlockReviewTag(item);
   const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<tr data-code="${item.code}" tabindex="0">
@@ -387,7 +406,7 @@ function tableRow(item) {
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
     <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><div class="state-tier">${actionTierBadge(item)}</div></td>
-    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${techTag}${dataTag}${reverseTag}</td>
+    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${techTag}${dataTag}${reverseTag}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
@@ -402,6 +421,7 @@ function mobileCard(item) {
     : isReverseTCandidate(item) ? '<div class="advice-tag">反T候选 · 先卖100股</div>' : "";
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
   const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
+  const reviewTag = postUnlockReviewTag(item);
   const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
@@ -413,7 +433,7 @@ function mobileCard(item) {
     <div class="card-row"><span>${actionTierBadge(item)}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
     <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>${escapeHtml(displayState)}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
-    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${techTag}${dataTag}${reverseTag}</div>
+    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${techTag}${dataTag}${reverseTag}</div>
   </article>`;
 }
 
@@ -1229,7 +1249,8 @@ function closeDetail() {
 function renderEvents() {
   const container = document.querySelector("#eventList");
   const technicalAlerts = state.decisionReport?.technical_unlock_alerts || [];
-  if (!state.events.length && !technicalAlerts.length) {
+  const reviewAlerts = state.decisionReport?.post_unlock_review_alerts || [];
+  if (!state.events.length && !technicalAlerts.length && !reviewAlerts.length) {
     container.innerHTML = '<div class="empty-state">暂无状态变化事件</div>';
     return;
   }
@@ -1246,11 +1267,28 @@ function renderEvents() {
       ${checklist.length ? `<ol class="event-checklist">${checklist.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : ""}
     </article>`;
   }).join("");
+  const reviewHtml = reviewAlerts.map(alert => {
+    const review = alert.review || {};
+    const tags = [
+      review.status_label || review.status,
+      review.candidate ? `候选：${review.candidate === "positive_t" ? "正T" : "反T"}` : "",
+      review.blocked_check_count ? `阻断 ${review.blocked_check_count} 项` : "",
+      review.waiting_check_count ? `等待 ${review.waiting_check_count} 项` : "",
+    ].filter(Boolean);
+    return `<article class="event-item event-review event-clickable" tabindex="0" data-event-code="${escapeHtml(alert.code || "")}" data-event-target="technical-gate">
+      <div class="event-time">${escapeHtml(state.decisionReport?.generated_at || "")}</div>
+      <div class="event-title">${escapeHtml(alert.code || "")} ${escapeHtml(alert.name || "")} · ${escapeHtml(alert.title || "自动复核提醒")}</div>
+      ${alert.action_label ? `<div class="event-action event-action-${escapeHtml(alert.severity || "watch")}">${escapeHtml(alert.action_label)}</div>` : ""}
+      <p>${escapeHtml(alert.message || "")}</p>
+      <p class="secondary">${escapeHtml(review.next_step || "")}</p>
+      ${tags.length ? `<div class="event-changes">${tags.map(tag => `<span class="event-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+    </article>`;
+  }).join("");
   const monitorHtml = state.events.map(event => {
     const tags = Object.entries(event.signature || {}).map(([code, info]) => `<span class="event-tag">${code} · ${labels[info.state] || info.state}${info.reverse_t_price_alert ? " · 反T价格提醒" : ""}</span>`).join("");
     return `<article class="event-item"><div class="event-time">${escapeHtml(event.generated_at)}</div><div class="event-changes">${tags}</div></article>`;
   }).join("");
-  container.innerHTML = alertHtml + monitorHtml;
+  container.innerHTML = reviewHtml + alertHtml + monitorHtml;
 }
 
 function updateHeader(status) {

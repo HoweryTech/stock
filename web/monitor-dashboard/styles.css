@@ -172,6 +172,13 @@ th:nth-child(8) { width: 100px; }
 .advice { line-height: 1.45; }
 .advice-tag { margin-top: 4px; color: var(--blue); font-size: 12px; font-weight: 600; }
 .unlock-alert-tag { color: var(--amber); }
+.review-line { display: flex; align-items: flex-start; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 12px; }
+.review-line span { display: inline-flex; flex: 0 0 auto; min-height: 22px; align-items: center; padding: 2px 7px; border-radius: 4px; font-weight: 700; }
+.review-line em { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-style: normal; }
+.review-line-candidate span { color: var(--green); background: var(--green-bg); }
+.review-line-block span { color: var(--red); background: var(--red-bg); }
+.review-line-locked span { color: var(--amber); background: var(--amber-bg); }
+.review-line-watch span { color: var(--blue); background: var(--blue-bg); }
 .technical-line { display: flex; align-items: center; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 12px; }
 .technical-line span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .technical-badge { display: inline-flex; flex: 0 0 auto; align-items: center; min-height: 22px; padding: 2px 7px; border-radius: 4px; font-size: 12px; font-weight: 600; }
@@ -385,6 +392,7 @@ th:nth-child(8) { width: 100px; }
 .event-item { padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .event-item:last-child { border-bottom: 0; }
 .event-technical { background: #fbfcfd; }
+.event-review { background: #fffdf7; }
 .event-clickable { cursor: pointer; }
 .event-clickable:hover { background: #f5f8fb; }
 .event-clickable:focus-visible { outline: 2px solid rgba(23, 92, 211, 0.35); outline-offset: -2px; }
