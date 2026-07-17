@@ -310,6 +310,13 @@ function positiveTPlanTag(item) {
   return `<div class="advice-tag ${toneClass}">${escapeHtml(label)} · ${escapeHtml(plan.next_action || "")}</div>`;
 }
 
+function tClosurePerformanceTag(item) {
+  const performance = item.t_closure_performance || {};
+  if (!performance.total_count) return "";
+  const toneClass = Number(performance.total_net_profit) > 0 ? "positive-t-ready" : "positive-t-fail";
+  return `<div class="advice-tag ${toneClass}">做T实盘统计 · ${performance.profitable_count}/${performance.total_count}盈利 · 累计${money(performance.total_net_profit)}</div>`;
+}
+
 function filteredItems() {
   const items = state.snapshot?.items || [];
   return items.filter(item => {
@@ -411,6 +418,7 @@ function tableRow(item) {
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
   const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
   const reviewTag = postUnlockReviewTag(item);
+  const performanceTag = tClosurePerformanceTag(item);
   const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<tr data-code="${item.code}" tabindex="0">
@@ -419,7 +427,7 @@ function tableRow(item) {
     <td class="number"><div class="${tone(item.position.unrealized_pnl)}">${money(item.position.unrealized_pnl)}</div><div class="secondary ${tone(item.position.return_pct)}">${pct(item.position.return_pct)}</div></td>
     <td class="number"><div>${pct(item.position.live_position_pct)}</div><div class="secondary">${Number(item.position.shares).toFixed(0)}股</div></td>
     <td><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><div class="state-tier">${actionTierBadge(item)}</div></td>
-    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${positiveTag}${techTag}${dataTag}${reverseTag}</td>
+    <td class="advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${positiveTag}${performanceTag}${techTag}${dataTag}${reverseTag}</td>
     <td class="number"><div class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)}</div><div class="secondary ${tone(item.capital_flow?.main_net_inflow_ratio_pct)}">${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</div></td>
     <td class="number">${lag == null ? "--" : `${Number(lag).toFixed(1)}s`}</td>
   </tr>`;
@@ -436,6 +444,7 @@ function mobileCard(item) {
   const cardTag = card ? `<div class="advice-tag">${escapeHtml(card.decision.confidence)} · ${escapeHtml(card.reason)}</div>` : "";
   const unlockTag = unlockAlert ? `<div class="advice-tag unlock-alert-tag">${escapeHtml(unlockAlert.action_label || "技术接近解锁")} · 还差${unlockAlert.min_gap == null ? "--" : Number(unlockAlert.min_gap).toFixed(1)}分</div>` : "";
   const reviewTag = postUnlockReviewTag(item);
+  const performanceTag = tClosurePerformanceTag(item);
   const techTag = card ? `<div class="technical-line">${technicalBadge(item)}<span>${escapeHtml(technicalSummary(item))}</span></div>` : "";
   const dataTag = card ? `<div class="quality-line">${qualityBadge(item)}<span>${escapeHtml(qualitySummary(dataQualityFor(item)))}</span></div>` : "";
   return `<article class="position-card" data-code="${item.code}" tabindex="0">
@@ -447,7 +456,7 @@ function mobileCard(item) {
     <div class="card-row"><span>${actionTierBadge(item)}</span><span>仓位 ${pct(item.position.live_position_pct)}</span></div>
     <div class="card-row"><span class="state-badge state-${displayState}">${escapeHtml(displayStateLabelFor(item))}</span><span>${escapeHtml(displayState)}</span></div>
     <div class="card-row"><span>主力净额</span><span class="${tone(item.capital_flow?.main_net_inflow)}">${compactMoney(item.capital_flow?.main_net_inflow)} · ${pct(item.capital_flow?.main_net_inflow_ratio_pct)}</span></div>
-    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${positiveTag}${techTag}${dataTag}${reverseTag}</div>
+    <div class="card-advice">${escapeHtml(adviceFor(item))}${cardTag}${unlockTag}${reviewTag}${positiveTag}${performanceTag}${techTag}${dataTag}${reverseTag}</div>
   </article>`;
 }
 
@@ -1142,6 +1151,45 @@ function positiveTClosureSection(item) {
   );
 }
 
+function tClosurePerformanceSection(item) {
+  const performance = item.t_closure_performance || {};
+  if (!performance.total_count) return "";
+  const metrics = [
+    ["统计结论", performance.status_label || "--"],
+    ["闭环次数", `${performance.total_count}轮`],
+    ["盈利 / 未盈利", `${performance.profitable_count || 0} / ${performance.loss_count || 0}`],
+    ["胜率", pct(performance.win_rate_pct)],
+    ["累计净收益", money(performance.total_net_profit)],
+    ["平均每轮", money(performance.average_net_profit)],
+    ["累计毛收益", money(performance.total_gross_profit)],
+    ["累计费用", money(performance.total_fees)],
+    ["反T净收益", `${money(performance.reverse_t_net_profit)} / ${performance.reverse_t_count || 0}轮`],
+    ["正T净收益", `${money(performance.positive_t_net_profit)} / ${performance.positive_t_count || 0}轮`],
+  ];
+  const recent = performance.recent_closures || [];
+  const recentHtml = recent.length
+    ? `<div class="closure-list">${recent.slice().reverse().map(closure => `
+      <div class="closure-item">
+        <div><strong>${escapeHtml(closure.type_label || "--")}</strong><span>${escapeHtml(closure.closed_at || "--")}</span></div>
+        <div class="closure-item-metrics">
+          <span>${num(closure.open_price)} → ${num(closure.close_price)}元</span>
+          <span>${num(closure.shares, 0)}股</span>
+          <span class="${tone(closure.net_profit)}">${money(closure.net_profit)}</span>
+        </div>
+      </div>`).join("")}</div>`
+    : "";
+  const toneClass = Number(performance.total_net_profit) > 0 ? "positive" : "negative";
+  return detailSection(
+    "做T实盘绩效统计",
+    `<div class="closure-summary ${toneClass}">
+      <strong>${escapeHtml(performance.status_label || "暂无统计结论")}</strong>
+      <span>${escapeHtml(performance.next_action || "继续按系统候选小额验证。")}</span>
+    </div>
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${value}</dd></dl>`).join("")}</div>
+    ${recentHtml ? `<h4>最近闭环</h4>${recentHtml}` : ""}`
+  );
+}
+
 function updateManualTradeImpact(form) {
   const code = form.dataset.code;
   const item = state.snapshot?.items.find(entry => entry.code === code);
@@ -1328,6 +1376,7 @@ function openDetail(code, options = {}) {
   const reversePlan = item.reverse_t_plan;
   html += reverseTClosureSection(item);
   html += positiveTClosureSection(item);
+  html += tClosurePerformanceSection(item);
   if (reversePlan) {
     const reverseTechnicalBlock = renderTechnicalOperationBlock(technicalOperation, "reverse_t");
     const reverseStatus = reversePlan.status === "candidate" ? "反T候选" : reversePlan.status === "watch" ? "等待形态" : reversePlan.status === "fee_blocked" ? "手续费阻断" : "仅供观察，不可执行";

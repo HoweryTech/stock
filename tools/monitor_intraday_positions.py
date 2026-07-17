@@ -156,6 +156,85 @@ def latest_open_positive_t_leg(position: dict[str, Any]) -> dict[str, Any] | Non
     return candidates[-1] if candidates else None
 
 
+def build_t_closure_performance(position: dict[str, Any]) -> dict[str, Any]:
+    history = position.get("manual_trade_history") or []
+    if not isinstance(history, list):
+        history = []
+
+    closures: list[dict[str, Any]] = []
+    for record in history:
+        intent = record.get("trade_intent")
+        closure_key = "reverse_t_closure" if intent == "reverse_t_close" else "positive_t_closure" if intent == "positive_t_close" else ""
+        if not closure_key:
+            continue
+        closure = record.get(closure_key)
+        if not isinstance(closure, dict):
+            continue
+        net_profit = as_float(closure.get("net_profit"), 0.0) or 0.0
+        gross_profit = as_float(closure.get("gross_profit"), 0.0) or 0.0
+        total_fees = as_float(value_at(closure, "fees.total_fees"), 0.0) or 0.0
+        close_price_key = "buy_price" if intent == "reverse_t_close" else "sell_price"
+        open_price_key = "sell_price" if intent == "reverse_t_close" else "buy_price"
+        closures.append({
+            "type": "reverse_t" if intent == "reverse_t_close" else "positive_t",
+            "type_label": "反T" if intent == "reverse_t_close" else "正T",
+            "status": closure.get("status"),
+            "profitable": net_profit > 0,
+            "net_profit": round(net_profit, 4),
+            "gross_profit": round(gross_profit, 4),
+            "total_fees": round(total_fees, 4),
+            "shares": as_float(closure.get("shares"), 0.0) or 0.0,
+            "open_price": as_float(closure.get(open_price_key)),
+            "close_price": as_float(closure.get(close_price_key)),
+            "open_trade_id": closure.get("sell_trade_id") if intent == "reverse_t_close" else closure.get("buy_trade_id"),
+            "close_trade_id": closure.get("buy_trade_id") if intent == "reverse_t_close" else closure.get("sell_trade_id"),
+            "closed_at": record.get("occurred_at"),
+        })
+
+    total_count = len(closures)
+    profitable_count = sum(1 for item in closures if item["net_profit"] > 0)
+    loss_count = sum(1 for item in closures if item["net_profit"] <= 0)
+    total_net_profit = round(sum(float(item["net_profit"]) for item in closures), 4)
+    total_gross_profit = round(sum(float(item["gross_profit"]) for item in closures), 4)
+    total_fees = round(sum(float(item["total_fees"]) for item in closures), 4)
+    reverse_closures = [item for item in closures if item["type"] == "reverse_t"]
+    positive_closures = [item for item in closures if item["type"] == "positive_t"]
+    average_net_profit = round(total_net_profit / total_count, 4) if total_count else None
+    win_rate_pct = round(profitable_count / total_count * 100, 2) if total_count else None
+
+    if total_count == 0:
+        status = "no_history"
+        status_label = "暂无实盘闭环样本"
+        next_action = "先只按系统候选小额试做；完成正T/反T闭环后再评估这只股票是否适合继续做T。"
+    elif total_net_profit > 0 and profitable_count >= loss_count:
+        status = "profitable"
+        status_label = "实盘闭环暂时有效"
+        next_action = "可以继续小额执行系统给出的候选区间；不要因为单次盈利放大单次股数。"
+    else:
+        status = "needs_review"
+        status_label = "实盘闭环需要降频"
+        next_action = "暂停放大做T，只保留最小100股试做或等待更强的技术确认。"
+
+    return {
+        "status": status,
+        "status_label": status_label,
+        "total_count": total_count,
+        "profitable_count": profitable_count,
+        "loss_count": loss_count,
+        "win_rate_pct": win_rate_pct,
+        "total_net_profit": total_net_profit,
+        "average_net_profit": average_net_profit,
+        "total_gross_profit": total_gross_profit,
+        "total_fees": total_fees,
+        "reverse_t_count": len(reverse_closures),
+        "reverse_t_net_profit": round(sum(float(item["net_profit"]) for item in reverse_closures), 4),
+        "positive_t_count": len(positive_closures),
+        "positive_t_net_profit": round(sum(float(item["net_profit"]) for item in positive_closures), 4),
+        "recent_closures": closures[-5:],
+        "next_action": next_action,
+    }
+
+
 def one_side_trade_fees(side: str, price: float, shares: int, costs: dict[str, float]) -> dict[str, float]:
     amount = price * shares
     commission = max(amount * costs["commission_rate"], costs["minimum_commission"])
@@ -782,6 +861,7 @@ def analyze_quote(
         stale="stale_quote" in signal_codes,
         costs=costs,
     )
+    t_closure_performance = build_t_closure_performance(position)
     action_decision = apply_state_action_tier(build_action_decision(reverse_t_plan, reduction_plan), state, reverse_t_plan, reduction_plan)
 
     return {
@@ -811,6 +891,7 @@ def analyze_quote(
         "signals": signals,
         "latest_reverse_t_closure": value_at(position, "tracking.latest_reverse_t_closure"),
         "latest_positive_t_closure": value_at(position, "tracking.latest_positive_t_closure"),
+        "t_closure_performance": t_closure_performance,
         "reverse_t_plan": reverse_t_plan,
         "positive_t_plan": positive_t_plan,
         "reduction_plan": reduction_plan,
@@ -925,6 +1006,8 @@ def state_signature(snapshot: dict[str, Any]) -> dict[str, Any]:
             "positive_t_target_ready": item.get("positive_t_plan", {}).get("status") == "target_sell_ready",
             "latest_reverse_t_closure": (item.get("latest_reverse_t_closure") or {}).get("buy_trade_id"),
             "latest_positive_t_closure": (item.get("latest_positive_t_closure") or {}).get("sell_trade_id"),
+            "t_closure_count": item.get("t_closure_performance", {}).get("total_count"),
+            "t_closure_total_net_profit": item.get("t_closure_performance", {}).get("total_net_profit"),
             "reduction_status": item.get("reduction_plan", {}).get("status"),
         }
         for item in snapshot["items"]

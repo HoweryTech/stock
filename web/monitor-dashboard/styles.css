@@ -296,6 +296,24 @@ th:nth-child(8) { width: 100px; }
   background: var(--bg);
 }
 .closure-summary span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.closure-list { display: grid; gap: 8px; }
+.closure-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.closure-item > div:first-child,
+.closure-item-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+}
+.closure-item span { color: var(--muted); font-size: 12px; }
+.closure-item-metrics span:last-child { font-weight: 700; }
 .confirm-modal {
   position: fixed;
   z-index: 50;

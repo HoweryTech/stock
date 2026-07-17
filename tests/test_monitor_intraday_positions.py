@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 
-from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_positive_t_plan, build_reduction_plan, build_reverse_t_plan, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
+from tools.monitor_intraday_positions import analyze_quote, build_action_decision, build_positive_t_plan, build_reduction_plan, build_reverse_t_plan, build_t_closure_performance, moving_averages, multi_timeframe_metrics, state_signature, trade_costs
 
 
 class MonitorIntradayPositionsTest(unittest.TestCase):
@@ -209,6 +209,96 @@ class MonitorIntradayPositionsTest(unittest.TestCase):
 
         self.assertEqual(item["latest_positive_t_closure"]["sell_trade_id"], "MANUAL-POSITIVE-CLOSE")
         self.assertEqual(item["latest_positive_t_closure"]["status"], "closed_profitable")
+
+    def test_t_closure_performance_summarizes_manual_closures(self) -> None:
+        position = {
+            "manual_trade_history": [
+                {
+                    "id": "MANUAL-REVERSE-CLOSE",
+                    "side": "buy",
+                    "trade_intent": "reverse_t_close",
+                    "linked_trade_id": "MANUAL-REVERSE-OPEN",
+                    "occurred_at": "2026-07-16T14:40:00+08:00",
+                    "reverse_t_closure": {
+                        "status": "closed_profitable",
+                        "sell_trade_id": "MANUAL-REVERSE-OPEN",
+                        "buy_trade_id": "MANUAL-REVERSE-CLOSE",
+                        "sell_price": 6.32,
+                        "buy_price": 6.04,
+                        "shares": 100,
+                        "gross_profit": 28.0,
+                        "fees": {"total_fees": 10.3283},
+                        "net_profit": 17.6717,
+                    },
+                },
+                {
+                    "id": "MANUAL-POSITIVE-CLOSE",
+                    "side": "sell",
+                    "trade_intent": "positive_t_close",
+                    "linked_trade_id": "MANUAL-POSITIVE-OPEN",
+                    "occurred_at": "2026-07-17T10:18:00+08:00",
+                    "positive_t_closure": {
+                        "status": "closed_loss",
+                        "buy_trade_id": "MANUAL-POSITIVE-OPEN",
+                        "sell_trade_id": "MANUAL-POSITIVE-CLOSE",
+                        "buy_price": 6.10,
+                        "sell_price": 6.18,
+                        "shares": 100,
+                        "gross_profit": 8.0,
+                        "fees": {"total_fees": 10.3213},
+                        "net_profit": -2.3213,
+                    },
+                },
+            ],
+        }
+
+        performance = build_t_closure_performance(position)
+
+        self.assertEqual(performance["total_count"], 2)
+        self.assertEqual(performance["profitable_count"], 1)
+        self.assertEqual(performance["loss_count"], 1)
+        self.assertEqual(performance["win_rate_pct"], 50.0)
+        self.assertAlmostEqual(performance["total_net_profit"], 15.3504, places=4)
+        self.assertAlmostEqual(performance["average_net_profit"], 7.6752, places=4)
+        self.assertEqual(performance["reverse_t_count"], 1)
+        self.assertEqual(performance["positive_t_count"], 1)
+        self.assertEqual(performance["status"], "profitable")
+        self.assertEqual(performance["recent_closures"][-1]["type"], "positive_t")
+
+    def test_analyze_quote_exposes_t_closure_performance(self) -> None:
+        position = {
+            "stock": {"code": "000725", "name": "京东方A"},
+            "entry": {"shares": 200, "entry_price": 7.6025, "position_pct_of_total_assets": 4.72},
+            "manual_trade_history": [
+                {
+                    "id": "MANUAL-REVERSE-CLOSE",
+                    "side": "buy",
+                    "trade_intent": "reverse_t_close",
+                    "linked_trade_id": "MANUAL-REVERSE-OPEN",
+                    "reverse_t_closure": {
+                        "status": "closed_profitable",
+                        "sell_trade_id": "MANUAL-REVERSE-OPEN",
+                        "buy_trade_id": "MANUAL-REVERSE-CLOSE",
+                        "sell_price": 6.32,
+                        "buy_price": 6.04,
+                        "shares": 100,
+                        "gross_profit": 28.0,
+                        "fees": {"total_fees": 10.3283},
+                        "net_profit": 17.6717,
+                    },
+                },
+            ],
+        }
+        quote = {"code": "000725", "latest_price": 6.25, "change_pct": 1.2, "quote_timestamp": 1000}
+
+        item = analyze_quote(
+            position, quote, self.history(), total_assets=25480, max_stale_seconds=60,
+            costs=self.costs, max_reverse_t_position_ratio_pct=50, now_timestamp=1001,
+        )
+
+        self.assertEqual(item["t_closure_performance"]["total_count"], 1)
+        self.assertEqual(item["t_closure_performance"]["status"], "profitable")
+        self.assertAlmostEqual(item["t_closure_performance"]["total_net_profit"], 17.6717, places=4)
 
     def test_open_positive_t_leg_triggers_target_sell_ready(self) -> None:
         position = {
