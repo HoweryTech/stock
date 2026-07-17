@@ -588,7 +588,33 @@ function renderCapitalPlan(plan) {
   );
 }
 
-function renderPriceActionTable(table) {
+function priceActionPresetButton(row, item) {
+  if (!row || row.status !== "ready") return "";
+  const currentPrice = item?.quote?.latest_price == null ? null : Number(item.quote.latest_price);
+  const shares = Number(row.shares || 0);
+  if (!currentPrice || !shares) return "";
+  if (row.action === "止损/退出") {
+    return `<button class="secondary-action danger-lite-action" type="button" data-manual-preset data-auto-confirm="true" data-code="${escapeHtml(item.code)}" data-side="sell" data-price="${escapeHtml(currentPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="" data-note="价格动作表：止损/退出已触发，按真实成交确认写入">填入止损卖出</button>`;
+  }
+  if (row.action === "反T回补") {
+    const plan = item.reverse_t_plan || {};
+    const buybackPrice = plan.buyback_max_price == null ? currentPrice : Math.min(currentPrice, Number(plan.buyback_max_price));
+    const openLegId = plan.open_reverse_t_leg?.id || "";
+    if (!openLegId) return "";
+    return `<button class="secondary-action" type="button" data-manual-preset data-auto-confirm="true" data-code="${escapeHtml(item.code)}" data-side="buy" data-price="${escapeHtml(buybackPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="reverse_t_close" data-linked-trade-id="${escapeHtml(openLegId)}" data-note="价格动作表：反T回补已触发，关闭开放反T卖出腿">填入反T回补</button>`;
+  }
+  if (row.action === "正T目标卖出") {
+    const plan = item.positive_t_plan || {};
+    const zone = plan.target_sell_zone || [];
+    const targetPrice = Array.isArray(zone) && zone.length >= 2 ? Number(zone[0]) : currentPrice;
+    const openLegId = plan.open_positive_t_leg?.id || "";
+    if (!openLegId) return "";
+    return `<button class="secondary-action" type="button" data-manual-preset data-auto-confirm="true" data-code="${escapeHtml(item.code)}" data-side="sell" data-price="${escapeHtml(targetPrice.toFixed(2))}" data-shares="${escapeHtml(shares)}" data-trade-intent="positive_t_close" data-linked-trade-id="${escapeHtml(openLegId)}" data-note="价格动作表：正T目标卖出已触发，关闭开放正T买入腿">填入正T卖出</button>`;
+  }
+  return "";
+}
+
+function renderPriceActionTable(table, item) {
   const rows = table?.rows || [];
   if (!rows.length) return "";
   const statusClass = status => ({
@@ -602,7 +628,7 @@ function renderPriceActionTable(table) {
     `<p class="secondary">${escapeHtml(table.summary || "按触发价执行；未触发前只观察。")}</p>
     <div class="action-table-wrap">
       <table class="action-table">
-        <thead><tr><th>动作</th><th>触发条件</th><th>价格</th><th>操作</th><th>状态</th><th>数量</th></tr></thead>
+        <thead><tr><th>动作</th><th>触发条件</th><th>价格</th><th>操作</th><th>状态</th><th>数量</th><th>确认</th></tr></thead>
         <tbody>${rows.map(row => `
           <tr class="action-row-${escapeHtml(row.status || "unknown")}">
             <td><strong>${escapeHtml(row.action || "--")}</strong></td>
@@ -611,8 +637,9 @@ function renderPriceActionTable(table) {
             <td>${escapeHtml(row.operation || "--")}</td>
             <td class="${statusClass(row.status)}">${escapeHtml(row.status_label || row.status || "--")}</td>
             <td class="number">${row.shares ? `${escapeHtml(row.shares)}股` : "--"}</td>
+            <td>${priceActionPresetButton(row, item)}</td>
           </tr>
-          ${row.note ? `<tr class="action-note"><td></td><td colspan="5">${escapeHtml(row.note)}</td></tr>` : ""}`
+          ${row.note ? `<tr class="action-note"><td></td><td colspan="6">${escapeHtml(row.note)}</td></tr>` : ""}`
         ).join("")}</tbody>
       </table>
     </div>`
@@ -1333,7 +1360,7 @@ function openDetail(code, options = {}) {
       ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
     );
-    html += renderPriceActionTable(decisionCard.price_action_table);
+    html += renderPriceActionTable(decisionCard.price_action_table, item);
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
     html += renderPositiveTPlan(item.positive_t_plan);
     html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);
@@ -1668,11 +1695,15 @@ document.querySelector("#detailContent").addEventListener("click", event => {
   form.querySelector('[name="trade_intent"]').value = button.dataset.tradeIntent || "";
   form.querySelector('[name="linked_trade_id"]').value = button.dataset.linkedTradeId || "";
   updateManualTradeImpact(form);
-  const status = form.querySelector(".manual-trade-status");
-  status.textContent = "已填入系统建议成交参数；确认已真实成交后再点击记录。";
   form.scrollIntoView({ block: "center", behavior: "smooth" });
   form.classList.add("detail-focus");
   setTimeout(() => form.classList.remove("detail-focus"), 1800);
+  if (button.dataset.autoConfirm === "true") {
+    prepareManualTradeConfirmation(form);
+  } else {
+    const status = form.querySelector(".manual-trade-status");
+    status.textContent = "已填入系统建议成交参数；确认已真实成交后再点击记录。";
+  }
 });
 document.querySelector("#detailContent").addEventListener("input", event => {
   const form = event.target.closest(".manual-trade-form");

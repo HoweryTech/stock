@@ -238,13 +238,14 @@ th:nth-child(8) { width: 100px; }
 .metric dt { color: var(--muted); font-size: 12px; }
 .metric dd { margin: 3px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .action-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
-.action-table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 12px; }
+.action-table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 12px; }
 .action-table th, .action-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .action-table th { color: var(--muted); font-weight: 700; background: #f6f8fa; }
 .action-table tr:last-child td { border-bottom: 0; }
 .action-table .action-row-ready td { background: var(--red-bg); }
 .action-table .action-row-blocked td { background: #fff8e6; }
 .action-table .action-note td { padding-top: 0; color: var(--muted); background: var(--surface); }
+.danger-lite-action { border-color: var(--red); color: var(--red); }
 .action-panel { margin: 14px 0; padding: 12px 13px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
 .action-panel-title { margin-bottom: 7px; font-size: 12px; color: var(--muted); font-weight: 700; }
 .action-panel p { margin: 0 0 8px; }
