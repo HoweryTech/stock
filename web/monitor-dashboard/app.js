@@ -207,6 +207,17 @@ function decisionModeTag(item) {
   return `<div class="advice-tag decision-mode-tag decision-mode-${escapeHtml(modeClass)}">盘中可信度：${escapeHtml(mode.label || mode.mode || "--")}</div>`;
 }
 
+function minuteConfirmationFor(item) {
+  return decisionCardFor(item)?.minute_confirmation || null;
+}
+
+function minuteConfirmationTag(item) {
+  const confirmation = minuteConfirmationFor(item);
+  if (!confirmation) return "";
+  const status = confirmation.status || "not_available";
+  return `<div class="advice-tag minute-confirmation-tag minute-confirmation-${escapeHtml(status)}">分钟确认：${escapeHtml(confirmation.status_label || status)}</div>`;
+}
+
 function adviceFor(item) {
   const card = state.decisionCards.get(item.code);
   return card?.decision?.action_label || automaticDecisionFor(item).headline;
@@ -475,6 +486,7 @@ function renderDecisionSummary(item) {
   return `<div class="advice-summary">
     <div class="advice-primary advice-unique"><span>唯一结论</span><strong>${escapeHtml(conclusion)}</strong></div>
     ${decisionModeTag(item)}
+    ${minuteConfirmationTag(item)}
     ${stopLossDistanceTag(card)}
   </div>`;
 }
@@ -691,6 +703,7 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
   const actionSteps = decisionCard?.decision?.action_steps || [];
   const decision = decisionCard?.decision || {};
   const arbitration = decision.action_arbitration || {};
+  const minuteConfirmation = decisionCard?.minute_confirmation || {};
   const automatic = item.action_decision || {};
   const watchRows = (decisionCard?.price_action_table?.rows || []).filter(row => row.status === "watch" || row.status === "reference");
   const queueItem = (state.decisionReport?.priority_queue?.items || []).find(entry => entry.code === item.code);
@@ -715,6 +728,7 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
     ["状态", decisionCard?.state_label || displayStateLabelFor(item)],
     ["动作等级", actionTierFor(item).label],
     ["盘中可信度", decisionCard?.decision_mode?.label || "--"],
+    ["分钟确认", minuteConfirmation.status_label || "--"],
     ["执行许可", decision.execution_allowed ? "允许人工确认" : "禁止直接执行"],
   ];
   const readingOrder = [
@@ -1623,6 +1637,41 @@ function renderPositiveTiming(timing, technicalOperation = null) {
   );
 }
 
+function renderMinuteConfirmation(confirmation) {
+  if (!confirmation) return "";
+  const metrics = confirmation.metrics || {};
+  const metricRows = [
+    ["状态", confirmation.status_label || confirmation.status || "--"],
+    ["评分", confirmation.score == null ? "--" : Number(confirmation.score).toFixed(1)],
+    ["最新分钟", confirmation.latest_timestamp || "--"],
+    ["样本", metrics.bar_count == null ? "--" : `${metrics.bar_count}根`],
+    ["现价/收盘", money(metrics.last_close)],
+    ["5分钟MA5", money(metrics.ma5)],
+    ["5分钟MA20", money(metrics.ma20)],
+    ["近3根涨跌", pct(metrics.return_3_pct)],
+    ["近6根涨跌", pct(metrics.return_6_pct)],
+    ["MACD动能", metrics.macd_hist == null ? "--" : Number(metrics.macd_hist).toFixed(4)],
+    ["RSI14", metrics.rsi14 == null ? "--" : Number(metrics.rsi14).toFixed(1)],
+    ["BOLL位置", metrics.boll_percent_b == null ? "--" : Number(metrics.boll_percent_b).toFixed(2)],
+    ["5分钟量比", metrics.volume_ratio == null ? "--" : Number(metrics.volume_ratio).toFixed(2)],
+  ];
+  const signals = confirmation.signals || [];
+  const blockers = confirmation.blockers || [];
+  const tone = confirmation.status === "confirm" ? "positive_t_watch" : confirmation.status === "block" ? "exit_risk_review" : "hold_no_add";
+  return detailSection(
+    "分钟级二次确认",
+    `<div class="action-panel action-${tone}">
+      <div class="action-panel-title">${escapeHtml(confirmation.status_label || "分钟确认")}</div>
+      <p>${escapeHtml(confirmation.summary || "")}</p>
+    </div>
+    <div class="metric-grid">${metricRows.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    ${signals.length ? `<h4>支持信号</h4><ul class="reason-list">${signals.map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}
+    ${blockers.length ? `<h4>阻断/扣分信号</h4><ul class="reason-list">${blockers.map(blocker => `<li>${escapeHtml(blocker)}</li>`).join("")}</ul>` : ""}`,
+    "minute-confirmation",
+    {collapsed: confirmation.status !== "block", summary: confirmation.summary || confirmation.status_label || "分钟线确认"}
+  );
+}
+
 function estimateManualTradeFees(side, price, shares) {
   const amount = price * shares;
   const commission = Math.max(amount * 0.0003, 5);
@@ -2294,6 +2343,7 @@ function openDetail(code, options = {}) {
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
     html += renderPositiveTPlan(item.positive_t_plan);
     html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);
+    html += renderMinuteConfirmation(decisionCard.minute_confirmation);
     html += renderCapitalPlan(decisionCard.capital_plan);
     html += renderReverseTPlanSection(item, decisionCard, technicalOperation);
     html += renderTechnicalAssessment(decisionCard.technical_assessment);

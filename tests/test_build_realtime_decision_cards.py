@@ -141,6 +141,24 @@ def unconfirmed_minute_bars(code: str = "600000") -> dict[str, list[dict]]:
     return {code: adjusted}
 
 
+def weak_minute_bars(code: str = "600000") -> dict[str, list[dict]]:
+    closes = [10.80 - index * 0.035 for index in range(30)]
+    bars = []
+    for index, close in enumerate(closes):
+        bars.append(
+            {
+                "timestamp": f"2026-07-16 10:{index:02d}",
+                "code": code,
+                "open": close + 0.02,
+                "high": close + 0.03,
+                "low": close - 0.02,
+                "close": close,
+                "volume": 900 + index * 80,
+            }
+        )
+    return {code: bars}
+
+
 class RealtimeDecisionCardsTest(unittest.TestCase):
     def test_hard_t_blocker_takes_exit_risk_priority(self) -> None:
         portfolio = portfolio_result()
@@ -457,6 +475,32 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any(blocker["code"] == "confirmation_insufficient" for blocker in card["positive_timing"]["blockers"]))
         self.assertIn("当前不买入", card["positive_timing"]["next_action"])
         self.assertEqual(card["capital_plan"]["status"], "waiting_intraday_confirmation")
+
+    def test_minute_confirmation_blocks_when_short_term_signals_are_weak(self) -> None:
+        item = intraday_item()
+        item["quote"]["latest_price"] = 9.78
+        report = build_report(
+            {"items": [item]},
+            portfolio_result(),
+            t_result(),
+            None,
+            None,
+            None,
+            None,
+            bullish_technical_doc(),
+            weak_minute_bars(),
+            generated_at=datetime(2026, 7, 16, 10, 0, 0),
+        )
+
+        card = report["cards"][0]
+        confirmation = card["minute_confirmation"]
+
+        self.assertTrue(confirmation["available"])
+        self.assertEqual(confirmation["status"], "block")
+        self.assertLessEqual(confirmation["score"], -18)
+        self.assertLess(confirmation["metrics"]["return_6_pct"], 0)
+        self.assertTrue(any("5分钟MACD" in item for item in confirmation["blockers"]))
+        self.assertTrue(any("[分钟阻断]" in item for item in card["evidence"]))
 
     def test_positive_t_confirmed_intraday_waits_when_daily_context_is_weak(self) -> None:
         item = intraday_item()

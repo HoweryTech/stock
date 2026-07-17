@@ -1173,6 +1173,176 @@ def simple_rsi(values: list[float], period: int = 14) -> float | None:
     return 100 - 100 / (1 + relative_strength)
 
 
+def rolling_stddev(values: list[float]) -> float | None:
+    if not values:
+        return None
+    mean = average(values)
+    if mean is None:
+        return None
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return math.sqrt(variance)
+
+
+def build_minute_confirmation(
+    intraday: dict[str, Any],
+    minute_bars: list[dict[str, Any]] | None,
+    technical_assessment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    day_bars = latest_day_bars(minute_bars or [])
+    if len(day_bars) < 20:
+        return {
+            "available": False,
+            "status": "not_available",
+            "status_label": "分钟数据不足",
+            "score": None,
+            "summary": f"最新交易日5分钟线只有 {len(day_bars)} 根，不能做分钟级二次确认。",
+            "signals": [],
+            "blockers": ["5分钟线不足20根，MA20、RSI、BOLL和量能确认不稳定。"],
+            "metrics": {"bar_count": len(day_bars)},
+        }
+
+    closes = [as_float(bar.get("close")) for bar in day_bars]
+    closes = [value for value in closes if value is not None]
+    volumes = [as_float(bar.get("volume")) for bar in day_bars]
+    volumes = [value for value in volumes if value is not None]
+    if len(closes) < 20:
+        return {
+            "available": False,
+            "status": "not_available",
+            "status_label": "分钟价格不足",
+            "score": None,
+            "summary": f"最新交易日5分钟有效收盘价只有 {len(closes)} 个，不能做分钟级二次确认。",
+            "signals": [],
+            "blockers": ["5分钟线价格字段不完整，短线动能、BOLL和均线确认失效。"],
+            "metrics": {"bar_count": len(day_bars), "valid_close_count": len(closes)},
+        }
+
+    current = as_float(value_at(intraday, "quote.latest_price"), closes[-1]) or closes[-1]
+    previous = closes[-2] if len(closes) >= 2 else None
+    ma5 = average(closes[-5:])
+    ma20 = average(closes[-20:])
+    std20 = rolling_stddev(closes[-20:])
+    boll_upper = None if ma20 is None or std20 is None else ma20 + std20 * 2
+    boll_lower = None if ma20 is None or std20 is None else ma20 - std20 * 2
+    boll_percent_b = None
+    if boll_upper is not None and boll_lower is not None and boll_upper != boll_lower:
+        boll_percent_b = (current - boll_lower) / (boll_upper - boll_lower)
+    ema12 = ema_latest(closes, 12)
+    ema26 = ema_latest(closes, 26)
+    macd_hist = None if ema12 is None or ema26 is None else ema12 - ema26
+    rsi14 = simple_rsi(closes, 14)
+    avg_volume_20 = average(volumes[-20:]) if len(volumes) >= 20 else None
+    volume_ratio = None if avg_volume_20 in (None, 0) or not volumes else volumes[-1] / avg_volume_20
+    return_3_pct = None if len(closes) < 4 or closes[-4] == 0 else (current / closes[-4] - 1) * 100
+    return_6_pct = None if len(closes) < 7 or closes[-7] == 0 else (current / closes[-7] - 1) * 100
+    latest_return_pct = None if previous in (None, 0) else (current / previous - 1) * 100
+    technical_label = str((technical_assessment or {}).get("label") or "")
+
+    score = 0.0
+    signals: list[str] = []
+    blockers: list[str] = []
+    if ma5 is not None and current >= ma5:
+        score += 8
+        signals.append("现价站在5分钟MA5上方，短线没有继续破位。")
+    elif ma5 is not None:
+        score -= 8
+        blockers.append("现价低于5分钟MA5，短线仍偏弱。")
+    if ma20 is not None and current >= ma20:
+        score += 8
+        signals.append("现价站在5分钟MA20上方，分时结构可观察。")
+    elif ma20 is not None:
+        score -= 8
+        blockers.append("现价低于5分钟MA20，分时结构尚未修复。")
+    if return_3_pct is not None and return_6_pct is not None:
+        if return_3_pct > 0 and return_6_pct > 0:
+            score += 14
+            signals.append(f"近3/6根5分钟涨幅为 {return_3_pct:.2f}% / {return_6_pct:.2f}%，短线动能改善。")
+        elif return_3_pct < 0 and return_6_pct < 0:
+            score -= 14
+            blockers.append(f"近3/6根5分钟涨幅为 {return_3_pct:.2f}% / {return_6_pct:.2f}%，短线动能转弱。")
+    if macd_hist is not None:
+        if macd_hist > 0:
+            score += 12
+            signals.append("5分钟MACD动能为正，支持继续观察执行窗口。")
+        else:
+            score -= 12
+            blockers.append("5分钟MACD动能为负，暂不支持主动动作。")
+    if rsi14 is not None:
+        if 45 <= rsi14 <= 65:
+            score += 8
+            signals.append(f"5分钟RSI14为 {rsi14:.1f}，处于健康确认区。")
+        elif 35 <= rsi14 < 45:
+            score += 2
+            signals.append(f"5分钟RSI14为 {rsi14:.1f}，弱修复但还不强。")
+        elif rsi14 < 35:
+            score -= 8
+            blockers.append(f"5分钟RSI14为 {rsi14:.1f}，短线承接偏弱。")
+        elif rsi14 > 75:
+            score -= 6
+            blockers.append(f"5分钟RSI14为 {rsi14:.1f}，短线过热，避免追价。")
+    if boll_percent_b is not None:
+        if 0.25 <= boll_percent_b <= 0.80:
+            score += 6
+            signals.append(f"5分钟BOLL位置 {boll_percent_b:.2f}，没有贴下轨破位或上轨过热。")
+        elif boll_percent_b < 0.15:
+            score -= 8
+            blockers.append(f"5分钟BOLL位置 {boll_percent_b:.2f}，接近下轨弱势区。")
+        elif boll_percent_b > 0.95:
+            score -= 5
+            blockers.append(f"5分钟BOLL位置 {boll_percent_b:.2f}，接近上轨，追价性价比不足。")
+    if volume_ratio is not None:
+        if volume_ratio >= 1.3 and (latest_return_pct or 0) >= 0:
+            score += 8
+            signals.append(f"5分钟量比 {volume_ratio:.2f} 且价格未下跌，成交确认偏正。")
+        elif volume_ratio >= 1.3 and (latest_return_pct or 0) < 0:
+            score -= 8
+            blockers.append(f"5分钟量比 {volume_ratio:.2f} 但价格下跌，放量偏空。")
+        elif volume_ratio < 0.6:
+            score -= 4
+            blockers.append(f"5分钟量比 {volume_ratio:.2f}，成交不足。")
+    if technical_label in {"bearish", "slightly_bearish"} and score > 0:
+        score -= 6
+        blockers.append("大周期技术面偏弱，分钟确认分需要打折。")
+
+    if score >= 18:
+        status = "confirm"
+        status_label = "分钟确认"
+        summary = "5分钟动能、均线、BOLL/RSI和量能整体支持把价格区间作为可观察执行窗口。"
+    elif score <= -18:
+        status = "block"
+        status_label = "分钟阻断"
+        summary = "5分钟动能或结构明显偏弱，暂不支持主动买入、卖出做T或放宽止损。"
+    else:
+        status = "watch"
+        status_label = "分钟观察"
+        summary = "5分钟信号不够一致，只能作为观察证据，不能单独触发交易动作。"
+
+    return {
+        "available": True,
+        "status": status,
+        "status_label": status_label,
+        "score": rounded(score),
+        "summary": summary,
+        "signals": signals[:5],
+        "blockers": blockers[:5],
+        "latest_timestamp": day_bars[-1].get("timestamp"),
+        "metrics": {
+            "bar_count": len(day_bars),
+            "last_close": rounded(current),
+            "ma5": rounded(ma5),
+            "ma20": rounded(ma20),
+            "return_3_pct": rounded(return_3_pct),
+            "return_6_pct": rounded(return_6_pct),
+            "latest_return_pct": rounded(latest_return_pct),
+            "macd_hist": rounded(macd_hist),
+            "rsi14": rounded(rsi14),
+            "boll_percent_b": rounded(boll_percent_b),
+            "volume_ratio": rounded(volume_ratio),
+            "technical_label": technical_label or None,
+        },
+    }
+
+
 def latest_day_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not bars:
         return []
@@ -1600,6 +1770,7 @@ def build_evidence(
     data_quality: dict[str, Any] | None,
     technical_assessment: dict[str, Any] | None = None,
     positive_timing: dict[str, Any] | None = None,
+    minute_confirmation: dict[str, Any] | None = None,
     t_performance_gate: dict[str, Any] | None = None,
     execution_quality_gate: dict[str, Any] | None = None,
 ) -> list[str]:
@@ -1616,6 +1787,15 @@ def build_evidence(
         )
         for signal in positive_timing.get("signals", [])[:3]:
             evidence.append(f"[正T分时] {signal}")
+    if minute_confirmation:
+        evidence.append(
+            f"[分钟二次确认] {minute_confirmation.get('status_label') or minute_confirmation.get('status')} · "
+            f"score={minute_confirmation.get('score') if minute_confirmation.get('score') is not None else '-'}"
+        )
+        for signal in (minute_confirmation.get("signals") or [])[:2]:
+            evidence.append(f"[分钟确认] {signal}")
+        for blocker in (minute_confirmation.get("blockers") or [])[:2]:
+            evidence.append(f"[分钟阻断] {blocker}")
     if technical_assessment and technical_assessment.get("available"):
         evidence.append(
             f"[技术指标] {technical_assessment.get('label')} · score={technical_assessment.get('score')}"
@@ -2893,6 +3073,7 @@ def build_card(
     technical_operation = build_technical_operation(technical_assessment)
     technical_operation["post_unlock_checklist"] = technical_post_unlock_checklist(technical_operation)
     decision_mode = build_decision_mode(data_quality)
+    minute_confirmation = build_minute_confirmation(intraday, minute_bars, technical_assessment)
     positive_timing = build_positive_timing(intraday, t_check, minute_bars, technical_assessment, technical_operation)
     t_performance_gate = build_t_performance_gate(intraday)
     execution_quality_gate = build_execution_quality_gate(intraday)
@@ -2907,6 +3088,7 @@ def build_card(
         data_quality,
         technical_assessment,
         positive_timing,
+        minute_confirmation,
         t_performance_gate,
         execution_quality_gate,
     )
@@ -3005,6 +3187,7 @@ def build_card(
         "execution_quality_summary": intraday.get("execution_quality_summary") or {},
         "t_closure_performance": intraday.get("t_closure_performance") or {},
         "positive_timing": positive_timing,
+        "minute_confirmation": minute_confirmation,
         "post_unlock_review_summary": post_unlock_review_summary,
         "manual_execution_plan": manual_execution_plan,
         "decision_mode": decision_mode,
@@ -3029,6 +3212,8 @@ def build_card(
             "technical_label": technical_assessment.get("label"),
             "positive_timing_score": positive_timing.get("score"),
             "positive_timing_status": positive_timing.get("status"),
+            "minute_confirmation_status": minute_confirmation.get("status"),
+            "minute_confirmation_score": minute_confirmation.get("score"),
             "t_performance_status": t_performance_gate.get("status"),
             "t_performance_total_count": t_performance_gate.get("total_count"),
             "t_performance_total_net_profit": t_performance_gate.get("total_net_profit"),

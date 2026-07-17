@@ -242,6 +242,10 @@ th:nth-child(8) { width: 100px; }
 .decision-mode-tradable { color: var(--green); }
 .decision-mode-observe_only { color: var(--blue); }
 .decision-mode-blocked { color: var(--red); }
+.minute-confirmation-confirm { color: var(--green); }
+.minute-confirmation-watch { color: var(--blue); }
+.minute-confirmation-block { color: var(--red); }
+.minute-confirmation-not_available { color: var(--muted); }
 .review-line { display: flex; align-items: flex-start; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 12px; }
 .review-line span { display: inline-flex; flex: 0 0 auto; min-height: 22px; align-items: center; padding: 2px 7px; border-radius: 4px; font-weight: 700; }
 .review-line em { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-style: normal; }
