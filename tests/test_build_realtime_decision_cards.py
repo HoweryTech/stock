@@ -590,7 +590,7 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
             {"items": [{"code": "600000", "as_of": "2026-07-16 09:39", "predicted_sell_zone": [10.2, 10.3], "predicted_buyback_max_price": 9.95}]},
             None,
             bullish_technical_doc(),
-            {},
+            positive_minute_bars(),
             generated_at=datetime(2026, 7, 16, 9, 39, 0),
         )
 
@@ -608,6 +608,35 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(reverse_actions["反T卖出"]["shares"], 100)
         self.assertEqual(reverse_actions["反T回补"]["price"], "≤ 9.95 元")
         self.assertTrue(any("只有价格不高于" in step for step in card["manual_execution_plan"]["steps"]))
+
+    def test_reverse_t_candidate_waits_when_minute_confirmation_blocks(self) -> None:
+        item = intraday_item(reverse_status="candidate")
+        item["position"]["shares"] = 500
+        item["position"]["entry_price"] = 9.8
+        item["quote"]["latest_price"] = 9.78
+        item["reverse_t_plan"]["trade_shares"] = 100
+        item["reverse_t_plan"]["buyback_max_price"] = 9.95
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(),
+            None,
+            {"items": [{"code": "600000", "verdict": "pass", "verdict_label": "反T回测通过"}]},
+            {"items": [{"code": "600000", "as_of": "2026-07-16 09:39", "predicted_sell_zone": [10.2, 10.3], "predicted_buyback_max_price": 9.95}]},
+            None,
+            bullish_technical_doc(),
+            weak_minute_bars(),
+            generated_at=datetime(2026, 7, 16, 9, 39, 0),
+        )
+
+        card = report["cards"][0]
+        reverse_actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+
+        self.assertEqual(card["minute_confirmation"]["status"], "block")
+        self.assertEqual(card["post_unlock_review_summary"]["status"], "blocked_after_unlock")
+        self.assertFalse(card["manual_execution_plan"]["applicable"])
+        self.assertEqual(reverse_actions["反T卖出"]["status"], "blocked")
+        self.assertEqual(reverse_actions["反T卖出"]["status_label"], "分钟阻断")
 
     def test_negative_t_performance_blocks_reverse_t_candidate(self) -> None:
         item = intraday_item(reverse_status="candidate")
@@ -727,8 +756,8 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["positive_timing"]["status"], "insufficient")
         self.assertTrue(any(blocker["code"] == "minute_sample_insufficient" for blocker in card["positive_timing"]["blockers"]))
         self.assertIn("不买入", card["positive_timing"]["next_action"])
-        self.assertEqual(card["capital_plan"]["status"], "waiting_intraday_confirmation")
-        self.assertIn("分时评分未确认", card["capital_plan"]["status_label"])
+        self.assertEqual(card["capital_plan"]["status"], "waiting_minute_confirmation")
+        self.assertIn("分钟二次确认未通过", card["capital_plan"]["status_label"])
 
     def test_reverse_t_price_levels_prefer_indicator_forecast_zone(self) -> None:
         report = build_report(

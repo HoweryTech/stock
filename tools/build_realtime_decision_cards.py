@@ -915,6 +915,7 @@ def build_post_unlock_review(
     levels: dict[str, Any],
     data_quality: dict[str, Any] | None,
     positive_timing: dict[str, Any],
+    minute_confirmation: dict[str, Any],
     reverse_backtest: dict[str, Any] | None,
     intraday: dict[str, Any],
     t_performance_gate: dict[str, Any],
@@ -955,6 +956,16 @@ def build_post_unlock_review(
         checks.append(review_check("data_quality", "数据质量", "pass", "数据质量没有硬阻断。", "继续检查止损距离和候选状态。"))
     else:
         checks.append(review_check("data_quality", "数据质量", "warn", "未提供数据质量快照。", "刷新完整日内决策链后再进入候选。"))
+
+    minute_status = str((minute_confirmation or {}).get("status") or "not_available")
+    minute_label = str((minute_confirmation or {}).get("status_label") or minute_status)
+    minute_summary = str((minute_confirmation or {}).get("summary") or "")
+    if minute_status == "confirm":
+        checks.append(review_check("minute_confirmation", "分钟二次确认", "pass", minute_summary or "分钟级二次确认已通过。", "允许继续复核正T/反T候选。"))
+    elif minute_status == "block":
+        checks.append(review_check("minute_confirmation", "分钟二次确认", "block", minute_summary or "分钟级二次确认阻断主动动作。", "分钟信号转为确认前，不执行正T、反T或放宽止损。"))
+    else:
+        checks.append(review_check("minute_confirmation", "分钟二次确认", "warn", f"{minute_label}：{minute_summary or '分钟信号尚未确认。'}", "只观察；等待分钟级确认后才进入人工候选。"))
 
     current = as_float(levels.get("current_price"))
     near_block = as_float(levels.get("near_stop_block_price"))
@@ -1014,6 +1025,7 @@ def build_post_unlock_review(
         checks.append(review_check("execution_quality", "执行质量评分", "warn", execution_quality_gate.get("reasons", ["执行评分样本不足。"])[0], execution_quality_gate.get("next_step") or "只允许最小股数试做或继续观察。"))
 
     blocking = [item for item in checks if item["status"] == "block"]
+    minute_ready = any(item["code"] == "minute_confirmation" and item["status"] == "pass" for item in checks)
     positive_ready = any(item["code"] == "positive_timing" and item["status"] == "pass" for item in checks)
     reverse_ready = any(item["code"] == "reverse_t" and item["status"] == "pass" for item in checks)
     if blocking:
@@ -1021,7 +1033,7 @@ def build_post_unlock_review(
         label = "技术已观察，但复核仍阻断"
         candidate = None
         next_step = blocking[0]["next_step"]
-    elif positive_ready or reverse_ready:
+    elif minute_ready and (positive_ready or reverse_ready):
         status = "manual_candidate"
         label = "可进入人工候选复核"
         candidate = "positive_t" if positive_ready else "reverse_t"
@@ -1030,7 +1042,7 @@ def build_post_unlock_review(
         status = "watch_only"
         label = "技术解锁后仍只观察"
         candidate = None
-        next_step = "技术面改善后，还需要等待正T或反T候选结构出现。"
+        next_step = "技术面改善后，还需要等待分钟级确认与正T/反T候选结构同时出现。"
     return {"status": status, "status_label": label, "candidate": candidate, "checks": checks, "next_step": next_step}
 
 
@@ -2086,6 +2098,7 @@ def build_near_stop_risk_plan(
     levels: dict[str, Any],
     position: dict[str, Any],
     technical_assessment: dict[str, Any] | None,
+    minute_confirmation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
@@ -2128,6 +2141,8 @@ def build_near_stop_risk_plan(
     stop_text = money_text(stop_loss)
     near_text = money_text(near_block)
     rebound_text = format_price_zone(rebound_zone)
+    minute_status = str((minute_confirmation or {}).get("status") or "not_available")
+    minute_label = str((minute_confirmation or {}).get("status_label") or minute_status)
     distance_text = "-" if distance_pct is None else f"{distance_pct:.2f}%"
     post_trade_shares = max(0, current_shares - shares)
     reason = (
@@ -2137,7 +2152,7 @@ def build_near_stop_risk_plan(
     steps = [
         f"路径1-下破：现价小于等于硬止损 {stop_text} 时，立刻转入止损减仓/硬退出计划，不再等待反T或正T信号。",
         f"路径2-反抽：若价格反抽到 {rebound_text} 但技术仍未修复，卖出 {shares} 股风控减仓；成交后预计剩余 {post_trade_shares} 股。",
-        f"路径3-站稳：若价格重新站上 {money_text(recover_price)}，且量能确认不再走弱，本轮退出风险降级为观察复核，不主动卖出。",
+        f"路径3-站稳：若价格重新站上 {money_text(recover_price)}，且分钟二次确认为“分钟确认”，本轮退出风险才降级为观察复核，不主动卖出。",
         f"在以上任一路径触发前，不补仓、不做T；低于做T阻断价 {near_text} 时，所有T操作继续禁止。",
     ]
     failure_conditions = [
@@ -2170,11 +2185,13 @@ def build_near_stop_risk_plan(
             "volume_confirmation": rounded(volume),
             "distance_to_stop_pct": rounded(distance_pct),
             "recover_price": rounded(recover_price),
+            "minute_confirmation_status": minute_status,
+            "minute_confirmation_label": minute_label,
         },
         "reason": reason,
         "failure_conditions": failure_conditions,
         "steps": steps,
-        "post_trade_plan": f"盘中只按三条路径处理：跌破 {stop_text} 转退出，反抽到 {rebound_text} 降风险，重新站上 {money_text(recover_price)} 才降级观察。",
+        "post_trade_plan": f"盘中只按三条路径处理：跌破 {stop_text} 转退出，反抽到 {rebound_text} 降风险，重新站上 {money_text(recover_price)} 且分钟确认通过才降级观察。",
     }
 
 
@@ -2187,11 +2204,12 @@ def build_manual_execution_plan(
     intraday: dict[str, Any],
     state: str = "",
     technical_assessment: dict[str, Any] | None = None,
+    minute_confirmation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     stop_loss_plan = build_stop_loss_risk_plan(levels, position, technical_assessment)
     if stop_loss_plan.get("applicable"):
         return stop_loss_plan
-    near_stop_plan = build_near_stop_risk_plan(state, levels, position, technical_assessment)
+    near_stop_plan = build_near_stop_risk_plan(state, levels, position, technical_assessment, minute_confirmation)
     if near_stop_plan.get("applicable"):
         return near_stop_plan
 
@@ -2328,6 +2346,7 @@ def build_capital_plan(
     total_assets: float | None = None,
     technical_assessment: dict[str, Any] | None = None,
     positive_timing: dict[str, Any] | None = None,
+    minute_confirmation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     policy = dict(SUPPLEMENTAL_CAPITAL_POLICY)
     technical_label = str((technical_assessment or {}).get("label") or "")
@@ -2367,6 +2386,18 @@ def build_capital_plan(
         "reasons": [],
     }
     if state != "positive_t_watch":
+        return plan
+    minute_status = str((minute_confirmation or {}).get("status") or "not_available")
+    if minute_status != "confirm":
+        plan.update(
+            {
+                "status": "waiting_minute_confirmation",
+                "status_label": "分钟二次确认未通过，不计算正T追加资金",
+                "reasons": [
+                    str((minute_confirmation or {}).get("summary") or "等待5分钟MACD、RSI、BOLL、量能和均线共同确认。")
+                ],
+            }
+        )
         return plan
     if positive_timing and positive_timing.get("status") != "confirmed":
         plan.update(
@@ -2689,6 +2720,7 @@ def build_price_action_table(
     t_performance_gate: dict[str, Any],
     execution_quality_gate: dict[str, Any],
     data_quality: dict[str, Any] | None,
+    minute_confirmation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
@@ -2700,6 +2732,10 @@ def build_price_action_table(
     reverse_plan = intraday.get("reverse_t_plan") or {}
     positive_plan = intraday.get("positive_t_plan") or {}
     data_allowed = data_quality is None or bool(value_at(data_quality or {}, "data_trust.intraday_decision_allowed"))
+    minute_status = str((minute_confirmation or {}).get("status") or "not_available")
+    minute_confirmed = minute_status == "confirm"
+    minute_blocked = minute_status == "block"
+    minute_status_label = str((minute_confirmation or {}).get("status_label") or "分钟未确认")
     rows: list[dict[str, Any]] = []
 
     rows.append(
@@ -2798,20 +2834,28 @@ def build_price_action_table(
     suggested_buy_shares = int(capital_plan.get("suggested_buy_shares") or 0)
     if buy_zone:
         buy_high = as_float(buy_zone[1]) if isinstance(buy_zone, list) and len(buy_zone) >= 2 else None
-        buy_ready = state == "positive_t_watch" and data_allowed and current is not None and buy_high is not None and current <= buy_high
+        buy_ready = state == "positive_t_watch" and data_allowed and minute_confirmed and current is not None and buy_high is not None and current <= buy_high
         buy_gate_blocked = t_performance_gate.get("status") == "blocked" or execution_quality_gate.get("status") == "blocked"
-        buy_blocked = state not in {"positive_t_watch"} or buy_gate_blocked or not data_allowed
-        buy_status_label = "执行评分阻断" if execution_quality_gate.get("status") == "blocked" else "绩效阻断" if t_performance_gate.get("status") == "blocked" else "禁止" if buy_blocked else "可确认" if buy_ready else "等待"
+        buy_blocked = state not in {"positive_t_watch"} or buy_gate_blocked or not data_allowed or not minute_confirmed
+        buy_status_label = (
+            "执行评分阻断" if execution_quality_gate.get("status") == "blocked" else
+            "绩效阻断" if t_performance_gate.get("status") == "blocked" else
+            "分钟阻断" if minute_blocked else
+            "等待分钟确认" if not minute_confirmed else
+            "禁止" if buy_blocked else
+            "可确认" if buy_ready else
+            "等待"
+        )
         rows.append(
             action_table_row(
                 "正T买入",
-                f"价格进入 {format_price_zone(buy_zone)} 且分时/数据仍确认",
+                f"价格进入 {format_price_zone(buy_zone)} 且分钟二次确认通过",
                 format_price_zone(buy_zone),
                 "买入新增仓位",
                 status="blocked" if buy_blocked else "ready" if buy_ready else "watch",
                 status_label=buy_status_label,
                 shares=suggested_buy_shares or None,
-                note="高于买入上限不追；买入后目标是卖出新增仓位，不是长期补仓。",
+                note=f"{minute_status_label}；高于买入上限不追，买入后目标是卖出新增仓位，不是长期补仓。",
                 priority=price_action_priority("正T买入", "blocked" if buy_blocked else "ready" if buy_ready else "watch"),
             )
         )
@@ -2839,19 +2883,26 @@ def build_price_action_table(
     reverse_shares = int(reverse_plan.get("trade_shares") or 0)
     if reverse_zone:
         reverse_gate_blocked = t_performance_gate.get("status") == "blocked" or execution_quality_gate.get("status") == "blocked"
-        reverse_candidate = state == "reverse_t_watch" and reverse_plan.get("status") == "candidate" and not reverse_gate_blocked
-        reverse_status_label = "可确认" if reverse_candidate else "执行评分阻断" if execution_quality_gate.get("status") == "blocked" else "绩效阻断" if t_performance_gate.get("status") == "blocked" else "仅观察"
+        reverse_candidate = state == "reverse_t_watch" and reverse_plan.get("status") == "candidate" and minute_confirmed and not reverse_gate_blocked
+        reverse_status_label = (
+            "可确认" if reverse_candidate else
+            "执行评分阻断" if execution_quality_gate.get("status") == "blocked" else
+            "绩效阻断" if t_performance_gate.get("status") == "blocked" else
+            "分钟阻断" if minute_blocked else
+            "等待分钟确认" if not minute_confirmed else
+            "仅观察"
+        )
         rows.append(
             action_table_row(
                 "反T卖出",
-                f"价格进入 {format_price_zone(reverse_zone)} 且分时转弱",
+                f"价格进入 {format_price_zone(reverse_zone)} 且分钟二次确认通过",
                 format_price_zone(reverse_zone),
                 "卖出计划股数",
-                status="ready" if reverse_candidate else "blocked" if reverse_gate_blocked else "watch",
+                status="ready" if reverse_candidate else "blocked" if reverse_gate_blocked or not minute_confirmed else "watch",
                 status_label=reverse_status_label,
                 shares=reverse_shares or None,
-                note="没有回补上限或未接受卖出后果时，不执行反T卖出。",
-                priority=price_action_priority("反T卖出", "ready" if reverse_candidate else "blocked" if reverse_gate_blocked else "watch"),
+                note=f"{minute_status_label}；没有回补上限或未接受卖出后果时，不执行反T卖出。",
+                priority=price_action_priority("反T卖出", "ready" if reverse_candidate else "blocked" if reverse_gate_blocked or not minute_confirmed else "watch"),
             )
         )
 
@@ -2906,16 +2957,21 @@ def build_action_arbitration(
     state: str,
     price_action_table: dict[str, Any],
     decision_mode: dict[str, Any],
+    minute_confirmation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     primary = price_action_table.get("primary_action") or {}
     rows = price_action_table.get("rows") or []
     mode = str(decision_mode.get("mode") or "")
+    minute_status = str((minute_confirmation or {}).get("status") or "not_available")
+    minute_label = str((minute_confirmation or {}).get("status_label") or minute_status)
     suppressed: list[dict[str, Any]] = []
     primary_action = str(primary.get("action") or "当前动作")
     if state == "exit_risk_review":
         summary = f"{primary_action}优先；正T、反T和补仓全部让位于硬止损风险。"
     elif mode != "tradable":
         summary = f"{decision_mode.get('label') or '只观察'}优先；数据或交易时段未支持盘中人工确认。"
+    elif minute_status != "confirm":
+        summary = f"{minute_label}优先；分钟二次确认通过前，正T、反T和放宽止损都只观察。"
     elif primary.get("status") == "ready":
         summary = f"{primary_action}已满足触发条件；其他动作等待本动作处理后重新评估。"
     else:
@@ -2930,6 +2986,8 @@ def build_action_arbitration(
             reason = "硬止损或近硬止损优先，做T/买入不能扩大风险。"
         elif mode != "tradable":
             reason = f"盘中可信度为{decision_mode.get('label') or mode}，该动作只能保留观察。"
+        elif minute_status != "confirm" and any(keyword in action for keyword in ("T", "买入", "止损复核")):
+            reason = f"{minute_label}，分钟二次确认通过前不执行该动作。"
         elif row.get("status") == "blocked":
             reason = row.get("note") or row.get("status_label") or "该动作当前被规则阻断。"
         elif row.get("status") == "watch":
@@ -3100,6 +3158,7 @@ def build_card(
         levels,
         data_quality,
         positive_timing,
+        minute_confirmation,
         reverse_backtest,
         intraday,
         t_performance_gate,
@@ -3113,6 +3172,7 @@ def build_card(
         total_assets=total_assets,
         technical_assessment=technical_assessment,
         positive_timing=positive_timing,
+        minute_confirmation=minute_confirmation,
     )
     manual_execution_plan = build_manual_execution_plan(
         post_unlock_review_summary,
@@ -3123,6 +3183,7 @@ def build_card(
         intraday,
         state,
         technical_assessment,
+        minute_confirmation,
     )
     price_action_table = build_price_action_table(
         state,
@@ -3134,8 +3195,9 @@ def build_card(
         t_performance_gate,
         execution_quality_gate,
         data_quality,
+        minute_confirmation,
     )
-    action_arbitration = build_action_arbitration(state, price_action_table, decision_mode)
+    action_arbitration = build_action_arbitration(state, price_action_table, decision_mode, minute_confirmation)
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
