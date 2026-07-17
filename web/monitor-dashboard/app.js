@@ -13,6 +13,7 @@ const state = {
   selectedCode: null,
   detailDirty: false,
   detailRenderedAt: "",
+  manualTradeDrafts: new Map(),
   pendingManualTrade: null,
 };
 
@@ -1179,6 +1180,40 @@ function manualTradePayload(form) {
   };
 }
 
+function saveManualTradeDraft(form, dirty = true) {
+  const payload = manualTradePayload(form);
+  if (!payload.code) return;
+  state.manualTradeDrafts.set(payload.code, {
+    side: payload.side,
+    price: form.querySelector('[name="price"]')?.value || "",
+    shares: form.querySelector('[name="shares"]')?.value || "",
+    note: payload.note,
+    trade_intent: payload.trade_intent,
+    linked_trade_id: payload.linked_trade_id,
+    dirty,
+  });
+}
+
+function clearManualTradeDraft(code) {
+  if (!code) return;
+  state.manualTradeDrafts.delete(code);
+}
+
+function updateManualTradeLockNotice(form) {
+  const existing = form.querySelector(".manual-trade-lock");
+  const draft = state.manualTradeDrafts.get(form.dataset.code);
+  if (!draft?.dirty) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const notice = document.createElement("div");
+  notice.className = "manual-trade-lock";
+  notice.innerHTML = `<span>正在编辑成交草稿，后台行情刷新不会覆盖价格。</span>
+    <button class="secondary-action" type="button" data-use-live-price>恢复实时价 ${escapeHtml(form.dataset.livePrice || "--")}</button>`;
+  form.querySelector(".manual-trade-grid")?.before(notice);
+}
+
 function nextPlanAfterManualTrade(item, payload, impact) {
   if (payload.trade_intent === "positive_t_close") {
     return "正T卖出成交后，系统会关闭这笔正T买入腿；刷新后不再围绕这笔新增仓位重复卖出。";
@@ -1410,6 +1445,7 @@ async function submitManualTrade(payload, form) {
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     status.textContent = result.refresh_error ? `已保存成交，但刷新建议失败：${result.refresh_error}` : "已写入成交，并生成成交后追踪。";
+    clearManualTradeDraft(payload.code);
     showManualTradeResult(result);
     await loadData();
   } catch (error) {
@@ -1512,18 +1548,30 @@ function manualTradeSection(item) {
   const currentPrice = item.quote?.latest_price == null ? "" : Number(item.quote.latest_price).toFixed(2);
   const maxSellShares = Number(item.position?.shares || 0);
   const defaultShares = maxSellShares >= 100 ? 100 : maxSellShares || 100;
-  const defaultImpact = renderManualTradeImpact(item, "sell", Number(currentPrice), Number(defaultShares));
+  const draft = state.manualTradeDrafts.get(item.code) || {};
+  const sideValue = draft.side || "sell";
+  const priceValue = draft.price ?? currentPrice;
+  const sharesValue = draft.shares ?? defaultShares;
+  const noteValue = draft.note || "";
+  const intentValue = draft.trade_intent || "";
+  const linkedTradeIdValue = draft.linked_trade_id || "";
+  const defaultImpact = renderManualTradeImpact(item, sideValue, Number(priceValue), Number(sharesValue));
+  const lockNotice = draft.dirty ? `<div class="manual-trade-lock">
+    <span>正在编辑成交草稿，后台行情刷新不会覆盖价格。</span>
+    <button class="secondary-action" type="button" data-use-live-price>恢复实时价 ${escapeHtml(currentPrice || "--")}</button>
+  </div>` : "";
   return detailSection(
     "手工成交更新",
-    `<form class="manual-trade-form" data-code="${escapeHtml(item.code)}">
+    `<form class="manual-trade-form" data-code="${escapeHtml(item.code)}" data-live-price="${escapeHtml(currentPrice)}">
       ${reverseTradePresetControls(item)}
+      ${lockNotice}
       <div class="manual-trade-grid">
-        <label><span>方向</span><select name="side"><option value="sell">卖出</option><option value="buy">买入</option></select></label>
-        <label><span>价格</span><input name="price" type="number" step="0.01" min="0.01" value="${escapeHtml(currentPrice)}" required></label>
-        <label><span>数量</span><input name="shares" type="number" step="100" min="1" value="${escapeHtml(defaultShares)}" required></label>
-        <label><span>备注</span><input name="note" type="text" placeholder="可选"></label>
-        <input name="trade_intent" type="hidden" value="">
-        <input name="linked_trade_id" type="hidden" value="">
+        <label><span>方向</span><select name="side"><option value="sell"${sideValue === "sell" ? " selected" : ""}>卖出</option><option value="buy"${sideValue === "buy" ? " selected" : ""}>买入</option></select></label>
+        <label><span>价格</span><input name="price" type="number" step="0.01" min="0.01" value="${escapeHtml(priceValue)}" required></label>
+        <label><span>数量</span><input name="shares" type="number" step="100" min="1" value="${escapeHtml(sharesValue)}" required></label>
+        <label><span>备注</span><input name="note" type="text" placeholder="可选" value="${escapeHtml(noteValue)}"></label>
+        <input name="trade_intent" type="hidden" value="${escapeHtml(intentValue)}">
+        <input name="linked_trade_id" type="hidden" value="${escapeHtml(linkedTradeIdValue)}">
       </div>
       <div class="manual-trade-impact">${defaultImpact}</div>
       <button class="primary-action" type="submit">记录成交并刷新建议</button>
@@ -1925,6 +1973,7 @@ function openDetail(code, options = {}) {
 }
 
 function closeDetail() {
+  clearManualTradeDraft(state.selectedCode);
   state.selectedCode = null;
   state.detailDirty = false;
   state.detailRenderedAt = "";
@@ -2105,6 +2154,18 @@ document.querySelector("#detailContent").addEventListener("click", event => {
     focusDetailTarget(targetButton.dataset.detailTarget);
     return;
   }
+  const livePriceButton = event.target.closest("[data-use-live-price]");
+  if (livePriceButton) {
+    event.preventDefault();
+    const form = livePriceButton.closest(".manual-trade-form");
+    if (!form) return;
+    form.querySelector('[name="price"]').value = form.dataset.livePrice || "";
+    clearManualTradeDraft(form.dataset.code);
+    updateManualTradeLockNotice(form);
+    updateManualTradeImpact(form);
+    form.querySelector(".manual-trade-status").textContent = "已恢复为当前实时价；继续编辑后会再次锁定草稿。";
+    return;
+  }
   const submitButton = event.target.closest(".manual-trade-form button[type='submit']");
   if (submitButton) {
     event.preventDefault();
@@ -2121,6 +2182,8 @@ document.querySelector("#detailContent").addEventListener("click", event => {
   form.querySelector('[name="note"]').value = button.dataset.note || "";
   form.querySelector('[name="trade_intent"]').value = button.dataset.tradeIntent || "";
   form.querySelector('[name="linked_trade_id"]').value = button.dataset.linkedTradeId || "";
+  saveManualTradeDraft(form, true);
+  updateManualTradeLockNotice(form);
   updateManualTradeImpact(form);
   form.scrollIntoView({ block: "center", behavior: "smooth" });
   form.classList.add("detail-focus");
@@ -2134,11 +2197,19 @@ document.querySelector("#detailContent").addEventListener("click", event => {
 });
 document.querySelector("#detailContent").addEventListener("input", event => {
   const form = event.target.closest(".manual-trade-form");
-  if (form) updateManualTradeImpact(form);
+  if (form) {
+    saveManualTradeDraft(form, true);
+    updateManualTradeLockNotice(form);
+    updateManualTradeImpact(form);
+  }
 });
 document.querySelector("#detailContent").addEventListener("change", event => {
   const form = event.target.closest(".manual-trade-form");
-  if (form) updateManualTradeImpact(form);
+  if (form) {
+    saveManualTradeDraft(form, true);
+    updateManualTradeLockNotice(form);
+    updateManualTradeImpact(form);
+  }
 });
 document.querySelector("#manualTradeCancel").addEventListener("click", closeManualTradeConfirm);
 document.querySelector("#manualTradeCancelTop").addEventListener("click", closeManualTradeConfirm);
