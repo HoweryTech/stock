@@ -196,6 +196,12 @@ def apply_manual_trade(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         closure = reverse_t_closure_summary(open_record, record, float(new_shares))
         record["reverse_t_closure"] = closure
         set_value(position, "tracking.latest_reverse_t_closure", closure)
+    if side == "sell" and record["trade_intent"] == "positive_t_close" and linked_trade_id:
+        open_record = find_manual_trade(position, linked_trade_id)
+        if open_record is None:
+            raise ValueError(f"linked positive T open trade not found: {linked_trade_id}")
+        if open_record.get("side") != "buy" or open_record.get("trade_intent") != "positive_t_open":
+            raise ValueError(f"linked trade is not a positive T open buy: {linked_trade_id}")
     append_manual_trade(position, record)
     write_yaml(path, position, overwrite=True)
     return {"position_path": str(path), "trade": record, "position": {"shares": float(new_shares), "entry_price": value_at(position, "entry.entry_price")}}, path

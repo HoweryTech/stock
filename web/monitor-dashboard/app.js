@@ -670,10 +670,17 @@ function renderPositiveTPlan(plan) {
   ];
   const steps = plan.execution_steps || plan.instructions || [];
   const blockers = plan.blockers || [];
+  const targetPrice = Array.isArray(plan.target_sell_zone) && plan.target_sell_zone.length >= 2 ? Number(plan.target_sell_zone[0]) : null;
+  const closeButton = plan.status === "target_sell_ready" && plan.trade_shares && targetPrice && plan.open_positive_t_leg?.id
+    ? `<div class="manual-plan-actions">
+        <button class="primary-action" type="button" data-manual-preset data-code="${escapeHtml(state.selectedCode || "")}" data-side="sell" data-price="${escapeHtml(targetPrice.toFixed(2))}" data-shares="${escapeHtml(plan.trade_shares)}" data-trade-intent="positive_t_close" data-linked-trade-id="${escapeHtml(plan.open_positive_t_leg.id)}" data-note="正T目标卖出：关闭开放正T买入腿">填入正T卖出</button>
+      </div>`
+    : "";
   return detailSection(
     "正T闭环跟踪",
     `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     ${plan.next_action ? `<div class="action-panel action-${plan.status === "target_sell_ready" ? "positive_t_watch" : plan.status === "failure_review" ? "exit_risk_review" : "observe"}"><div class="action-panel-title">下一步动作</div><p>${escapeHtml(plan.next_action)}</p></div>` : ""}
+    ${closeButton}
     ${steps.length ? `<h4>操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
     ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}`,
     "positive-t-plan"
@@ -797,6 +804,12 @@ function manualTradePayload(form) {
 }
 
 function nextPlanAfterManualTrade(item, payload, impact) {
+  if (payload.trade_intent === "positive_t_close") {
+    return "正T卖出成交后，系统会关闭这笔正T买入腿；刷新后不再围绕这笔新增仓位重复卖出。";
+  }
+  if (payload.trade_intent === "positive_t_open") {
+    return "买入成交后，系统会跟踪这笔正T买入腿；未到目标卖出区不急于卖出，触发失败价时先复核。";
+  }
   if (payload.trade_intent === "reverse_t_close") {
     return "回补成交后，系统会关闭这笔开放反T腿，持仓恢复后重新计算成本和下一步建议。";
   }
@@ -893,6 +906,24 @@ function manualTradePreflightChecks(item, payload, impact) {
       zoneOk && sharesOk ? "pass" : "warn",
       zone.length < 2 ? "当前没有明确买入观察区，请人工复核。" : zoneOk && sharesOk ? `买入价位于 ${num(zone[0])}-${num(zone[1])} 元观察区，数量符合计划。` : `计划区间 ${num(zone[0])}-${num(zone[1])} 元、数量 ${plan.shares || "--"} 股；当前填写值需要人工复核。`,
     );
+  } else if (payload.trade_intent === "positive_t_close") {
+    const plan = item.positive_t_plan || {};
+    const openLegId = plan.open_positive_t_leg?.id || "";
+    const zone = plan.target_sell_zone || [];
+    const linkedOk = Boolean(openLegId && payload.linked_trade_id && payload.linked_trade_id === openLegId);
+    add(
+      "正T买入腿",
+      linkedOk ? "pass" : "block",
+      linkedOk ? `已关联开放买入腿 ${openLegId}。` : `关联买入腿缺失或不匹配；当前开放腿是 ${openLegId || "--"}。`,
+      !linkedOk,
+    );
+    const priceOk = zone.length < 2 || (payload.price >= Number(zone[0]) && payload.price <= Number(zone[1]));
+    const sharesOk = !plan.trade_shares || Number(payload.shares) === Number(plan.trade_shares);
+    add(
+      "正T目标卖出",
+      priceOk && sharesOk ? "pass" : "warn",
+      zone.length < 2 ? "当前没有明确目标卖出区，请人工复核。" : priceOk && sharesOk ? `卖出价位于 ${num(zone[0])}-${num(zone[1])} 元目标区，数量符合计划。` : `目标区 ${num(zone[0])}-${num(zone[1])} 元、数量 ${plan.trade_shares || "--"} 股；当前填写值需要人工复核。`,
+    );
   } else {
     add("成交意图", "warn", "这会按普通手工成交写入，不会关闭或打开反T腿。");
   }
@@ -919,6 +950,7 @@ function renderManualTradeConfirmation(item, payload, impact, checks) {
     reverse_t_open: "反T卖出腿",
     reverse_t_close: "反T回补",
     positive_t_open: "正T买入腿",
+    positive_t_close: "正T目标卖出",
   }[payload.trade_intent] || "普通手工成交";
   const metrics = [
     ["证券", `${item.code} ${item.name}`],

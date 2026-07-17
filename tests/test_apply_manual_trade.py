@@ -107,11 +107,23 @@ class ApplyManualTradeTest(unittest.TestCase):
             path.parent.mkdir()
             write_position(path)
 
-            apply_manual_trade(args(base, side="sell", shares=100.0, price=6.18, trade_intent="positive_t_close", linked_trade_id="MANUAL-POSITIVE-OPEN"))
+            apply_manual_trade(args(base, side="buy", shares=100.0, price=6.10, trade_intent="positive_t_open"))
+            opened = load_yaml(path)["manual_trade_history"][-1]
+            apply_manual_trade(args(base, side="sell", shares=100.0, price=6.18, trade_intent="positive_t_close", linked_trade_id=opened["id"]))
             updated = load_yaml(path)
 
         self.assertEqual(updated["manual_trade_history"][-1]["trade_intent"], "positive_t_close")
-        self.assertEqual(updated["manual_trade_history"][-1]["linked_trade_id"], "MANUAL-POSITIVE-OPEN")
+        self.assertEqual(updated["manual_trade_history"][-1]["linked_trade_id"], opened["id"])
+
+    def test_positive_t_close_requires_linked_open_buy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            path = base / "positions/POS-000725.yaml"
+            path.parent.mkdir()
+            write_position(path)
+
+            with self.assertRaisesRegex(ValueError, "linked positive T open trade not found"):
+                apply_manual_trade(args(base, side="sell", shares=100.0, price=6.18, trade_intent="positive_t_close", linked_trade_id="missing"))
 
     def test_reverse_t_close_records_closure_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
