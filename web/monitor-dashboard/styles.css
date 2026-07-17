@@ -371,8 +371,35 @@ th:nth-child(8) { width: 100px; }
 .execution-preview-grid dd { margin: 2px 0 0; font-weight: 700; font-variant-numeric: tabular-nums; }
 .execution-preview p { margin: 5px 0 0; line-height: 1.5; }
 .detail-section { padding: 16px 0 16px 12px; border-bottom: 1px solid var(--line); border-left: 4px solid transparent; }
+.detail-section-collapsed { padding-right: 0; }
+.detail-section-collapsed summary {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.detail-section-collapsed summary::-webkit-details-marker { display: none; }
+.detail-section-collapsed summary span { font-size: 15px; font-weight: 800; }
+.detail-section-collapsed summary em { color: var(--muted); font-style: normal; font-size: 12px; text-align: right; }
+.detail-section-collapsed summary::after {
+  content: "+";
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--surface);
+  font-weight: 700;
+}
+.detail-section-collapsed[open] summary::after { content: "-"; }
+.detail-section-body { padding-top: 12px; }
 .detail-section-execution-layers,
-.detail-section-decision-brief,
 .detail-section-decision-card,
 .detail-section-price-action-table { border-left-color: var(--blue); background: linear-gradient(90deg, rgba(231, 240, 255, 0.72), rgba(255, 255, 255, 0)); }
 .detail-section-manual-trade,
@@ -391,10 +418,27 @@ th:nth-child(8) { width: 100px; }
 .detail-section, .detail-section p, .reason-list li, .signal-list li, .advice, .advice-tag, .consistency-item { overflow-wrap: anywhere; }
 .forecast-stale-badge { display: inline-flex; align-items: center; min-height: 22px; margin-right: 8px; padding: 2px 7px; border-radius: 4px; color: var(--muted); background: #eef1f4; font-size: 12px; font-weight: 700; }
 .technical-summary { margin: 10px 0 12px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; line-height: 1.55; }
-.decision-brief-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
-.decision-brief-grid dl { margin: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
-.decision-brief-grid dt { color: var(--muted); font-size: 12px; }
-.decision-brief-grid dd { margin: 3px 0 0; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+.decision-context-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.decision-context-grid dl { margin: 0; padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
+.decision-context-grid dt { color: var(--muted); font-size: 11px; }
+.decision-context-grid dd { margin: 3px 0 0; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+.decision-focus-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.decision-focus-card {
+  min-height: 132px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.decision-focus-card span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 12px; font-weight: 800; }
+.decision-focus-card strong { display: block; font-size: 15px; line-height: 1.45; }
+.decision-focus-card p { margin: 0; line-height: 1.5; }
+.decision-focus-card .reason-list { margin: 0; padding-left: 19px; }
+.decision-focus-now { border-left-color: var(--blue); background: rgba(238, 244, 255, 0.68); }
+.decision-focus-trigger { border-left-color: var(--green); background: rgba(234, 246, 240, 0.66); }
+.decision-focus-block { border-left-color: var(--amber); background: rgba(255, 246, 221, 0.72); }
+.decision-focus-effect { border-left-color: var(--red); background: rgba(255, 240, 238, 0.54); }
 .detail-nav { display: flex; flex-wrap: wrap; gap: 8px; }
 .detail-nav .secondary-action { min-height: 32px; }
 .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
@@ -736,7 +780,7 @@ th:nth-child(8) { width: 100px; }
   #detailContent { padding: 16px 14px 32px; }
   .detail-header { padding: 14px 14px; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
-  .decision-brief-grid { grid-template-columns: 1fr; }
+  .decision-context-grid, .decision-focus-grid { grid-template-columns: 1fr; }
   .detail-refresh-notice { align-items: stretch; flex-direction: column; }
   .sticky-action-bar { grid-template-columns: 1fr; top: 75px; }
   .sticky-action-metrics { grid-template-columns: 1fr 1fr; }

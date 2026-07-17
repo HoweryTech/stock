@@ -601,9 +601,15 @@ function renderPositions() {
   bindPositionOpeners();
 }
 
-function detailSection(title, body, key = "") {
+function detailSection(title, body, key = "", options = {}) {
   const sectionAttr = key ? ` data-detail-section="${escapeHtml(key)}"` : "";
   const keyClass = key ? ` detail-section-${escapeHtml(key)}` : "";
+  if (options.collapsed) {
+    return `<details class="detail-section detail-section-collapsed${keyClass}"${sectionAttr}>
+      <summary><span>${escapeHtml(title)}</span><em>${escapeHtml(options.summary || "辅助信息，点击展开")}</em></summary>
+      <div class="detail-section-body">${body}</div>
+    </details>`;
+  }
   return `<section class="detail-section${keyClass}"${sectionAttr}><h3>${title}</h3>${body}</section>`;
 }
 
@@ -618,36 +624,66 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
   const primary = decisionCard?.price_action_table?.primary_action || {};
   const blockers = decisionCard?.blockers || [];
   const actionSteps = decisionCard?.decision?.action_steps || [];
+  const decision = decisionCard?.decision || {};
+  const automatic = item.action_decision || {};
+  const watchRows = (decisionCard?.price_action_table?.rows || []).filter(row => row.status === "watch" || row.status === "reference");
   const queueItem = (state.decisionReport?.priority_queue?.items || []).find(entry => entry.code === item.code);
-  const chips = [
+  const nowText = uniqueTradeConclusion(item, decisionCard, automaticDecision);
+  const triggerItems = [
+    primary.trigger ? `${primary.action || "价格动作"}：${primary.trigger}` : "",
+    ...watchRows.slice(0, 3).map(row => `${row.action || "观察"}：${row.trigger || row.price || row.note || "--"}`),
+    ...(automatic.execute_when || []).slice(0, 3),
+  ].filter(Boolean);
+  const blockerItems = [
+    primary.status === "blocked" ? primary.note : "",
+    ...(blockers || []),
+    decision.technical_operation?.reason || "",
+  ].filter(Boolean);
+  const effectItems = [
+    ...(automatic.expected_effects || []),
+    item.reverse_t_plan?.failure_result || "",
+    automatic.prediction_note || "",
+  ].filter(Boolean);
+  const contextItems = [
     ["队列", queueItem?.category_label || "未排序"],
     ["状态", decisionCard?.state_label || displayStateLabelFor(item)],
-    ["动作", decisionCard?.decision?.action_label || automaticDecision.headline],
-    ["最紧急", primary.action ? `${primary.action} · ${primary.status_label || primary.status || "--"} · ${primary.price || "--"}` : "--"],
+    ["动作等级", actionTierFor(item).label],
+    ["执行许可", decision.execution_allowed ? "允许人工确认" : "禁止直接执行"],
   ];
   const readingOrder = [
-    ["先看执行分层", "execution-layers"],
-    ["再看结论", "decision-card"],
+    ["先看价格动作表", "price-action-table"],
+    ["再看执行分层", "execution-layers"],
     ["再看动态止损", "dynamic-stop-loss"],
-    ["再看价格动作表", "price-action-table"],
     ["需要成交才看手工更新", "manual-trade"],
-    ["想知道为什么再看技术/数据", "technical-assessment"],
-    ["反T细节最后看", "reverse-t-plan"],
+    ["想知道为什么再展开辅助信息", "technical-assessment"],
   ];
   return detailSection(
-    "决策摘要",
-    `<div class="decision-brief-grid">${chips.map(([key, value]) => `
+    "操作决策",
+    `<div class="decision-context-grid">${contextItems.map(([key, value]) => `
       <dl><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
-    <div class="action-panel action-${escapeHtml(decisionCard?.state || item.state || "observe")}">
-      <div class="action-panel-title">现在只看这一句</div>
-      <p><strong>${escapeHtml(decisionCard?.decision?.next_step || automaticDecision.action || "")}</strong></p>
-      ${actionSteps.length ? `<ol class="reason-list">${actionSteps.slice(0, 3).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
+    <div class="decision-focus-grid">
+      <div class="decision-focus-card decision-focus-now">
+        <span>现在做什么</span>
+        <strong>${escapeHtml(nowText)}</strong>
+        ${actionSteps.length ? `<ol class="reason-list">${actionSteps.slice(0, 4).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
+      </div>
+      <div class="decision-focus-card decision-focus-trigger">
+        <span>什么时候触发</span>
+        ${triggerItems.length ? `<ol class="reason-list">${triggerItems.slice(0, 5).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : `<p class="secondary">当前没有可执行触发线，等待下一轮数据。</p>`}
+      </div>
+      <div class="decision-focus-card decision-focus-block">
+        <span>为什么不能做</span>
+        ${blockerItems.length ? `<ul class="reason-list">${blockerItems.slice(0, 5).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<p class="secondary">当前没有额外阻断；仍需按价格动作表人工确认。</p>`}
+      </div>
+      <div class="decision-focus-card decision-focus-effect">
+        <span>做了会怎样</span>
+        ${effectItems.length ? `<ul class="reason-list">${effectItems.slice(0, 5).map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul>` : `<p class="secondary">成交后系统会按真实成交价重新计算持仓、成本和下一步建议。</p>`}
+      </div>
     </div>
-    ${blockers.length ? `<h4>当前最主要阻断</h4><ul class="reason-list">${blockers.slice(0, 3).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
     <h4>阅读顺序</h4>
     <div class="detail-nav">${readingOrder.map(([label, target], index) => `
       <button class="secondary-action" type="button" data-detail-target="${escapeHtml(target)}">${index + 1}. ${escapeHtml(label)}</button>`).join("")}</div>`,
-    "decision-brief"
+    "decision-card"
   );
 }
 
@@ -818,7 +854,8 @@ function renderTechnicalAssessment(assessment) {
       </table>
     </div>
     ${signals.length ? `<h4>技术证据</h4><ul class="reason-list">${signals.slice(0, 8).map(signal => `<li>${escapeHtml(signal)}</li>`).join("")}</ul>` : ""}`,
-    "technical-assessment"
+    "technical-assessment",
+    {collapsed: true, summary: assessment.summary || technicalLabel(assessment)}
   );
 }
 
@@ -894,7 +931,8 @@ function renderReverseTForecastSection(forecast, decisionCard) {
     `<p>${badge}<strong>${escapeHtml(forecast.status_label || forecast.status || "--")}</strong></p>
     <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     <p class="secondary">${escapeHtml(message)}</p>`,
-    stale ? "reverse-t-forecast-stale" : "reverse-t-forecast"
+    stale ? "reverse-t-forecast-stale" : "reverse-t-forecast",
+    stale ? {collapsed: true, summary: "旧预测，仅用于追溯"} : {}
   );
 }
 
@@ -2000,13 +2038,12 @@ function openDetail(code, options = {}) {
   let html = detailRefreshNotice();
   if (decisionCard) {
     html += renderStickyActionBar(item, decisionCard, automaticDecision);
-    html += renderExecutionLayers(item, decisionCard);
     html += renderDecisionBrief(item, decisionCard, automaticDecision);
+    html += renderPriceActionTable(decisionCard.price_action_table, item, decisionCard);
+    html += renderExecutionLayers(item, decisionCard);
   }
-  html += detailSection("实时状态", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status");
+  html += detailSection("持仓与行情", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status", {collapsed: true, summary: "现价、成本、仓位和均线"});
   if (decisionCard) {
-    const levels = decisionCard.price_levels || {};
-    const decision = decisionCard.decision || {};
     const quality = decisionCard.data_quality || {};
     const qualityMetrics = [
       ["总状态", qualityLabel(quality)],
@@ -2027,46 +2064,13 @@ function openDetail(code, options = {}) {
       ["最大允许偏差", consistency.max_diff_pct == null ? "--" : `${Number(consistency.max_diff_pct).toFixed(2)}%`],
       ["冲突数量", String((consistency.issues || []).length)],
     ];
-    const cardMetrics = [
-      ["动作等级", actionTierFor(item).label],
-      ["技术操作档位", technicalOperation.tier_label || "--"],
-      ["技术允许观察", technicalOperation.allow_buy_watch || technicalOperation.allow_t_watch ? "允许进入观察" : "不支持买入/做T"],
-      ["做T绩效门禁", decisionCard.t_performance_gate?.status_label || "--"],
-      ["执行质量门禁", decisionCard.execution_quality_gate?.status_label || "--"],
-      ["状态", decisionCard.state_label],
-      ["建议动作", decision.action_label],
-      ["置信度", decision.confidence],
-      ["执行许可", decision.execution_allowed ? "允许进入人工确认" : "禁止直接执行"],
-      ["当前价", money(levels.current_price)],
-      ["止损草案价", money(levels.stop_loss_price)],
-      ["动态止损复核价", money(levels.dynamic_stop_loss_price)],
-      ["做T阻断价", money(levels.near_stop_block_price)],
-      ["20日均线", money(levels.ma20)],
-    ];
-    const blockers = decisionCard.blockers || [];
-    const evidence = decisionCard.evidence || [];
-    const actionSteps = decision.action_steps || [];
-    html += detailSection(
-      "实时决策卡",
-      `<div class="metric-grid">${cardMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
-      <div class="action-panel action-${escapeHtml(decisionCard.state || "observe")}">
-        <div class="action-panel-title">当前可执行步骤</div>
-        <p><strong>${escapeHtml(decision.next_step || "")}</strong></p>
-        ${technicalOperation.reason ? `<p class="secondary"><strong>技术理由：</strong>${escapeHtml(technicalOperation.reason)}</p>` : ""}
-        ${technicalOperation.next_step ? `<p class="secondary"><strong>技术下一步：</strong>${escapeHtml(technicalOperation.next_step)}</p>` : ""}
-        ${actionSteps.length ? `<ol class="reason-list">${actionSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
-      </div>
-      ${blockers.length ? `<h4>阻断原因</h4><ul class="reason-list">${blockers.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
-      <h4>证据链</h4><ul class="reason-list">${evidence.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`,
-      "decision-card"
-    );
     html += renderDynamicStopLossSection(decisionCard);
-    html += renderPriceActionTable(decisionCard.price_action_table, item, decisionCard);
     html += manualTradeSection(item);
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan);
     html += renderPositiveTPlan(item.positive_t_plan);
     html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);
     html += renderCapitalPlan(decisionCard.capital_plan);
+    html += renderReverseTPlanSection(item, decisionCard, technicalOperation);
     html += renderTechnicalAssessment(decisionCard.technical_assessment);
     html += detailSection(
       "数据质量",
@@ -2076,16 +2080,19 @@ function openDetail(code, options = {}) {
       <div class="metric-grid">${consistencyMetrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
       ${renderConsistencyChecks(quality)}
       ${qualityMessages.length ? `<h4>质量问题</h4><ul class="reason-list">${qualityMessages.slice(0, 6).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`,
-      "data-quality"
+      "data-quality",
+      {collapsed: true, summary: qualityMessages.length ? "有质量提示，点击查看来源" : "行情时效和数据源一致性"}
     );
   } else {
     html += manualTradeSection(item);
   }
   const decision = item.action_decision;
-  const decisionDetails = item.reduction_plan?.status === "actionable" ? "" : backtest?.verdict === "rule_observation_only" && decision
-    ? `<h4>再次触发条件</h4><ol class="reason-list">${decision.execute_when.map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${decision.expected_effects.map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note)}</p>`
-    : `<h4>重新开放反T的条件</h4><ol class="reason-list"><li>至少积累30次历史触发。</li><li>回补成功率达到65%以上，且95%成功率下限不低于50%。</li><li>再经过模拟盘验证后，才恢复反T候选。</li></ol>`;
-  html += detailSection("自动操作结论", `<p>${actionTierBadge(item)} <span class="state-badge state-${item.state}">${escapeHtml(automaticDecision.level)}</span></p><p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
+  if (!decisionCard) {
+    const decisionDetails = decision
+      ? `<h4>再次触发条件</h4><ol class="reason-list">${(decision.execute_when || []).map(condition => `<li>${escapeHtml(condition)}</li>`).join("")}</ol><h4>操作后的效果</h4><ul class="reason-list">${(decision.expected_effects || []).map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul><p class="secondary">${escapeHtml(decision.prediction_note || "")}</p>`
+      : "";
+    html += detailSection("自动操作结论", `<p>${actionTierBadge(item)} <span class="state-badge state-${item.state}">${escapeHtml(automaticDecision.level)}</span></p><p><strong>${escapeHtml(automaticDecision.headline)}</strong></p><p>${escapeHtml(automaticDecision.action)}</p>${automaticDecision.reasons.length ? `<h4>程序判定依据</h4><ul class="reason-list">${automaticDecision.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${decisionDetails}`);
+  }
   html += renderReverseTPriceAlertSection(item, decisionCard);
   html += renderReverseTForecastSection(forecast, decisionCard);
   const reverseAudit = item.reverse_t_plan;
@@ -2109,7 +2116,7 @@ function openDetail(code, options = {}) {
       ["主力净流入占比", pct(mainFlow)], ["资金流趋势", flowWeak ? "低于3%确认" : flowEasing ? "3%-6%相对回落" : "未确认转弱"],
       ["卖出观察区", `${num(reverseAudit.sell_zone[0])}–${num(reverseAudit.sell_zone[1])}元`],
     ];
-    html += detailSection("反T机会审计", `<p><strong>${auditStatus}</strong></p><div class="metric-grid">${auditMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>${auditReasons.length ? `<h4>未发出执行提醒的原因</h4><ul class="reason-list">${auditReasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`);
+    html += detailSection("反T机会审计", `<p><strong>${auditStatus}</strong></p><div class="metric-grid">${auditMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>${auditReasons.length ? `<h4>未发出执行提醒的原因</h4><ul class="reason-list">${auditReasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`, "reverse-t-audit", {collapsed: true, summary: "高点回落、资金流和回补价审计"});
   }
   const multi = item.technicals?.multi_timeframe || {};
   const multiMetrics = [
@@ -2118,8 +2125,7 @@ function openDetail(code, options = {}) {
     ["4周收益", pct(multi.weekly_return_4_pct)], ["3月均价", money(multi.monthly_ma3)],
     ["6月均价", money(multi.monthly_ma6)], ["3月收益", pct(multi.monthly_return_3_pct)],
   ];
-  html += detailSection("日线 / 周线 / 月线", `<div class="metric-grid">${multiMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
-  html += detailSection("当前状态", `<p><span class="state-badge state-${displayStateFor(item)}">${escapeHtml(displayStateLabelFor(item))}</span></p>`);
+  html += detailSection("日线 / 周线 / 月线", `<div class="metric-grid">${multiMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "multi-timeframe", {collapsed: true, summary: "多周期方向和均价"});
   if (backtest) {
     const backtestMetrics = [
       ["回测交易日", `${backtest.trading_days}日`], ["触发次数", backtest.triggered_count],
@@ -2134,20 +2140,21 @@ function openDetail(code, options = {}) {
     } else if (intraday?.status === "not_bought_back") {
       intradayText = `今日模拟卖出后尚未回补，当前属于未完成风险，不计入历史胜率。`;
     }
-    html += detailSection("反T历史回测", `<p><strong>${escapeHtml(backtest.verdict_label)}</strong></p><p>${escapeHtml(intradayText)}</p><div class="metric-grid">${backtestMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">盘中当天不计入历史验证。仅验证5分钟价格规则和估算费用；未覆盖历史资金流、滑点及盘口排队。</p>`);
+    html += detailSection("反T历史回测", `<p><strong>${escapeHtml(backtest.verdict_label)}</strong></p><p>${escapeHtml(intradayText)}</p><div class="metric-grid">${backtestMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">盘中当天不计入历史验证。仅验证5分钟价格规则和估算费用；未覆盖历史资金流、滑点及盘口排队。</p>`, "reverse-t-backtest", {collapsed: true, summary: "历史触发、回补成功率和净收益"});
   }
-  html += detailSection("盘中信号", item.signals.length ? `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>` : "<p>当前没有新增盘中风险信号。</p>");
+  if (item.signals.length) {
+    html += detailSection("盘中信号", `<ul class="signal-list">${item.signals.map(signal => `<li>${escapeHtml(signal.message)}</li>`).join("")}</ul>`, "intraday-signals");
+  }
   const flow = item.capital_flow || {};
   const flowMetrics = [
     ["主力净额", compactMoney(flow.main_net_inflow)], ["主力净占比", pct(flow.main_net_inflow_ratio_pct)],
     ["超大单净额", compactMoney(flow.super_large_net_inflow)], ["大单净额", compactMoney(flow.large_net_inflow)],
     ["中单净额", compactMoney(flow.medium_net_inflow)], ["小单净额", compactMoney(flow.small_net_inflow)],
   ];
-  html += detailSection("主力资金流", `<div class="metric-grid">${flowMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">${escapeHtml(flow.interpretation || "")}</p>`);
+  html += detailSection("主力资金流", `<div class="metric-grid">${flowMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div><p class="secondary">${escapeHtml(flow.interpretation || "")}</p>`, "capital-flow", {collapsed: true, summary: "主力、大单、中小单资金"});
   html += reverseTClosureSection(item);
   html += positiveTClosureSection(item);
   html += tClosurePerformanceSection(item);
-  html += renderReverseTPlanSection(item, decisionCard, technicalOperation);
   const reductionPlan = item.reduction_plan;
   if (reductionPlan && !["within_limit", "unavailable"].includes(reductionPlan.status)) {
     const reductionMetrics = [
@@ -2167,10 +2174,12 @@ function openDetail(code, options = {}) {
       ["营收同比", pct(fin.revenue_yoy_pct)], ["归母净利同比", pct(fin.parent_net_profit_yoy_pct)],
       ["ROE", pct(fin.roe_weighted_pct)], ["资产负债率", pct(fin.debt_ratio_pct)],
     ];
-    html += detailSection("基本面快照", `<div class="metric-grid">${financialMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`);
+    html += detailSection("基本面快照", `<div class="metric-grid">${financialMetrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "fundamental-snapshot", {collapsed: true, summary: "估值、财报和行业"});
     const flags = research.financial_review?.flags || [];
     const notices = research.risk_review?.matched_announcements || [];
-    html += detailSection("待复核事项", `${flags.length ? `<ul class="reason-list">${flags.map(flag => `<li>${escapeHtml(flag.message)}</li>`).join("")}</ul>` : "<p>财务阈值未触发风险旗标。</p>"}${notices.length ? `<ul class="reason-list">${notices.map(notice => `<li>${escapeHtml(notice.title)}</li>`).join("")}</ul>` : ""}`);
+    if (flags.length || notices.length) {
+      html += detailSection("待复核事项", `${flags.length ? `<ul class="reason-list">${flags.map(flag => `<li>${escapeHtml(flag.message)}</li>`).join("")}</ul>` : ""}${notices.length ? `<ul class="reason-list">${notices.map(notice => `<li>${escapeHtml(notice.title)}</li>`).join("")}</ul>` : ""}`, "research-review");
+    }
   }
   document.querySelector("#detailContent").innerHTML = html;
   document.querySelector("#detailPanel").classList.add("open");
