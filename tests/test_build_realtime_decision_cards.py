@@ -204,6 +204,34 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIn("止损复核", actions)
         self.assertNotIn("止损/退出", actions)
         self.assertEqual(actions["止损复核"]["status_label"], "未确认")
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "当前动作")
+        self.assertEqual(card["price_levels"]["dynamic_stop_loss_price"], 9.506)
+
+    def test_dynamic_unconfirmed_stop_reference_can_use_market_levels(self) -> None:
+        portfolio = portfolio_result()
+        result = portfolio["positions"][0]["result"]
+        result["warnings"] = [{"code": "unconfirmed_stop_loss_reference", "message": "导入草案止损未确认。"}]
+        result["calculations"]["stop_loss_price"] = 8.0
+        result["calculations"]["stop_loss_confirmed"] = False
+        report = build_report(
+            {"items": [intraday_item()]},
+            portfolio,
+            t_result(warnings=[{"code": "unconfirmed_stop_loss_reference", "message": "导入草案止损未确认。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            None,
+            None,
+            generated_at=datetime(2026, 7, 16, 9, 30, 0),
+        )
+
+        levels = report["cards"][0]["price_levels"]
+        actions = {row["action"]: row for row in report["cards"][0]["price_action_table"]["rows"]}
+
+        self.assertEqual(levels["stop_loss_price"], 8.0)
+        self.assertEqual(levels["dynamic_stop_loss_price"], 9.108)
+        self.assertEqual(levels["dynamic_stop_loss_source"], "recent_low_buffer")
+        self.assertEqual(actions["止损复核"]["price"], "9.11 元")
+        self.assertEqual(report["cards"][0]["price_action_table"]["primary_action"]["action"], "当前动作")
 
     def test_positive_t_candidate_is_watch_only(self) -> None:
         item = intraday_item()

@@ -121,6 +121,61 @@ def dynamic_price_zone_width(anchor_price: float | None, *, ratio_pct: float = 0
     return round(ticks * tick, 2)
 
 
+def dynamic_stop_loss_reference(
+    *,
+    base_stop: float | None,
+    stop_loss_confirmed: bool,
+    current: float | None,
+    entry: float | None,
+    ma20: float | None,
+    recent_low: float | None,
+    atr_pct: float | None,
+    technical_label: str | None,
+) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+
+    def add(source: str, price: float | None, reason: str) -> None:
+        if price is None or price <= 0:
+            return
+        if current is not None and price >= current:
+            price = current * 0.995
+        rounded_price = round(price, 4)
+        if rounded_price <= 0 or any(item["price"] == rounded_price for item in candidates):
+            return
+        candidates.append({"source": source, "price": rounded_price, "reason": reason})
+
+    add("draft_or_confirmed", base_stop, "持仓文件中的止损价；若未确认，只能作为草案参考。")
+    if entry is not None:
+        add("entry_risk_budget", entry * 0.88, "按成本下浮12%估算单笔风险预算。")
+    if ma20 is not None:
+        add("ma20_buffer", ma20 * 0.98, "按20日均线下方2%估算趋势失效参考。")
+    if recent_low is not None:
+        add("recent_low_buffer", recent_low * 0.99, "按近期低点下方1%估算结构破位参考。")
+    if current is not None and atr_pct is not None:
+        atr_buffer_pct = min(10.0, max(3.0, atr_pct * 1.5))
+        add("atr_buffer", current * (1 - atr_buffer_pct / 100), f"按ATR波动缓冲{atr_buffer_pct:.2f}%估算动态风控参考。")
+
+    if not candidates:
+        return {"price": None, "source": None, "reason": None, "candidates": []}
+
+    candidates = sorted(candidates, key=lambda item: item["price"])
+    if stop_loss_confirmed and base_stop is not None:
+        selected = next((item for item in candidates if item["source"] == "draft_or_confirmed"), candidates[0])
+    elif technical_label in {"bearish", "slightly_bearish"}:
+        selected = candidates[-1]
+    elif technical_label == "bullish":
+        selected = candidates[len(candidates) // 2]
+    else:
+        selected = candidates[-2] if len(candidates) >= 2 else candidates[-1]
+
+    return {
+        "price": selected["price"],
+        "source": selected["source"],
+        "reason": selected["reason"],
+        "candidates": candidates,
+    }
+
+
 def positive_t_score_threshold(confirmation_count: int, technical_operation: dict[str, Any]) -> float:
     threshold = POSITIVE_T_SCORE_THRESHOLD
     tier = str(technical_operation.get("tier") or "")
@@ -1395,11 +1450,26 @@ def price_levels(
     intraday: dict[str, Any],
     reverse_forecast: dict[str, Any] | None = None,
     generated_at: datetime | None = None,
+    technical_assessment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     calculations = (portfolio or {}).get("calculations", {})
     t_calculations = (t_check or {}).get("calculations", {})
+    current = as_float(value_at(intraday, "quote.latest_price"))
     stop_loss = as_float(calculations.get("stop_loss_price"))
     stop_loss_confirmed = bool(calculations.get("stop_loss_confirmed", stop_loss is not None))
+    ma20 = as_float(value_at(intraday, "technicals.ma20") or t_calculations.get("ma_mid"))
+    recent_low = as_float(t_calculations.get("recent_low"))
+    entry_price = as_float(value_at(intraday, "position.entry_price"))
+    dynamic_stop = dynamic_stop_loss_reference(
+        base_stop=stop_loss,
+        stop_loss_confirmed=stop_loss_confirmed,
+        current=current,
+        entry=entry_price,
+        ma20=ma20,
+        recent_low=recent_low,
+        atr_pct=as_float(value_at(technical_assessment or {}, "periods.daily.atr_pct")),
+        technical_label=str((technical_assessment or {}).get("label") or ""),
+    )
     warning_pct = as_float(calculations.get("near_stop_warning_pct"), 3.0) or 3.0
     block_pct = as_float(t_calculations.get("near_stop_block_pct"), 1.0) or 1.0
     near_warning_price = None
@@ -1427,15 +1497,19 @@ def price_levels(
     else:
         zone_source = None
     return {
-        "current_price": rounded(as_float(value_at(intraday, "quote.latest_price"))),
+        "current_price": rounded(current),
         "stop_loss_price": rounded(stop_loss),
         "stop_loss_confirmed": stop_loss_confirmed,
+        "dynamic_stop_loss_price": rounded(as_float(dynamic_stop.get("price"))),
+        "dynamic_stop_loss_source": dynamic_stop.get("source"),
+        "dynamic_stop_loss_reason": dynamic_stop.get("reason"),
+        "dynamic_stop_loss_candidates": dynamic_stop.get("candidates") or [],
         "near_stop_warning_price": rounded(near_warning_price),
         "near_stop_block_price": rounded(near_block_price),
         "ma5": rounded(as_float(value_at(intraday, "technicals.ma5") or t_calculations.get("ma_short"))),
-        "ma20": rounded(as_float(value_at(intraday, "technicals.ma20") or t_calculations.get("ma_mid"))),
+        "ma20": rounded(ma20),
         "recent_high": rounded(as_float(t_calculations.get("recent_high"))),
-        "recent_low": rounded(as_float(t_calculations.get("recent_low"))),
+        "recent_low": rounded(recent_low),
         "reverse_t_sell_zone": sell_zone,
         "reverse_t_buyback_max_price": rounded(buyback),
         "reverse_t_intraday_reference_zone": intraday_sell_zone,
@@ -2116,6 +2190,7 @@ def build_price_action_table(
 ) -> dict[str, Any]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
+    dynamic_stop = as_float(levels.get("dynamic_stop_loss_price"), stop_loss)
     stop_loss_confirmed = bool(levels.get("stop_loss_confirmed", stop_loss is not None))
     near_block = as_float(levels.get("near_stop_block_price"))
     position = intraday.get("position") or {}
@@ -2155,17 +2230,21 @@ def build_price_action_table(
             )
         )
     elif stop_loss is not None:
+        review_price = dynamic_stop if dynamic_stop is not None else stop_loss
+        review_warning_price = review_price * 1.03 if review_price is not None else None
+        review_near = current is not None and review_warning_price is not None and current <= review_warning_price
+        dynamic_source = levels.get("dynamic_stop_loss_source") or "draft_or_confirmed"
         rows.append(
             action_table_row(
                 "止损复核",
-                f"参考价 {stop_loss:.2f} 未确认",
-                f"{stop_loss:.2f} 元",
+                f"动态复核价 {review_price:.2f} 未确认" if review_price is not None else "止损参考价未确认",
+                f"{review_price:.2f} 元" if review_price is not None else "-",
                 "人工复核，不直接卖出",
                 status="watch",
-                status_label="未确认",
+                status_label="接近复核" if review_near else "未确认",
                 shares=None,
-                note="该止损价来自导入草案，不能作为硬退出触发；先重新确认有效止损或持有逻辑。",
-                priority=45,
+                note=f"该价格按{dynamic_source}动态估算；未人工确认前不能作为硬退出触发。",
+                priority=46 if review_near else 18,
             )
         )
 
@@ -2427,7 +2506,7 @@ def build_card(
         execution_quality_gate,
     )
     blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment, t_performance_gate, execution_quality_gate)
-    levels = price_levels(portfolio, t_check, intraday, reverse_forecast, generated_at)
+    levels = price_levels(portfolio, t_check, intraday, reverse_forecast, generated_at, technical_assessment)
     technical_operation["post_unlock_review"] = build_post_unlock_review(
         technical_operation,
         state,

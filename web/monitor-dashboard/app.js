@@ -1966,7 +1966,8 @@ function openDetail(code, options = {}) {
       ["置信度", decision.confidence],
       ["执行许可", decision.execution_allowed ? "允许进入人工确认" : "禁止直接执行"],
       ["当前价", money(levels.current_price)],
-      ["止损价", money(levels.stop_loss_price)],
+      ["止损草案价", money(levels.stop_loss_price)],
+      ["动态止损复核价", money(levels.dynamic_stop_loss_price)],
       ["做T阻断价", money(levels.near_stop_block_price)],
       ["20日均线", money(levels.ma20)],
     ];
