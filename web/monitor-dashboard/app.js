@@ -18,6 +18,7 @@ const state = {
   pendingStopLossConfirmation: null,
   triggerRefreshInFlight: false,
   lastTriggerRefreshKey: "",
+  lastTriggerRefresh: null,
 };
 
 const labels = {
@@ -349,6 +350,12 @@ function triggerRefreshKey(alerts) {
     .join("|");
 }
 
+function triggerRefreshSummary(alerts) {
+  return alerts
+    .map(alert => `${alert.name || alert.code || "--"} ${alert.active_path || "--"}`)
+    .join("；");
+}
+
 async function maybeRefreshTriggeredDecisionChain() {
   const actionable = liveIntradayTriggerAlerts().filter(alert => alert.severity === "action" && alert.active_path);
   if (!actionable.length || state.triggerRefreshInFlight) return;
@@ -356,6 +363,14 @@ async function maybeRefreshTriggeredDecisionChain() {
   if (!key || key === state.lastTriggerRefreshKey) return;
   state.triggerRefreshInFlight = true;
   state.lastTriggerRefreshKey = key;
+  state.lastTriggerRefresh = {
+    status: "running",
+    started_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+    trigger_count: actionable.length,
+    trigger_summary: triggerRefreshSummary(actionable),
+    message: "触发路径已出现，正在刷新完整日内决策链。",
+  };
+  renderRefreshAlert();
   document.querySelector("#monitorStatus").textContent = "触发路径已出现，正在刷新决策链...";
   try {
     const response = await fetch("/api/intraday-trigger-refresh", {
@@ -375,8 +390,27 @@ async function maybeRefreshTriggeredDecisionChain() {
     });
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    state.lastTriggerRefresh = {
+      status: "success",
+      started_at: state.lastTriggerRefresh.started_at,
+      finished_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+      trigger_count: actionable.length,
+      trigger_summary: triggerRefreshSummary(actionable),
+      generated_at: result.generated_at || "",
+      state_counts: result.state_counts || {},
+      message: "已根据盘中触发路径刷新完整决策链。",
+    };
     await loadData();
   } catch (error) {
+    state.lastTriggerRefresh = {
+      status: "failed",
+      started_at: state.lastTriggerRefresh?.started_at || new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+      finished_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+      trigger_count: actionable.length,
+      trigger_summary: triggerRefreshSummary(actionable),
+      message: `触发后刷新失败：${error.message}`,
+    };
+    renderRefreshAlert();
     document.querySelector("#monitorStatus").textContent = `触发后刷新失败：${error.message}`;
   } finally {
     state.triggerRefreshInFlight = false;
@@ -748,25 +782,36 @@ function renderRefreshAlert() {
   const alert = document.querySelector("#refreshAlert");
   const check = state.refreshCheck;
   const staleDecisionReport = state.decisionReport?.stale_due_to_snapshot_date;
-  if (!check && !staleDecisionReport || check?.conclusion === "no_market_wait" && !staleDecisionReport) {
+  const autoRefresh = state.lastTriggerRefresh;
+  if ((!check && !staleDecisionReport || check?.conclusion === "no_market_wait" && !staleDecisionReport) && !autoRefresh) {
     alert.hidden = true;
     alert.innerHTML = "";
     return;
   }
   const command = check?.refresh_command?.shell || "";
-  const actionClass = check?.action_required || staleDecisionReport ? "refresh-action" : "refresh-wait";
+  const actionClass = check?.action_required || staleDecisionReport || autoRefresh?.status === "failed" ? "refresh-action" : "refresh-wait";
   const commandHtml = command
     ? `<div class="refresh-command"><code>${escapeHtml(command)}</code><button class="copy-refresh" type="button" data-command="${escapeHtml(command)}">复制</button></div>`
     : "";
   const message = staleDecisionReport
     ? `实时决策卡生成于 ${state.decisionReport?.generated_at || "--"}，早于行情快照 ${state.snapshot?.generated_at || "--"}；旧决策已停用，请刷新完整日内决策链。`
-    : check?.message || "等待行情刷新。";
+    : check?.message || autoRefresh?.message || "等待行情刷新。";
+  const statusLine = check || staleDecisionReport
+    ? `<span>${escapeHtml(check?.market_session?.label || "--")} · ${escapeHtml(check?.market_wait_count ?? 0)} 只等待</span>`
+    : "";
+  const autoRefreshHtml = autoRefresh ? `
+    <div class="auto-refresh-record auto-refresh-${escapeHtml(autoRefresh.status || "unknown")}">
+      <strong>${escapeHtml(autoRefresh.status === "running" ? "自动刷新中" : autoRefresh.status === "success" ? "最近自动刷新成功" : "最近自动刷新失败")}</strong>
+      <span>${escapeHtml(autoRefresh.started_at || "--")}${autoRefresh.finished_at ? ` - ${escapeHtml(autoRefresh.finished_at)}` : ""} · ${escapeHtml(autoRefresh.trigger_summary || "--")} · ${escapeHtml(autoRefresh.trigger_count ?? 0)} 条触发</span>
+      ${autoRefresh.generated_at ? `<span>新决策卡：${escapeHtml(String(autoRefresh.generated_at).replace("T", " "))}</span>` : ""}
+    </div>` : "";
   alert.hidden = false;
   alert.className = `refresh-alert ${actionClass}`;
   alert.innerHTML = `
     <div>
       <strong>${escapeHtml(message)}</strong>
-      <span>${escapeHtml(check?.market_session?.label || "--")} · ${escapeHtml(check?.market_wait_count ?? 0)} 只等待</span>
+      ${statusLine}
+      ${autoRefreshHtml}
     </div>
     ${check?.action_required || staleDecisionReport ? commandHtml : ""}`;
 }
