@@ -237,6 +237,10 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("路径1-下破" in step for step in card["manual_execution_plan"]["steps"]))
         self.assertTrue(any("路径2-反抽" in step for step in card["manual_execution_plan"]["steps"]))
         self.assertTrue(any("路径3-站稳" in step for step in card["manual_execution_plan"]["steps"]))
+        arbitration = card["decision"]["action_arbitration"]
+        self.assertEqual(arbitration["primary_action"], "止损风险复核")
+        self.assertIn("正T、反T和补仓全部让位", arbitration["summary"])
+        self.assertTrue(any("T" in item["action"] or "买入" in item["action"] for item in arbitration["suppressed_actions"]))
 
     def test_unconfirmed_imported_stop_reference_does_not_take_exit_priority(self) -> None:
         portfolio = portfolio_result()

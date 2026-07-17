@@ -690,6 +690,7 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
   const blockers = decisionCard?.blockers || [];
   const actionSteps = decisionCard?.decision?.action_steps || [];
   const decision = decisionCard?.decision || {};
+  const arbitration = decision.action_arbitration || {};
   const automatic = item.action_decision || {};
   const watchRows = (decisionCard?.price_action_table?.rows || []).filter(row => row.status === "watch" || row.status === "reference");
   const queueItem = (state.decisionReport?.priority_queue?.items || []).find(entry => entry.code === item.code);
@@ -743,6 +744,12 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
       <div class="decision-focus-card decision-focus-effect">
         <span>做了会怎样</span>
         ${effectItems.length ? `<ul class="reason-list">${effectItems.slice(0, 5).map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul>` : `<p class="secondary">成交后系统会按真实成交价重新计算持仓、成本和下一步建议。</p>`}
+      </div>
+      <div class="decision-focus-card decision-focus-arbitration">
+        <span>仲裁结论</span>
+        <strong>${escapeHtml(arbitration.primary_action || primary.action || "--")}</strong>
+        <p class="secondary">${escapeHtml(arbitration.summary || "按可操作步骤表排序，只保留一个主动作。")}</p>
+        ${(arbitration.suppressed_actions || []).length ? `<ul class="reason-list">${arbitration.suppressed_actions.slice(0, 4).map(item => `<li>${escapeHtml(item.action || "--")}：${escapeHtml(item.reason || "--")}</li>`).join("")}</ul>` : ""}
       </div>
     </div>
     <h4>阅读顺序</h4>

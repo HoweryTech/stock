@@ -450,6 +450,7 @@ th:nth-child(8) { width: 100px; }
 .decision-focus-trigger { border-left-color: var(--green); background: rgba(234, 246, 240, 0.66); }
 .decision-focus-block { border-left-color: var(--amber); background: rgba(255, 246, 221, 0.72); }
 .decision-focus-effect { border-left-color: var(--red); background: rgba(255, 240, 238, 0.54); }
+.decision-focus-arbitration { border-left-color: var(--muted); background: rgba(244, 246, 248, 0.84); }
 .detail-nav { display: flex; flex-wrap: wrap; gap: 8px; }
 .detail-nav .secondary-action { min-height: 32px; }
 .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }

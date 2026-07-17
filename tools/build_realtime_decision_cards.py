@@ -2722,6 +2722,56 @@ def build_price_action_table(
     }
 
 
+def build_action_arbitration(
+    state: str,
+    price_action_table: dict[str, Any],
+    decision_mode: dict[str, Any],
+) -> dict[str, Any]:
+    primary = price_action_table.get("primary_action") or {}
+    rows = price_action_table.get("rows") or []
+    mode = str(decision_mode.get("mode") or "")
+    suppressed: list[dict[str, Any]] = []
+    primary_action = str(primary.get("action") or "当前动作")
+    if state == "exit_risk_review":
+        summary = f"{primary_action}优先；正T、反T和补仓全部让位于硬止损风险。"
+    elif mode != "tradable":
+        summary = f"{decision_mode.get('label') or '只观察'}优先；数据或交易时段未支持盘中人工确认。"
+    elif primary.get("status") == "ready":
+        summary = f"{primary_action}已满足触发条件；其他动作等待本动作处理后重新评估。"
+    else:
+        summary = f"{primary_action}作为当前主观察动作；未触发前不提前切换到其他动作。"
+    for row in rows:
+        if row is primary:
+            continue
+        action = str(row.get("action") or "")
+        if not action or action == primary_action:
+            continue
+        if state == "exit_risk_review" and any(keyword in action for keyword in ("T", "买入", "追买")):
+            reason = "硬止损或近硬止损优先，做T/买入不能扩大风险。"
+        elif mode != "tradable":
+            reason = f"盘中可信度为{decision_mode.get('label') or mode}，该动作只能保留观察。"
+        elif row.get("status") == "blocked":
+            reason = row.get("note") or row.get("status_label") or "该动作当前被规则阻断。"
+        elif row.get("status") == "watch":
+            reason = row.get("trigger") or "该动作尚未到触发条件。"
+        else:
+            reason = row.get("note") or "优先级低于当前主动作。"
+        suppressed.append(
+            {
+                "action": action,
+                "status": row.get("status"),
+                "status_label": row.get("status_label"),
+                "reason": reason,
+            }
+        )
+    return {
+        "primary_action": primary_action,
+        "primary_status": primary.get("status"),
+        "summary": summary,
+        "suppressed_actions": suppressed[:6],
+    }
+
+
 def confidence_for(state: str, evidence: list[str], blockers: list[str]) -> str:
     if state in {"exit_risk_review", "data_stale", "market_wait", "data_insufficient"}:
         return "high"
@@ -2903,6 +2953,7 @@ def build_card(
         execution_quality_gate,
         data_quality,
     )
+    action_arbitration = build_action_arbitration(state, price_action_table, decision_mode)
     action_code = {
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
@@ -2944,6 +2995,7 @@ def build_card(
                 manual_execution_plan=manual_execution_plan,
             ),
             "technical_operation": technical_operation,
+            "action_arbitration": action_arbitration,
         },
         "price_levels": levels,
         "price_action_table": price_action_table,
