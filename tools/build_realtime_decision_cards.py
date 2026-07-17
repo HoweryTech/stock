@@ -631,6 +631,78 @@ def review_check(code: str, label: str, status: str, message: str, next_step: st
     return {"code": code, "label": label, "status": status, "message": message, "next_step": next_step}
 
 
+def build_t_performance_gate(intraday: dict[str, Any]) -> dict[str, Any]:
+    performance = intraday.get("t_closure_performance") or {}
+    total_count = int(as_float(performance.get("total_count"), 0.0) or 0)
+    profitable_count = int(as_float(performance.get("profitable_count"), 0.0) or 0)
+    loss_count = int(as_float(performance.get("loss_count"), 0.0) or 0)
+    total_net_profit = as_float(performance.get("total_net_profit"), 0.0) or 0.0
+    win_rate_pct = as_float(performance.get("win_rate_pct"))
+    recent_closures = performance.get("recent_closures") if isinstance(performance.get("recent_closures"), list) else []
+    consecutive_loss_count = 0
+    for closure in reversed(recent_closures):
+        if as_float(closure.get("net_profit"), 0.0) <= 0:
+            consecutive_loss_count += 1
+        else:
+            break
+
+    reasons: list[str] = []
+    evidence: list[str] = []
+    if total_count == 0:
+        status = "caution"
+        status_label = "暂无做T实盘闭环样本"
+        reasons.append("这只股票没有真实做T闭环样本，不能因为模型候选就放大交易。")
+        next_step = "只允许最小100股试做或继续观察；完成闭环后再评估是否适合继续做T。"
+    elif total_count >= 2 and total_net_profit <= 0:
+        status = "blocked"
+        status_label = "做T实盘累计未盈利"
+        reasons.append(f"已完成 {total_count} 轮做T闭环，累计净收益 {total_net_profit:.2f} 元，不支持继续执行做T候选。")
+        next_step = "暂停做T执行；只保留观察、止损或减仓决策，等待后续闭环绩效改善。"
+    elif total_count >= 3 and win_rate_pct is not None and win_rate_pct < 50:
+        status = "blocked"
+        status_label = "做T实盘胜率偏低"
+        reasons.append(f"已完成 {total_count} 轮做T闭环，胜率 {win_rate_pct:.2f}% 低于50%。")
+        next_step = "暂停做T执行；需要复盘失败原因后再恢复最小股数试做。"
+    elif consecutive_loss_count >= 2:
+        status = "blocked"
+        status_label = "做T最近连续失败"
+        reasons.append(f"最近连续 {consecutive_loss_count} 轮做T闭环扣费后未盈利。")
+        next_step = "暂停做T至少到下一次技术/量能重新确认；不要继续用做T摊低成本。"
+    elif total_count < 3:
+        status = "caution"
+        status_label = "做T实盘样本较少"
+        reasons.append(f"只有 {total_count} 轮做T闭环样本，累计净收益 {total_net_profit:.2f} 元，不能放大单次股数。")
+        next_step = "若其他门禁也通过，只允许最小股数执行；继续积累闭环样本。"
+    else:
+        status = "pass"
+        status_label = "做T实盘绩效允许观察"
+        reasons.append(f"已完成 {total_count} 轮做T闭环，胜率 {win_rate_pct:.2f}%，累计净收益 {total_net_profit:.2f} 元。")
+        next_step = "可以继续按系统候选小额执行；仍需人工确认价格、费用和失败后果。"
+
+    if total_count:
+        evidence.append(
+            f"做T实盘闭环 {total_count} 轮，盈利 {profitable_count} 轮，未盈利 {loss_count} 轮，"
+            f"胜率 {win_rate_pct if win_rate_pct is not None else '-'}%，累计净收益 {total_net_profit:.2f} 元。"
+        )
+    else:
+        evidence.append("做T实盘闭环 0 轮，当前没有可验证的真实绩效。")
+    if consecutive_loss_count:
+        evidence.append(f"最近连续未盈利闭环 {consecutive_loss_count} 轮。")
+    return {
+        "status": status,
+        "status_label": status_label,
+        "total_count": total_count,
+        "profitable_count": profitable_count,
+        "loss_count": loss_count,
+        "win_rate_pct": win_rate_pct,
+        "total_net_profit": rounded(total_net_profit),
+        "consecutive_loss_count": consecutive_loss_count,
+        "reasons": reasons,
+        "evidence": evidence,
+        "next_step": next_step,
+    }
+
+
 def build_post_unlock_review(
     technical_operation: dict[str, Any],
     state: str,
@@ -639,6 +711,7 @@ def build_post_unlock_review(
     positive_timing: dict[str, Any],
     reverse_backtest: dict[str, Any] | None,
     intraday: dict[str, Any],
+    t_performance_gate: dict[str, Any],
 ) -> dict[str, Any]:
     checks: list[dict[str, str]] = []
     if not (technical_operation.get("allow_buy_watch") or technical_operation.get("allow_t_watch")):
@@ -702,6 +775,21 @@ def build_post_unlock_review(
         checks.append(review_check("reverse_t", "反T门禁", "block", f"反T候选存在，但回测门禁为 {reverse_verdict or '-'}。", "回测门禁未通过前不执行反T。"))
     else:
         checks.append(review_check("reverse_t", "反T门禁", "warn", f"反T状态为 {reverse_status or '-'}。", "未进入反T候选时不卖出做T。"))
+
+    if t_performance_gate.get("status") == "blocked":
+        checks.append(
+            review_check(
+                "t_performance",
+                "做T实盘绩效",
+                "block",
+                t_performance_gate.get("reasons", ["做T实盘绩效未通过。"])[0],
+                t_performance_gate.get("next_step") or "暂停做T执行。",
+            )
+        )
+    elif t_performance_gate.get("status") == "pass":
+        checks.append(review_check("t_performance", "做T实盘绩效", "pass", t_performance_gate.get("reasons", ["实盘绩效允许观察。"])[0], "继续人工确认价格、数量、费用和失败后果。"))
+    else:
+        checks.append(review_check("t_performance", "做T实盘绩效", "warn", t_performance_gate.get("reasons", ["实盘样本不足。"])[0], t_performance_gate.get("next_step") or "只允许最小股数试做或继续观察。"))
 
     blocking = [item for item in checks if item["status"] == "block"]
     positive_ready = any(item["code"] == "positive_timing" and item["status"] == "pass" for item in checks)
@@ -1127,6 +1215,7 @@ def choose_state(
     reverse_backtest: dict[str, Any] | None,
     data_quality: dict[str, Any] | None,
     technical_assessment: dict[str, Any] | None = None,
+    t_performance_gate: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     signal_codes = {item.get("code") for item in intraday.get("signals", [])}
     portfolio_action_codes = {item.get("code") for item in (portfolio or {}).get("actions", [])}
@@ -1158,10 +1247,14 @@ def choose_state(
         states.append(("risk_reduction_review", "持仓或组合仓位超限，需要先复核降仓。"))
     if value_at(intraday, "reduction_plan.status") == "actionable":
         states.append(("risk_reduction_review", "实时市值测算显示可复核降仓。"))
-    if t_check and t_check.get("conclusion") == "positive_t_candidate":
+    positive_candidate = bool(t_check and t_check.get("conclusion") == "positive_t_candidate")
+    reverse_candidate = value_at(intraday, "reverse_t_plan.status") == "candidate"
+    if positive_candidate:
         states.append(("positive_t_watch", "日线环境进入正T观察候选。"))
-    if value_at(intraday, "reverse_t_plan.status") == "candidate":
+    if reverse_candidate:
         states.append(("reverse_t_watch", "盘中价格进入反T观察候选。"))
+    if (t_performance_gate or {}).get("status") == "blocked" and (positive_candidate or reverse_candidate):
+        states.append(("hold_no_add", "做T实盘绩效门禁未通过，本轮暂停正T/反T执行。"))
     if (technical_assessment or {}).get("label") == "bearish":
         states.append(("hold_no_add", "多周期技术指标偏弱，禁止补仓和做T，先观察风险变化。"))
     if signal_codes & {"below_ma20", "intraday_drop"}:
@@ -1234,8 +1327,12 @@ def build_evidence(
     data_quality: dict[str, Any] | None,
     technical_assessment: dict[str, Any] | None = None,
     positive_timing: dict[str, Any] | None = None,
+    t_performance_gate: dict[str, Any] | None = None,
 ) -> list[str]:
     evidence: list[str] = []
+    if t_performance_gate:
+        evidence.append(f"[做T实盘绩效] {t_performance_gate.get('status_label') or t_performance_gate.get('status')}")
+        evidence.extend(f"[做T实盘] {item}" for item in (t_performance_gate.get("evidence") or [])[:2])
     if positive_timing and positive_timing.get("available"):
         evidence.append(
             f"[正T分时评分] {positive_timing.get('status')} · score={positive_timing.get('score')} / {positive_timing.get('threshold')}"
@@ -1307,6 +1404,7 @@ def build_blockers(
     reverse_backtest: dict[str, Any] | None,
     data_quality: dict[str, Any] | None,
     technical_assessment: dict[str, Any] | None = None,
+    t_performance_gate: dict[str, Any] | None = None,
 ) -> list[str]:
     blockers: list[str] = []
     if data_quality_status(data_quality) in QUALITY_BLOCKER_STATUSES:
@@ -1319,6 +1417,8 @@ def build_blockers(
     blockers.extend(item.get("message") for item in (t_check or {}).get("blockers", []))
     if (technical_assessment or {}).get("label") == "bearish":
         blockers.append("多周期技术指标偏弱，本轮禁止补仓和做T。")
+    if (t_performance_gate or {}).get("status") == "blocked":
+        blockers.extend((t_performance_gate or {}).get("reasons") or ["做T实盘绩效门禁未通过。"])
     if reverse_backtest and reverse_backtest.get("verdict") != "pass":
         blockers.append(reverse_backtest.get("verdict_label") or "反T历史回测未通过。")
     return [item for item in blockers if item]
@@ -1679,6 +1779,7 @@ def build_action_steps(
     position: dict[str, Any] | None = None,
     capital_plan: dict[str, Any] | None = None,
     technical_operation: dict[str, Any] | None = None,
+    t_performance_gate: dict[str, Any] | None = None,
 ) -> list[str]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
@@ -1750,6 +1851,8 @@ def build_action_steps(
             "只允许加入人工观察，不直接买入。",
             "可追加资金不等于可以无上限补仓；必须先满足买入区间、止损距离、数据质量和技术面条件。",
         ]
+        if t_performance_gate and t_performance_gate.get("status") == "caution":
+            steps.append(f"做T实盘绩效提示：{(t_performance_gate.get('reasons') or ['样本不足，不放大单次股数。'])[0]}")
         if technical_operation and not technical_operation.get("allow_buy_watch"):
             steps.append(f"技术操作档位为“{technical_operation.get('tier_label')}”：{technical_operation.get('next_step')}")
         if capital_plan and capital_plan.get("status") == "watch":
@@ -1764,11 +1867,16 @@ def build_action_steps(
             "必须确认5分钟回测、费用模型、分时转弱和回补上限。",
             "未到回补价不追买；可能形成实际减仓，必须提前接受这个结果。",
         ]
+        if t_performance_gate and t_performance_gate.get("status") == "caution":
+            steps.append(f"做T实盘绩效提示：{(t_performance_gate.get('reasons') or ['样本不足，不放大单次股数。'])[0]}")
         if technical_operation and not technical_operation.get("allow_t_watch"):
             steps.append(f"技术操作档位为“{technical_operation.get('tier_label')}”：{technical_operation.get('next_step')}")
         return steps
     if state == "hold_no_add":
         steps = ["持有观察，不补仓，不做T。", "等待技术面、数据质量或风险信号改善后再重新评估。"]
+        if t_performance_gate and t_performance_gate.get("status") == "blocked":
+            steps.append(f"做T实盘绩效阻断：{(t_performance_gate.get('reasons') or ['实盘绩效未通过。'])[0]}")
+            steps.append(t_performance_gate.get("next_step") or "暂停做T执行，只保留观察、止损或减仓。")
         if technical_operation and technical_operation.get("tier") in {"risk_control_first", "forbid_chase", "observe_only"}:
             steps.append(f"技术操作档位为“{technical_operation.get('tier_label')}”：{technical_operation.get('next_step')}")
         if action_backtest and (action_backtest.get("weak_rule_count") or 0) > 0:
@@ -1816,7 +1924,8 @@ def build_card(
     technical_operation = build_technical_operation(technical_assessment)
     technical_operation["post_unlock_checklist"] = technical_post_unlock_checklist(technical_operation)
     positive_timing = build_positive_timing(intraday, t_check, minute_bars, technical_assessment, technical_operation)
-    state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment)
+    t_performance_gate = build_t_performance_gate(intraday)
+    state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment, t_performance_gate)
     evidence = build_evidence(
         intraday,
         portfolio,
@@ -1827,8 +1936,9 @@ def build_card(
         data_quality,
         technical_assessment,
         positive_timing,
+        t_performance_gate,
     )
-    blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment)
+    blockers = build_blockers(intraday, t_check, reverse_backtest, data_quality, technical_assessment, t_performance_gate)
     levels = price_levels(portfolio, t_check, intraday, reverse_forecast)
     technical_operation["post_unlock_review"] = build_post_unlock_review(
         technical_operation,
@@ -1838,6 +1948,7 @@ def build_card(
         positive_timing,
         reverse_backtest,
         intraday,
+        t_performance_gate,
     )
     post_unlock_review_summary = build_post_unlock_review_summary(technical_operation["post_unlock_review"])
     capital_plan = build_capital_plan(
@@ -1892,11 +2003,14 @@ def build_card(
                 position=intraday.get("position", {}),
                 capital_plan=capital_plan,
                 technical_operation=technical_operation,
+                t_performance_gate=t_performance_gate,
             ),
             "technical_operation": technical_operation,
         },
         "price_levels": levels,
         "capital_plan": capital_plan,
+        "t_performance_gate": t_performance_gate,
+        "t_closure_performance": intraday.get("t_closure_performance") or {},
         "positive_timing": positive_timing,
         "post_unlock_review_summary": post_unlock_review_summary,
         "manual_execution_plan": manual_execution_plan,
@@ -1921,6 +2035,9 @@ def build_card(
             "technical_label": technical_assessment.get("label"),
             "positive_timing_score": positive_timing.get("score"),
             "positive_timing_status": positive_timing.get("status"),
+            "t_performance_status": t_performance_gate.get("status"),
+            "t_performance_total_count": t_performance_gate.get("total_count"),
+            "t_performance_total_net_profit": t_performance_gate.get("total_net_profit"),
         },
         "technical_assessment": technical_assessment,
         "data_quality": data_quality or {},

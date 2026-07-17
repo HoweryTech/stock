@@ -351,6 +351,15 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         item["position"]["entry_price"] = 9.8
         item["reverse_t_plan"]["trade_shares"] = 100
         item["reverse_t_plan"]["buyback_max_price"] = 9.95
+        item["t_closure_performance"] = {
+            "status": "profitable",
+            "total_count": 1,
+            "profitable_count": 1,
+            "loss_count": 0,
+            "win_rate_pct": 100.0,
+            "total_net_profit": 22.67,
+            "recent_closures": [{"net_profit": 22.67}],
+        }
         report = build_report(
             {"total_assets": 50000.0, "items": [item]},
             portfolio_result(),
@@ -368,10 +377,50 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
 
         self.assertEqual(card["post_unlock_review_summary"]["status"], "manual_candidate")
         self.assertEqual(card["post_unlock_review_summary"]["candidate"], "reverse_t")
+        self.assertEqual(card["t_performance_gate"]["status"], "caution")
         self.assertEqual(card["manual_execution_plan"]["side"], "sell")
         self.assertEqual(card["manual_execution_plan"]["trade_intent"], "reverse_t_open")
         self.assertEqual(card["manual_execution_plan"]["post_trade_shares"], 400)
         self.assertTrue(any("只有价格不高于" in step for step in card["manual_execution_plan"]["steps"]))
+
+    def test_negative_t_performance_blocks_reverse_t_candidate(self) -> None:
+        item = intraday_item(reverse_status="candidate")
+        item["position"]["shares"] = 500
+        item["position"]["entry_price"] = 9.8
+        item["reverse_t_plan"]["trade_shares"] = 100
+        item["reverse_t_plan"]["buyback_max_price"] = 9.95
+        item["t_closure_performance"] = {
+            "status": "needs_review",
+            "total_count": 2,
+            "profitable_count": 0,
+            "loss_count": 2,
+            "win_rate_pct": 0.0,
+            "total_net_profit": -6.5,
+            "recent_closures": [{"net_profit": -2.0}, {"net_profit": -4.5}],
+        }
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(),
+            None,
+            {"items": [{"code": "600000", "verdict": "pass", "verdict_label": "反T回测通过"}]},
+            None,
+            None,
+            bullish_technical_doc(),
+            {},
+            generated_at=datetime(2026, 7, 16, 9, 40, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "hold_no_add")
+        self.assertEqual(card["decision"]["action"], "hold_without_adding")
+        self.assertEqual(card["t_performance_gate"]["status"], "blocked")
+        self.assertEqual(card["post_unlock_review_summary"]["status"], "blocked_after_unlock")
+        self.assertIn("做T实盘绩效", card["post_unlock_review_summary"]["blocking_checks"])
+        self.assertTrue(any("累计净收益 -6.50 元" in blocker for blocker in card["blockers"]))
+        self.assertTrue(any("做T实盘绩效阻断" in step for step in card["decision"]["action_steps"]))
+        self.assertFalse(card["manual_execution_plan"]["applicable"])
 
     def test_positive_t_candidate_without_intraday_confirmation_waits(self) -> None:
         item = intraday_item()

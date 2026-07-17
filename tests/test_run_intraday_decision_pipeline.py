@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from argparse import Namespace
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -64,9 +65,10 @@ def write_daily_bars(path: Path) -> None:
 
 
 def write_minute_bars(path: Path) -> None:
+    today = datetime.now().date().isoformat()
     bars = [
         {
-            "timestamp": f"2026-07-16 {9 + (index // 60):02d}:{index % 60:02d}",
+            "timestamp": f"{today} {9 + (index // 60):02d}:{index % 60:02d}",
             "code": "600000",
             "open": 11.2,
             "high": 11.3,
@@ -149,7 +151,7 @@ class RunIntradayDecisionPipelineTest(unittest.TestCase):
             write_daily_bars(base / "daily_bars.csv")
             write_minute_bars(base / "minute-bars/600000.json")
             fake_snapshot = {
-                "generated_at": "2026-07-16T09:30:00+08:00",
+                "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "success_count": 1,
                 "position_count": 1,
                 "errors": [],
