@@ -29,11 +29,14 @@ def validate_position(profile: dict[str, Any], position: dict[str, Any], near_st
     entry_price = as_float(value_at(position, "entry.entry_price"))
     stop_loss_price = as_float(value_at(position, "risk.stop_loss_price"))
     stop_loss_confirmed = bool(value_at(position, "risk.stop_loss_confirmed"))
+    stop_loss_confirmation_status = value_at(position, "risk.stop_loss_confirmation_status")
+    stop_loss_confirmation_label = value_at(position, "risk.stop_loss_confirmation_label")
     imported_draft_stop = (
         value_at(position, "strategy.source") == "imported_holding"
         and any("需在下一次人工复核中确认" in str(item) for item in value_at(position, "risk.observation_items") or [])
     )
-    hard_stop_loss = stop_loss_price is not None and (stop_loss_confirmed or not imported_draft_stop)
+    reference_only_stop = stop_loss_confirmation_status == "reference_only"
+    hard_stop_loss = stop_loss_price is not None and not reference_only_stop and (stop_loss_confirmed or not imported_draft_stop)
     position_pct = as_float(value_at(position, "entry.position_pct_of_total_assets"))
     industry_pct = as_float(value_at(position, "portfolio_context.industry_position_pct"), position_pct)
     total_pct = as_float(value_at(position, "portfolio_context.total_position_pct"), position_pct)
@@ -108,6 +111,8 @@ def validate_position(profile: dict[str, Any], position: dict[str, Any], near_st
             "current_price": current_price,
             "stop_loss_price": stop_loss_price,
             "stop_loss_confirmed": hard_stop_loss,
+            "stop_loss_confirmation_status": stop_loss_confirmation_status,
+            "stop_loss_confirmation_label": stop_loss_confirmation_label,
             "distance_to_stop_pct": distance_to_stop_pct,
             "near_stop_warning_pct": effective_near_stop_pct,
             "position_pct_of_total_assets": position_pct,

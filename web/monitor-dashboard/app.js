@@ -694,8 +694,11 @@ function uniqueTradeConclusion(item, decisionCard, automaticDecision) {
   const cleanClause = text => String(text || "").replace(/[。；;，,\s]+$/g, "");
   const dynamicStop = levels.dynamic_stop_loss_price == null ? "--" : money(levels.dynamic_stop_loss_price);
   const stopConfirmed = Boolean(levels.stop_loss_confirmed);
+  const stopReferenceOnly = levels.stop_loss_confirmation_status === "reference_only";
   const stopSuffix = levels.dynamic_stop_loss_price == null
     ? ""
+    : stopReferenceOnly
+      ? ""
     : `；动态止损复核价 ${dynamicStop}${stopConfirmed ? "，已确认则触发后优先风控" : "，未确认前不作为卖出价"}`;
   if (primary.status === "ready") {
     return `现在可执行：${primary.action || decision.action_label || automaticDecision.headline || "按主动作处理"}；价格 ${primary.price || money(item.quote?.latest_price)}${primary.shares ? `，数量 ${primary.shares}股` : ""}。`;
@@ -991,7 +994,7 @@ function renderDynamicStopLossSection(item, decisionCard) {
     ["动态复核价", money(levels.dynamic_stop_loss_price)],
     ["采用来源", stopLossSourceLabel(selectedSource)],
     ["止损草案价", money(levels.stop_loss_price)],
-    ["确认状态", confirmed ? "已确认，可作为硬风控" : "未确认，仅作风险复核"],
+    ["确认状态", confirmed ? "已确认，可作为硬风控" : levels.stop_loss_confirmation_status === "reference_only" ? "已选择仅保留参考" : "未确认，仅作风险复核"],
     ["当前价", money(levels.current_price)],
     ["20日均线", money(levels.ma20)],
     ["近期低点", money(levels.recent_low)],
@@ -1003,7 +1006,9 @@ function renderDynamicStopLossSection(item, decisionCard) {
   const title = confirmed || reviewNear ? "动态止损复核" : "风控参考价";
   const message = confirmed
     ? "该止损价已确认；触发后会进入退出风险优先流程。"
-    : reviewNear
+    : levels.stop_loss_confirmation_status === "reference_only"
+      ? "你已选择仅保留参考；该价格不会作为硬卖出触发线。"
+      : reviewNear
       ? "现价接近未确认的动态复核价；只做人工复核，不会自动变成卖出指令。"
       : "这是未确认的风控参考价；未接近复核区间前，不放入可操作步骤表。";
   const currentPrice = levels.current_price ?? item?.quote?.latest_price;

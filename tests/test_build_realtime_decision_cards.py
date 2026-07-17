@@ -206,6 +206,31 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["price_action_table"]["primary_action"]["action"], "当前动作")
         self.assertEqual(card["price_levels"]["dynamic_stop_loss_price"], 9.506)
 
+    def test_reference_only_stop_status_is_exposed_to_dashboard(self) -> None:
+        portfolio = portfolio_result()
+        result = portfolio["positions"][0]["result"]
+        result["warnings"] = [{"code": "unconfirmed_stop_loss_reference", "message": "导入草案止损未确认。"}]
+        result["calculations"]["stop_loss_price"] = 10.5
+        result["calculations"]["stop_loss_confirmed"] = False
+        result["calculations"]["stop_loss_confirmation_status"] = "reference_only"
+        result["calculations"]["stop_loss_confirmation_label"] = "仅保留参考"
+        report = build_report(
+            {"items": [intraday_item()]},
+            portfolio,
+            t_result(warnings=[{"code": "unconfirmed_stop_loss_reference", "message": "导入草案止损未确认。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            None,
+            generated_at=datetime(2026, 7, 16, 9, 30, 0),
+        )
+
+        levels = report["cards"][0]["price_levels"]
+        actions = {row["action"]: row for row in report["cards"][0]["price_action_table"]["rows"]}
+
+        self.assertEqual(levels["stop_loss_confirmation_status"], "reference_only")
+        self.assertEqual(levels["stop_loss_confirmation_label"], "仅保留参考")
+        self.assertNotIn("止损/退出", actions)
+
     def test_dynamic_unconfirmed_stop_reference_can_use_market_levels(self) -> None:
         portfolio = portfolio_result()
         result = portfolio["positions"][0]["result"]

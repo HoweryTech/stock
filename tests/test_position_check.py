@@ -77,6 +77,24 @@ class PositionCheckTest(unittest.TestCase):
         self.assertIn("unconfirmed_stop_loss_reference", warning_codes)
         self.assertFalse(result["calculations"]["stop_loss_confirmed"])
 
+    def test_reference_only_stop_loss_stays_non_hard_stop(self) -> None:
+        position = copy.deepcopy(self.position)
+        position["strategy"]["source"] = "imported_holding"
+        position["tracking"]["current_price"] = 6.01
+        position["risk"]["stop_loss_price"] = 6.49
+        position["risk"]["stop_loss_confirmed"] = False
+        position["risk"]["stop_loss_confirmation_status"] = "reference_only"
+        position["risk"]["stop_loss_confirmation_label"] = "仅保留参考"
+        position["risk"]["observation_items"] = ["止损价采用“当前价下方5%”作为当前存量仓位风险边界，需在下一次人工复核中确认。"]
+
+        result = validate_position(self.profile, position)
+        action_codes = {item["code"] for item in result["actions"]}
+
+        self.assertNotIn("stop_loss_triggered", action_codes)
+        self.assertFalse(result["calculations"]["stop_loss_confirmed"])
+        self.assertEqual(result["calculations"]["stop_loss_confirmation_status"], "reference_only")
+        self.assertEqual(result["calculations"]["stop_loss_confirmation_label"], "仅保留参考")
+
     def test_missing_strategy_fields_warns(self) -> None:
         position = copy.deepcopy(self.position)
         position["strategy"]["buy_reason"] = ""

@@ -1457,6 +1457,8 @@ def price_levels(
     current = as_float(value_at(intraday, "quote.latest_price"))
     stop_loss = as_float(calculations.get("stop_loss_price"))
     stop_loss_confirmed = bool(calculations.get("stop_loss_confirmed", stop_loss is not None))
+    stop_loss_confirmation_status = calculations.get("stop_loss_confirmation_status")
+    stop_loss_confirmation_label = calculations.get("stop_loss_confirmation_label")
     ma20 = as_float(value_at(intraday, "technicals.ma20") or t_calculations.get("ma_mid"))
     recent_low = as_float(t_calculations.get("recent_low"))
     entry_price = as_float(value_at(intraday, "position.entry_price"))
@@ -1502,6 +1504,8 @@ def price_levels(
         "current_price": rounded(current),
         "stop_loss_price": rounded(stop_loss),
         "stop_loss_confirmed": stop_loss_confirmed,
+        "stop_loss_confirmation_status": stop_loss_confirmation_status,
+        "stop_loss_confirmation_label": stop_loss_confirmation_label,
         "dynamic_stop_loss_price": rounded(as_float(dynamic_stop.get("price"))),
         "dynamic_stop_loss_source": dynamic_stop.get("source"),
         "dynamic_stop_loss_reason": dynamic_stop.get("reason"),
