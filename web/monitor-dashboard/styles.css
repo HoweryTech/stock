@@ -361,6 +361,7 @@ th:nth-child(8) { width: 100px; }
 .unlock-item { padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, 0.7); }
 .unlock-item strong { display: block; margin-top: 4px; }
 .unlock-item span { display: inline-flex; min-height: 20px; padding: 2px 7px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+.unlock-gap { font-weight: 700; }
 .unlock-pass span { color: var(--green); background: var(--green-bg); }
 .unlock-block span { color: var(--red); background: var(--red-bg); }
 .technical-table-wrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; }

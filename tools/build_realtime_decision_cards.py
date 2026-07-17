@@ -395,6 +395,27 @@ def technical_unlock_condition(
     target_value: float | None = None,
 ) -> dict[str, Any]:
     current_value = rounded(current) if isinstance(current, int | float) else current
+    current_number = as_float(current)
+    gap: float | None = None
+    if current_number is not None and target_value is not None:
+        if operator in {">", ">="}:
+            gap = max(0.0, target_value - current_number)
+        elif operator in {"<", "<="}:
+            gap = max(0.0, current_number - target_value)
+    gap_text = None
+    if passed:
+        gap_text = "已达到目标。"
+    elif gap is not None:
+        gap_text = f"还差 {gap:.1f} 分。"
+    hint = None
+    if code in {"risk_recovered", "risk_not_heavy"}:
+        hint = "需要 ATR、RSI/KDJ 过弱、BOLL 下沿等风险项继续修复。"
+    elif code in {"trend_positive", "trend_recovered", "trend_strong"}:
+        hint = "需要 MACD、均线位置和多周期趋势继续改善。"
+    elif code in {"volume_confirmed", "volume_strong"}:
+        hint = "需要成交量/量比放大并配合价格修复。"
+    elif code == "multi_not_negative":
+        hint = "需要日线、周线、月线方向不再互相拖累。"
     return {
         "code": code,
         "label": label,
@@ -403,6 +424,9 @@ def technical_unlock_condition(
         "passed": passed,
         "operator": operator,
         "target_value": rounded(target_value),
+        "gap": rounded(gap),
+        "gap_text": gap_text,
+        "hint": hint,
     }
 
 

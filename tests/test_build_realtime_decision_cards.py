@@ -570,6 +570,9 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
             ["risk_recovered", "trend_positive", "volume_confirmed"],
         )
         self.assertTrue(all(condition["passed"] is False for condition in operation["unlock_conditions"]))
+        self.assertEqual(operation["unlock_conditions"][0]["gap"], 7.3)
+        self.assertIn("还差 7.3 分", operation["unlock_conditions"][0]["gap_text"])
+        self.assertIn("风险项继续修复", operation["unlock_conditions"][0]["hint"])
 
     def test_technical_unlock_alert_emits_when_blocked_condition_is_near(self) -> None:
         operation = build_technical_operation(

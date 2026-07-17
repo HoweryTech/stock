@@ -531,6 +531,8 @@ function renderTechnicalOperationBlock(operation, mode) {
       <span>${condition.passed ? "已满足" : "未满足"}</span>
       <strong>${escapeHtml(condition.label || condition.code || "条件")}</strong>
       <p>当前：${escapeHtml(condition.current == null ? "--" : String(condition.current))}；目标：${escapeHtml(condition.target || "--")}</p>
+      ${condition.gap_text ? `<p class="unlock-gap">${escapeHtml(condition.gap_text)}</p>` : ""}
+      ${condition.hint ? `<p class="secondary">${escapeHtml(condition.hint)}</p>` : ""}
     </div>`).join("")}</div>` : "";
   return `<div class="blocker-item" data-detail-section="technical-gate">
     <div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(operation.tier_label || "--")}</span></div>
