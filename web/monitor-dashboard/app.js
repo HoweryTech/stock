@@ -1499,6 +1499,7 @@ function renderTechnicalOperationBlock(operation, mode) {
 function renderManualExecutionPlan(plan) {
   if (!plan?.applicable) return "";
   const isRiskExit = plan.candidate === "risk_exit";
+  const isNearStopPlaybook = plan.plan_type === "near_stop_playbook";
   const priceZone = Array.isArray(plan.price_zone) && plan.price_zone.length >= 2
     ? `${num(plan.price_zone[0])}-${num(plan.price_zone[1])}元`
     : "--";
@@ -1509,9 +1510,9 @@ function renderManualExecutionPlan(plan) {
   const metrics = [
     ["计划状态", plan.status_label || "--"],
     ["计划类型", plan.plan_type === "hard_exit" ? "硬退出" : plan.plan_type === "rebound_reduce" ? "反弹减仓" : plan.plan_type === "risk_reduce" ? "止损减仓" : plan.plan_type === "near_stop_playbook" ? "近硬止损预案" : plan.candidate || "--"],
-    ["交易方向", plan.side_label || "--"],
+    [isNearStopPlaybook ? "路径2方向" : "交易方向", plan.side_label || "--"],
     ["成交意图", plan.trade_intent === "reverse_t_open" ? "反T卖出腿" : plan.trade_intent === "positive_t_open" ? "正T买入腿" : plan.trade_intent === "risk_exit_reduce" ? "风控减仓" : plan.trade_intent === "risk_exit_full" ? "风控清仓" : plan.trade_intent || "--"],
-    ["建议数量", plan.shares ? `${plan.shares}股` : "--"],
+    [isNearStopPlaybook ? "路径2数量" : "建议数量", plan.shares ? `${plan.shares}股` : "--"],
     ["价格区间", priceZone],
     ["目标区间", targetZone],
     ["预计金额", money(plan.estimated_amount)],
@@ -1546,7 +1547,7 @@ function renderManualExecutionPlan(plan) {
         </section>
         <section class="risk-exit-block risk-exit-steps">
           <span>现在怎么做</span>
-          <strong>${escapeHtml(plan.status === "wait_rebound_reduce" ? `等 ${priceZone}` : `${plan.side_label || "卖出"} ${plan.shares || "--"} 股`)}</strong>
+          <strong>${escapeHtml(plan.status === "near_stop_review" ? "等待三路径触发" : plan.status === "wait_rebound_reduce" ? `等 ${priceZone}` : `${plan.side_label || "卖出"} ${plan.shares || "--"} 股`)}</strong>
           ${steps.length ? `<ol>${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : `<p>等待系统给出可执行步骤。</p>`}
         </section>
         <section class="risk-exit-block risk-exit-impact">

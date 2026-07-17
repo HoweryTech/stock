@@ -2541,10 +2541,16 @@ def build_action_steps(
         if risk_plan:
             realized = as_float(risk_plan.get("estimated_realized_pnl"))
             remaining = risk_plan.get("post_trade_shares")
-            steps.append(
-                f"当前计划：{risk_plan.get('action_label') or '风控卖出'} {risk_plan.get('shares') or '-'} 股；"
-                f"执行后预计剩余 {remaining if remaining is not None else '-'} 股，预计确认盈亏约 {money_text(realized)}。"
-            )
+            if risk_plan.get("plan_type") == "near_stop_playbook":
+                steps.append(
+                    f"当前不是立即卖出；这是三路径预案。只有路径2反抽触发时，才考虑风控减仓 {risk_plan.get('shares') or '-'} 股；"
+                    f"成交后预计剩余 {remaining if remaining is not None else '-'} 股。"
+                )
+            else:
+                steps.append(
+                    f"当前计划：{risk_plan.get('action_label') or '风控卖出'} {risk_plan.get('shares') or '-'} 股；"
+                    f"执行后预计剩余 {remaining if remaining is not None else '-'} 股，预计确认盈亏约 {money_text(realized)}。"
+                )
             steps.extend(str(step) for step in risk_plan.get("steps", []))
             if risk_plan.get("post_trade_plan"):
                 steps.append(f"成交后的下一步计划：{risk_plan['post_trade_plan']}")
@@ -3552,10 +3558,13 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- 解锁后复核：{review_summary.get('status_label')}；下一步：{review_summary.get('next_step') or '-'}")
         manual_plan = card.get("manual_execution_plan") or {}
         if manual_plan.get("applicable"):
-            lines.append(
-                f"- 人工候选计划：{manual_plan.get('status_label')}；"
-                f"{manual_plan.get('side_label') or '-'} {manual_plan.get('shares') or 0} 股"
-            )
+            if manual_plan.get("plan_type") == "near_stop_playbook":
+                lines.append(f"- 人工候选计划：{manual_plan.get('status_label')}；等待三路径触发")
+            else:
+                lines.append(
+                    f"- 人工候选计划：{manual_plan.get('status_label')}；"
+                    f"{manual_plan.get('side_label') or '-'} {manual_plan.get('shares') or 0} 股"
+                )
         if card["blockers"]:
             lines.append("- 阻断：")
             lines.extend(f"  - {item}" for item in card["blockers"][:4])

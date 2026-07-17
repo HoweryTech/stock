@@ -255,6 +255,11 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("路径1-下破" in step for step in card["manual_execution_plan"]["steps"]))
         self.assertTrue(any("路径2-反抽" in step for step in card["manual_execution_plan"]["steps"]))
         self.assertTrue(any("路径3-站稳" in step for step in card["manual_execution_plan"]["steps"]))
+        self.assertTrue(any("当前不是立即卖出" in step for step in card["decision"]["action_steps"]))
+        self.assertFalse(any("当前计划：止损风险复核 500 股" in step for step in card["decision"]["action_steps"]))
+        content = render_markdown(report)
+        self.assertIn("人工候选计划：近硬止损盘中预案；等待三路径触发", content)
+        self.assertNotIn("人工候选计划：近硬止损盘中预案；卖出 500 股", content)
         arbitration = card["decision"]["action_arbitration"]
         structured = card["decision"]["structured_conclusion"]
         self.assertEqual(arbitration["primary_action"], "止损风险复核")
