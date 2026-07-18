@@ -2011,6 +2011,17 @@ function renderDailyTradeRhythm(rhythm) {
   );
 }
 
+function renderDecisionReplaySection(code) {
+  const body = window.DecisionReplay?.renderForCode(state.triggerRefreshEvents, state.triggerReviewQueue, code) || "";
+  if (!body) return "";
+  return detailSection(
+    "盘中决策回放",
+    body,
+    "decision-replay",
+    {collapsed: true, summary: "触发、确认、刷新和处理结果时间线"}
+  );
+}
+
 function renderPositiveTiming(timing, technicalOperation = null) {
   if (!timing || timing.status === "not_applicable") return "";
   const buyZone = timing.buy_zone ? `${num(timing.buy_zone[0])}–${num(timing.buy_zone[1])}元` : "--";
@@ -2747,6 +2758,7 @@ function openDetail(code, options = {}) {
     html += renderDynamicStopLossSection(item, decisionCard);
     html += renderManualExecutionPlan(decisionCard.manual_execution_plan, liveTrigger);
     html += renderDailyTradeRhythm(decisionCard.daily_trade_rhythm);
+    html += renderDecisionReplaySection(code);
   }
   html += detailSection("持仓与行情", `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${key}</dt><dd>${value}</dd></dl>`).join("")}</div>`, "realtime-status", {collapsed: true, summary: "现价、成本、仓位和均线"});
   if (decisionCard) {
