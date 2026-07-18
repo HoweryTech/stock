@@ -1249,6 +1249,107 @@ function renderActionStepTable(table, item, decisionCard = null) {
   );
 }
 
+function matchingTriggerReviewItem(code, activePath = "") {
+  const items = state.triggerReviewQueue || [];
+  return items.find(item => {
+    if (String(item.code || "") !== String(code || "")) return false;
+    if (activePath && item.active_path !== activePath) return false;
+    return true;
+  }) || null;
+}
+
+function priceWithinZone(price, zone) {
+  if (!Array.isArray(zone) || zone.length < 2) return true;
+  const low = Number(zone[0]);
+  const high = Number(zone[1]);
+  if (!Number.isFinite(low) || !Number.isFinite(high) || !Number.isFinite(price)) return true;
+  return price >= low && price <= high;
+}
+
+function buildExecutionPreflightChecks(item, decisionCard, liveTrigger = null) {
+  const checks = [];
+  const add = (label, status, message) => checks.push({label, status, message});
+  const plan = decisionCard?.manual_execution_plan || {};
+  const primary = decisionCard?.price_action_table?.primary_action || {};
+  const quality = decisionCard?.data_quality || {};
+  const decisionMode = decisionCard?.decision_mode || {};
+  const rhythm = decisionCard?.daily_trade_rhythm || {};
+  const current = Number(item?.quote?.latest_price);
+  const queueItem = liveTrigger?.active_path
+    ? matchingTriggerReviewItem(item.code, liveTrigger.active_path)
+    : matchingTriggerReviewItem(item.code);
+
+  if (queueItem?.review_resolution === "ignored") {
+    add("队列处理结果", "block", "这条触发已标记为暂不处理；不要按旧计划下单，除非重新生成新的触发。");
+  } else if (queueItem?.review_resolution === "handled") {
+    add("队列处理结果", "block", "这条触发已标记为已处理；不要重复执行同一计划。");
+  } else {
+    add("队列处理结果", "pass", queueItem ? `队列状态：${queueItem.review_resolution_label || "待处理"}。` : "当前没有被标记为已处理或暂不处理。");
+  }
+
+  if (queueItem?.expired) {
+    add("执行有效期", "block", queueItem.expiry_action || "该触发计划已过期；先刷新完整日内决策链。");
+  } else if (queueItem?.validity_status === "expiring") {
+    add("执行有效期", "warn", `计划即将过期，剩余约 ${queueItem.remaining_seconds || 0} 秒；操作前优先刷新或再次确认当前价。`);
+  } else if (queueItem?.validity_status === "valid") {
+    add("执行有效期", "pass", `计划仍在有效期内，剩余约 ${queueItem.remaining_seconds || 0} 秒。`);
+  } else {
+    add("执行有效期", "warn", "当前没有触发队列有效期记录；执行前确认这是最新决策卡。");
+  }
+
+  if (quality?.data_trust?.intraday_decision_allowed || decisionMode.mode === "tradable") {
+    add("数据可信度", "pass", `${decisionMode.label || "可人工确认"}：${decisionMode.reason || "数据质量允许盘中人工确认。"}`);
+  } else if (quality?.overall_status && quality.overall_status !== "usable") {
+    add("数据可信度", "block", `${decisionMode.label || "禁止决策"}：${decisionMode.reason || qualitySummary(quality)}`);
+  } else {
+    add("数据可信度", "warn", decisionMode.reason || "未确认盘中数据可信度；执行前先刷新。");
+  }
+
+  const priceZone = plan.price_zone || primary.price_zone || [];
+  if (!Number.isFinite(current)) {
+    add("当前价", "block", "当前价缺失，不能确认计划仍在有效价格区间内。");
+  } else if (priceWithinZone(current, priceZone)) {
+    add("当前价", "pass", Array.isArray(priceZone) && priceZone.length >= 2 ? `现价 ${num(current)} 仍在计划区间 ${num(priceZone[0])}-${num(priceZone[1])} 元内。` : `现价 ${num(current)} 已读取；该计划没有硬性区间。`);
+  } else {
+    add("当前价", "block", `现价 ${num(current)} 已离开计划区间 ${num(priceZone[0])}-${num(priceZone[1])} 元；先刷新，不按旧价操作。`);
+  }
+
+  if (rhythm.status === "risk_exit_cooldown" && plan.candidate !== "risk_exit") {
+    add("日内节奏", "block", rhythm.next_action || "今日已执行风控卖出，禁止新增买入或做T。");
+  } else if (rhythm.status === "trade_frequency_caution" && plan.candidate === "positive_t") {
+    add("日内节奏", "warn", rhythm.next_action || "今日操作偏多，不放大新增买入。");
+  } else {
+    add("日内节奏", "pass", rhythm.next_action || "当前没有日内节奏阻断。");
+  }
+
+  return checks;
+}
+
+function renderExecutionPreflightSection(item, decisionCard, liveTrigger = null) {
+  if (!decisionCard) return "";
+  const plan = decisionCard.manual_execution_plan || {};
+  const primary = decisionCard.price_action_table?.primary_action || {};
+  if (!plan.applicable && primary.status !== "ready" && !liveTrigger?.active_path) return "";
+  const checks = buildExecutionPreflightChecks(item, decisionCard, liveTrigger);
+  const blocking = checks.some(check => check.status === "block");
+  const warning = checks.some(check => check.status === "warn");
+  const headline = blocking ? "最终检查未通过，先不要下单" : warning ? "最终检查有提醒，谨慎复核" : "最终检查通过，仍需人工确认";
+  return detailSection(
+    "操作前最终检查",
+    `<div class="preflight-summary preflight-summary-${blocking ? "block" : warning ? "warn" : "pass"}">
+      <strong>${escapeHtml(headline)}</strong>
+      <p>${escapeHtml(blocking ? "先处理阻断项或刷新决策链，不要按旧计划操作。" : "所有真实买卖仍必须在券商成交后，再回本系统写入。")}</p>
+    </div>
+    <div class="preflight-list">${checks.map(check => `
+      <div class="preflight-item preflight-${escapeHtml(check.status)}">
+        <span>${check.status === "pass" ? "通过" : check.status === "warn" ? "提醒" : "阻断"}</span>
+        <strong>${escapeHtml(check.label)}</strong>
+        <p>${escapeHtml(check.message)}</p>
+      </div>`).join("")}</div>`,
+    "execution-preflight"
+  );
+}
+
 function renderConsistencyChecks(quality) {
   const consistency = quality?.source_consistency || {};
   const checks = consistency.checks || [];
@@ -2753,6 +2854,7 @@ function openDetail(code, options = {}) {
   if (decisionCard) {
     html += renderStickyActionBar(item, decisionCard, automaticDecision);
     html += renderDecisionBrief(item, decisionCard, automaticDecision);
+    html += renderExecutionPreflightSection(item, decisionCard, liveTrigger);
     html += renderActionStepTable(decisionCard.price_action_table, item, decisionCard);
     html += renderMinuteConfirmation(decisionCard.minute_confirmation);
     html += renderDynamicStopLossSection(item, decisionCard);
