@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -93,14 +94,37 @@ class ServeMonitorDashboardTest(unittest.TestCase):
             },
         ]
 
-        queue = build_trigger_review_queue(events)
+        queue = build_trigger_review_queue(events, as_of=datetime.fromisoformat("2026-07-17T10:02:00+08:00"))
 
         self.assertEqual([item["code"] for item in queue], ["000723", "601939"])
         self.assertEqual(queue[0]["status"], "action_required")
         self.assertEqual(queue[0]["target"], "manual-execution-plan")
         self.assertEqual(queue[0]["after_shares"], 500)
+        self.assertEqual(queue[0]["execution_window_seconds"], 180)
+        self.assertEqual(queue[0]["validity_status"], "valid")
+        self.assertEqual(queue[0]["remaining_seconds"], 120)
         self.assertEqual(queue[1]["status"], "watch_only")
         self.assertEqual(queue[1]["action_label"], "只观察，不交易")
+
+    def test_build_trigger_review_queue_marks_expired_execution_window(self) -> None:
+        events = [
+            {
+                "generated_at": "2026-07-17T10:01:00+08:00",
+                "trigger_action_snapshots": [
+                    {
+                        "code": "000723",
+                        "active_path": "path1_break",
+                        "after": {"available": True, "label": "止损减仓", "plan_type": "risk_reduce", "primary_status": "ready"},
+                    }
+                ],
+            }
+        ]
+
+        queue = build_trigger_review_queue(events, as_of=datetime.fromisoformat("2026-07-17T10:05:00+08:00"))
+
+        self.assertEqual(queue[0]["validity_status"], "expired")
+        self.assertTrue(queue[0]["expired"])
+        self.assertIn("刷新完整日内决策链", queue[0]["expiry_action"])
 
     def test_build_trigger_review_queue_merges_review_statuses(self) -> None:
         events = [

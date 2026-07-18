@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 from argparse import Namespace
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -138,7 +138,7 @@ def latest_trigger_review_status_by_key(statuses: list[dict[str, object]]) -> di
     return latest
 
 
-def classify_trigger_review_item(snapshot: dict[str, Any]) -> dict[str, str]:
+def classify_trigger_review_item(snapshot: dict[str, Any]) -> dict[str, Any]:
     after = snapshot.get("after") if isinstance(snapshot.get("after"), dict) else {}
     active_path = str(snapshot.get("active_path") or "")
     primary_status = str(after.get("primary_status") or "")
@@ -177,12 +177,81 @@ def classify_trigger_review_item(snapshot: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def parse_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def execution_window_seconds(status: str) -> int:
+    return {
+        "action_required": 180,
+        "review_required": 300,
+        "watch_only": 600,
+    }.get(status, 300)
+
+
+def build_execution_window(
+    *,
+    status: str,
+    created_at: object,
+    as_of: datetime | None = None,
+) -> dict[str, Any]:
+    start = parse_datetime(created_at)
+    now = as_of or datetime.now().astimezone()
+    seconds = execution_window_seconds(status)
+    if start is None:
+        return {
+            "execution_window_seconds": seconds,
+            "valid_until": None,
+            "remaining_seconds": None,
+            "validity_status": "unknown",
+            "validity_label": "有效期未知",
+            "expired": False,
+            "expiry_action": "无法确认建议有效期，执行前先刷新完整日内决策链。",
+        }
+    if start.tzinfo is None and now.tzinfo is not None:
+        start = start.replace(tzinfo=now.tzinfo)
+    elif start.tzinfo is not None and now.tzinfo is None:
+        now = now.replace(tzinfo=start.tzinfo)
+    valid_until = start + timedelta(seconds=seconds)
+    remaining = int((valid_until - now).total_seconds())
+    if remaining <= 0:
+        status_label = "已过期"
+        validity_status = "expired"
+        expiry_action = "该触发计划已过有效期；不要按旧价格直接操作，先刷新完整日内决策链。"
+    elif remaining <= 60:
+        status_label = "即将过期"
+        validity_status = "expiring"
+        expiry_action = "若要处理，先确认当前价仍在计划区间内；接近过期时优先刷新。"
+    else:
+        status_label = "有效"
+        validity_status = "valid"
+        expiry_action = "仍在有效期内；执行前仍需核对当前价、数据质量和人工计划。"
+    return {
+        "execution_window_seconds": seconds,
+        "valid_until": valid_until.isoformat(timespec="seconds"),
+        "remaining_seconds": max(0, remaining),
+        "validity_status": validity_status,
+        "validity_label": status_label,
+        "expired": remaining <= 0,
+        "expiry_action": expiry_action,
+    }
+
+
 def build_trigger_review_queue(
     events: list[dict[str, object]],
     *,
     limit: int = 20,
     statuses: list[dict[str, object]] | None = None,
     include_closed: bool = False,
+    as_of: datetime | None = None,
 ) -> list[dict[str, Any]]:
     queue: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -208,6 +277,7 @@ def build_trigger_review_queue(
             review_resolution = str(review_status.get("resolution") or "open")
             if review_resolution in {"handled", "ignored"} and not include_closed:
                 continue
+            window = build_execution_window(status=str(classification.get("status") or ""), created_at=event.get("generated_at"), as_of=as_of)
             queue.append(
                 {
                     "review_key": review_key,
@@ -236,6 +306,7 @@ def build_trigger_review_queue(
                     }.get(review_resolution, review_resolution),
                     "review_note": review_status.get("note") or "",
                     "review_updated_at": review_status.get("updated_at"),
+                    **window,
                     **classification,
                 }
             )

@@ -2929,8 +2929,16 @@ function renderEvents() {
     return;
   }
   const triggerQueueHtml = triggerQueue.map(item => {
-    const statusClass = item.status === "action_required" ? "action" : item.status === "review_required" ? "watch" : "observe";
+    const statusClass = item.expired ? "expired" : item.status === "action_required" ? "action" : item.status === "review_required" ? "watch" : "observe";
+    const remainingText = item.remaining_seconds == null
+      ? ""
+      : item.expired
+        ? "已过期"
+        : item.remaining_seconds >= 60
+          ? `剩余 ${Math.floor(item.remaining_seconds / 60)}分${item.remaining_seconds % 60}秒`
+          : `剩余 ${item.remaining_seconds}秒`;
     const details = [
+      item.validity_label ? `${item.validity_label}${remainingText ? ` · ${remainingText}` : ""}` : "",
       item.confirmation_window_seconds ? `确认窗口 ${item.confirmation_window_seconds}s` : "",
       item.confirmed_price == null ? "" : `确认价 ${money(item.confirmed_price)}`,
       item.after_shares ? `${item.after_shares}股` : "",
@@ -2940,7 +2948,7 @@ function renderEvents() {
       <div class="event-time">${escapeHtml(item.event_generated_at || item.decision_generated_at || "")}</div>
       <div class="event-title">${escapeHtml(item.code || "")} ${escapeHtml(item.name || "")} · ${escapeHtml(item.title || "触发后复核")}</div>
       <div class="event-action event-action-${escapeHtml(statusClass)}">${escapeHtml(item.status_label || "--")} · ${escapeHtml(item.action_label || "--")}</div>
-      <p>${escapeHtml(item.after_label || "查看刷新后的执行计划和阻断原因。")}</p>
+      <p>${escapeHtml(item.expired ? item.expiry_action || "该计划已过期，先刷新后再处理。" : item.after_label || "查看刷新后的执行计划和阻断原因。")}</p>
       <div class="event-changes">
         <span class="event-tag">${escapeHtml(item.review_resolution_label || "待处理")}</span>
         ${details.map(detail => `<span class="event-tag">${escapeHtml(detail)}</span>`).join("")}
