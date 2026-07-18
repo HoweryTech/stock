@@ -386,6 +386,7 @@ function evaluateNearStopTriggerAlert(alert, card, item) {
 
 function liveIntradayTriggerAlerts() {
   const alerts = state.decisionReport?.intraday_trigger_alerts || [];
+  const silencedKeys = silencedTriggerKeys();
   return alerts
     .map(alert => {
       const card = state.decisionCards.get(alert.code);
@@ -395,10 +396,23 @@ function liveIntradayTriggerAlerts() {
       const current = Number(item?.quote?.latest_price);
       return Number.isFinite(current) ? {...alert, current_price: current} : alert;
     })
+    .filter(alert => !alert.active_path || !silencedKeys.has(`${alert.code || ""}:${alert.active_path || ""}`))
     .sort((left, right) => {
       const severityRank = severity => severity === "action" ? 0 : 1;
       return severityRank(left.severity) - severityRank(right.severity) || String(left.code || "").localeCompare(String(right.code || ""));
     });
+}
+
+function silencedTriggerKeys() {
+  const keys = new Set();
+  const decisionGeneratedAt = Date.parse(state.decisionReport?.generated_at || "");
+  (state.triggerReviewQueue || []).forEach(item => {
+    if (!["handled", "ignored"].includes(item.review_resolution)) return;
+    const reviewUpdatedAt = Date.parse(item.review_updated_at || "");
+    if (Number.isFinite(decisionGeneratedAt) && Number.isFinite(reviewUpdatedAt) && reviewUpdatedAt < decisionGeneratedAt) return;
+    keys.add(`${item.code || ""}:${item.active_path || ""}`);
+  });
+  return keys;
 }
 
 function liveTriggerAlertForCode(code) {
@@ -424,7 +438,11 @@ function triggerRefreshSummary(alerts) {
 
 async function maybeRefreshTriggeredDecisionChain() {
   const actionable = actionableTriggerAlerts();
-  if (!actionable.length || state.triggerRefreshInFlight) return;
+  if (!actionable.length) {
+    state.lastTriggerRefreshKey = "";
+    return;
+  }
+  if (state.triggerRefreshInFlight) return;
   const key = triggerRefreshKey(actionable);
   if (!key || key === state.lastTriggerRefreshKey) return;
   state.triggerRefreshInFlight = true;
@@ -521,6 +539,7 @@ function renderUrgentTriggerAlert() {
     container.hidden = true;
     container.innerHTML = "";
     document.title = state.originalTitle;
+    state.lastUrgentNotificationKey = "";
     return;
   }
   notifyUrgentTriggers(alerts);
@@ -2892,7 +2911,7 @@ function renderEvents() {
   const technicalAlerts = state.decisionReport?.technical_unlock_alerts || [];
   const reviewAlerts = state.decisionReport?.post_unlock_review_alerts || [];
   const triggerHistory = state.triggerRefreshEvents || [];
-  const triggerQueue = state.triggerReviewQueue || [];
+  const triggerQueue = (state.triggerReviewQueue || []).filter(item => !["handled", "ignored"].includes(item.review_resolution));
   if (!state.events.length && !triggerQueue.length && !triggerHistory.length && !triggerAlerts.length && !technicalAlerts.length && !reviewAlerts.length) {
     container.innerHTML = '<div class="empty-state">暂无状态变化事件</div>';
     return;
@@ -3061,7 +3080,7 @@ async function loadData() {
       fetchJson("/api/status", { running: false }),
       fetchJson("/api/events?limit=20", { events: [] }),
       fetchJson("/api/intraday-trigger-refresh-events?limit=20", { events: [] }),
-      fetchJson("/api/intraday-trigger-review-queue?limit=20", { items: [] }),
+      fetchJson("/api/intraday-trigger-review-queue?limit=50&include_closed=true", { items: [] }),
       fetchJson("/api/flow-history?limit=30", { samples: [] }),
     ]);
     state.snapshot = snapshot;
