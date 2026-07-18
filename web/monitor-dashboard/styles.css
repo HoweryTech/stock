@@ -127,6 +127,58 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 .summary-value { font-size: 20px; font-weight: 650; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .summary-sub { color: var(--muted); font-size: 11px; margin-top: 3px; }
 
+.strategy-health {
+  margin: -2px 0 14px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--blue);
+  border-radius: 6px;
+  background: var(--surface);
+  display: grid;
+  grid-template-columns: minmax(240px, 1.1fr) minmax(260px, 1fr) minmax(360px, 1.4fr);
+  gap: 0;
+  overflow: hidden;
+}
+.strategy-health-risk { border-left-color: var(--red); background: #fffaf9; }
+.strategy-health-blocked { border-left-color: var(--red); background: var(--red-bg); }
+.strategy-health-caution { border-left-color: var(--amber); background: #fffdf6; }
+.strategy-health-candidate { border-left-color: var(--green); background: #fbfffd; }
+.strategy-health-observe { border-left-color: var(--blue); background: #fbfdff; }
+.strategy-health-main,
+.strategy-health-actions,
+.strategy-health-metrics { padding: 14px 16px; min-width: 0; }
+.strategy-health-main,
+.strategy-health-actions { border-right: 1px solid var(--line); }
+.strategy-health-main span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.strategy-health-main strong { display: block; font-size: 22px; line-height: 1.2; }
+.strategy-health-main p { margin: 7px 0 0; color: var(--text); line-height: 1.45; }
+.strategy-health-actions { display: grid; align-content: center; gap: 8px; }
+.strategy-action {
+  min-height: 30px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text);
+  font-weight: 650;
+  line-height: 1.35;
+}
+.strategy-health-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.strategy-health-metrics div { min-width: 0; }
+.strategy-health-metrics span,
+.strategy-health-metrics em { display: block; color: var(--muted); font-size: 11px; font-style: normal; }
+.strategy-health-metrics strong {
+  display: block;
+  margin: 3px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
 .priority-queue {
   margin: -2px 0 14px;
   border: 1px solid var(--line);
@@ -872,6 +924,10 @@ th:nth-child(8) { width: 100px; }
   .tabs { padding: 0 14px; }
   main { padding: 12px 12px 28px; }
   .summary-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .strategy-health { grid-template-columns: 1fr; }
+  .strategy-health-main,
+  .strategy-health-actions { border-right: 0; border-bottom: 1px solid var(--line); }
+  .strategy-health-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .refresh-alert { align-items: stretch; flex-direction: column; }
   .refresh-command { max-width: 100%; width: 100%; }
   .refresh-command code { flex: 1; }

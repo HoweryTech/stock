@@ -882,6 +882,119 @@ function renderSummary() {
     </div>`).join("");
 }
 
+function buildStrategyHealth() {
+  const cards = [...state.decisionCards.values()];
+  const activeQueue = (state.triggerReviewQueue || []).filter(item => !["handled", "ignored"].includes(item.review_resolution));
+  const actionableQueue = activeQueue.filter(item => item.status === "action_required" && !item.expired);
+  const reviewQueue = activeQueue.filter(item => item.status === "review_required" && !item.expired);
+  const expiredQueue = activeQueue.filter(item => item.expired);
+  const expiringQueue = activeQueue.filter(item => item.validity_status === "expiring" && !item.expired);
+  const triggerAlerts = liveIntradayTriggerAlerts();
+  const actionableAlerts = triggerAlerts.filter(alert => alert.severity === "action" && alert.active_path);
+  const exitRisk = cards.filter(card => card.state === "exit_risk_review").length;
+  const riskReduction = cards.filter(card => card.state === "risk_reduction_review").length;
+  const dataBlocked = cards.filter(card => ["market_wait", "data_stale", "data_insufficient"].includes(card.state)).length;
+  const lowTrust = cards.filter(card => card.data_quality?.data_trust?.level === "low").length;
+  const highTrust = cards.filter(card => card.data_quality?.data_trust?.level === "high").length;
+  const positiveT = cards.filter(card => card.state === "positive_t_watch").length;
+  const reverseT = cards.filter(card => card.state === "reverse_t_watch").length;
+  const manualCandidates = cards.filter(card => card.post_unlock_review_summary?.status === "manual_candidate").length;
+  const activeCandidates = positiveT + reverseT + manualCandidates;
+  const staleReport = Boolean(state.decisionReport?.stale_due_to_snapshot_date);
+  const totalCards = cards.length || state.snapshot?.items?.length || 0;
+  const items = state.snapshot?.items || [];
+  const pnl = items.reduce((sum, item) => sum + Number(item.position?.unrealized_pnl || 0), 0);
+
+  let toneClass = "observe";
+  let title = "观察为主";
+  let headline = "今天没有已确认的盘中执行信号，继续监控，不主动加仓或做T。";
+  const actions = [];
+
+  if (staleReport) {
+    toneClass = "blocked";
+    title = "先刷新决策链";
+    headline = "实时决策卡早于行情快照，旧结论已停用；刷新前不按页面旧计划交易。";
+    actions.push("先等待或手动触发完整日内决策链刷新。");
+  } else if (expiredQueue.length) {
+    toneClass = "blocked";
+    title = "过期计划先刷新";
+    headline = `${expiredQueue.length} 个触发后计划已过期，不能按旧价格区间执行。`;
+    actions.push("先刷新对应个股详情，再看新的可操作步骤。");
+  } else if (actionableQueue.length || actionableAlerts.length) {
+    toneClass = "risk";
+    title = "先处理触发队列";
+    headline = `${Math.max(actionableQueue.length, actionableAlerts.length)} 个盘中触发需要优先复核，先处理它们，再看其他机会。`;
+    actions.push("打开事件队列或今日处理顺序，逐个确认是否执行。");
+  } else if (exitRisk) {
+    toneClass = "risk";
+    title = "风控优先";
+    headline = `${exitRisk} 只股票处在退出风险复核，今天先看止损/减仓路径，不做补仓。`;
+    actions.push("先查看退出风险个股的硬止损、反抽区、站稳降级路径。");
+  } else if (riskReduction) {
+    toneClass = "caution";
+    title = "减仓复核";
+    headline = `${riskReduction} 只股票需要仓位风险复核，先处理仓位上限和减仓触发价。`;
+    actions.push("只在系统给出触发价和回落确认后执行减仓。");
+  } else if (dataBlocked || lowTrust) {
+    toneClass = "caution";
+    title = "谨慎观察";
+    headline = `${dataBlocked} 只数据阻断，${lowTrust} 只低可信；当前不适合放大仓位或频繁做T。`;
+    actions.push("数据恢复前只处理已确认风控，不新增主动交易。");
+  } else if (activeCandidates && highTrust) {
+    toneClass = "candidate";
+    title = "可小额候选";
+    headline = `${activeCandidates} 个候选信号可进入人工复核，但仍按单笔资金和确认窗口限制执行。`;
+    actions.push("只看详情页的唯一结论和执行前检查，通过后再挂限价单。");
+  } else {
+    actions.push("无触发时保持监控，等待价格进入系统区间。");
+  }
+
+  if (reviewQueue.length) actions.push(`${reviewQueue.length} 个计划需要人工复核，未复核前不要按它交易。`);
+  if (expiringQueue.length) actions.push(`${expiringQueue.length} 个计划接近过期，优先刷新或放弃旧计划。`);
+  if (!actions.some(action => action.includes("无触发")) && !actionableQueue.length && !expiredQueue.length && !staleReport) {
+    actions.push("没有待办后再看持仓列表，不从低优先级信息里找交易。");
+  }
+
+  return {
+    toneClass,
+    title,
+    headline,
+    actions: actions.slice(0, 3),
+    metrics: [
+      ["触发待办", `${actionableQueue.length}/${activeQueue.length}`, "可执行/未关闭"],
+      ["风控票数", `${exitRisk + riskReduction}`, "退出或减仓"],
+      ["数据阻断", `${dataBlocked}`, "等待/过期/不足"],
+      ["候选机会", `${activeCandidates}`, "正T/反T/人工"],
+      ["可信数据", `${highTrust}/${totalCards}`, "高可信/全部"],
+      ["浮动盈亏", money(pnl), "当前组合"],
+    ],
+  };
+}
+
+function renderStrategyHealth() {
+  const container = document.querySelector("#strategyHealth");
+  if (!container) return;
+  const health = buildStrategyHealth();
+  container.className = `strategy-health strategy-health-${health.toneClass}`;
+  container.innerHTML = `
+    <div class="strategy-health-main">
+      <span>今日策略状态</span>
+      <strong>${escapeHtml(health.title)}</strong>
+      <p>${escapeHtml(health.headline)}</p>
+    </div>
+    <div class="strategy-health-actions">
+      ${health.actions.map(action => `<div class="strategy-action">${escapeHtml(action)}</div>`).join("")}
+    </div>
+    <div class="strategy-health-metrics">
+      ${health.metrics.map(([label, value, sub]) => `
+        <div>
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+          <em>${escapeHtml(sub)}</em>
+        </div>`).join("")}
+    </div>`;
+}
+
 function renderPriorityQueue() {
   const queue = state.decisionReport?.priority_queue || {};
   const items = queue.top_items || [];
@@ -3229,6 +3342,7 @@ async function loadData() {
     renderUrgentTriggerAlert();
     renderRefreshAlert();
     renderSummary();
+    renderStrategyHealth();
     renderPriorityQueue();
     renderPositions();
     renderEvents();
