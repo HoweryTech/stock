@@ -921,6 +921,89 @@ def build_execution_quality_gate(intraday: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_liquidity_activity_gate(
+    intraday: dict[str, Any],
+    technical_assessment: dict[str, Any] | None = None,
+    data_quality: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    quote = intraday.get("quote") or {}
+    latest_price = as_float(quote.get("latest_price"))
+    turnover = as_float(quote.get("turnover"))
+    volume = as_float(quote.get("volume"))
+    quote_lag = as_float(quote.get("quote_lag_seconds"))
+    daily_volume_ratio = as_float(value_at(technical_assessment or {}, "periods.daily.volume_ratio_20"))
+    minute_volume_ratio = as_float(value_at(intraday, "positive_t_plan.timing_metrics.volume_ratio"))
+    market_live_required = market_session(data_quality).get("live_quote_required")
+    reasons: list[str] = []
+    evidence: list[str] = []
+    blockers: list[str] = []
+    warnings: list[str] = []
+
+    if latest_price is None or latest_price <= 0:
+        blockers.append("缺少可用现价，不能判断盘口成交活跃度。")
+    if quote_lag is not None and quote_lag > 60 and market_live_required is not False:
+        blockers.append(f"行情延迟 {quote_lag:.1f} 秒，不能用作盘中成交活跃度确认。")
+    elif quote_lag is not None:
+        evidence.append(f"行情延迟 {quote_lag:.1f} 秒。")
+
+    if turnover is None:
+        warnings.append("缺少实时成交额，只能降低活跃度可信度。")
+    else:
+        evidence.append(f"实时成交额 {money_text(turnover)}。")
+        if turnover < 10_000_000:
+            blockers.append(f"实时成交额仅 {money_text(turnover)}，主动买入或反T卖出容易出现成交滑点。")
+        elif turnover < 30_000_000:
+            warnings.append(f"实时成交额 {money_text(turnover)} 偏低，只允许最小股数观察。")
+
+    if volume is not None:
+        evidence.append(f"实时成交量 {int(volume)} 手/股单位按行情源口径。")
+
+    if daily_volume_ratio is None:
+        warnings.append("缺少日线20根量比，不能确认当前成交是否放大。")
+    else:
+        evidence.append(f"日线20根量比 {daily_volume_ratio:.2f}。")
+        if daily_volume_ratio < 0.55:
+            blockers.append(f"日线20根量比 {daily_volume_ratio:.2f} 明显缩量，主动交易信号不可靠。")
+        elif daily_volume_ratio < 0.80:
+            warnings.append(f"日线20根量比 {daily_volume_ratio:.2f} 偏低，必须等待分钟确认和更小股数。")
+
+    if minute_volume_ratio is not None:
+        evidence.append(f"5分钟量比 {minute_volume_ratio:.2f}。")
+        if minute_volume_ratio < 0.80:
+            warnings.append(f"5分钟量比 {minute_volume_ratio:.2f} 偏低，挂单前需确认价格仍在计划区间。")
+
+    if blockers:
+        status = "blocked"
+        status_label = "成交活跃度阻断"
+        reasons = blockers
+        next_step = "不执行主动买入或反T卖出；只保留风控卖出、已打开做T腿闭环或继续观察。"
+    elif warnings:
+        status = "caution"
+        status_label = "成交活跃度谨慎"
+        reasons = warnings
+        next_step = "若其他门禁通过，只允许最小100股、限价挂单，并在成交后立即写入系统。"
+    else:
+        status = "pass"
+        status_label = "成交活跃度可用"
+        reasons = ["成交额、量比和行情延迟没有触发主动交易阻断。"]
+        next_step = "继续确认价格区间、数量、费用和执行后果。"
+
+    return {
+        "status": status,
+        "status_label": status_label,
+        "latest_price": rounded(latest_price),
+        "turnover": rounded(turnover),
+        "volume": rounded(volume),
+        "quote_lag_seconds": rounded(quote_lag),
+        "daily_volume_ratio_20": rounded(daily_volume_ratio),
+        "minute_volume_ratio": rounded(minute_volume_ratio),
+        "reasons": reasons,
+        "evidence": evidence,
+        "next_step": next_step,
+        "scope": "只阻断主动买入和反T卖出；止损、减仓和已打开做T腿闭环仍按风控优先处理。",
+    }
+
+
 def build_post_unlock_review(
     technical_operation: dict[str, Any],
     state: str,
@@ -932,6 +1015,7 @@ def build_post_unlock_review(
     intraday: dict[str, Any],
     t_performance_gate: dict[str, Any],
     execution_quality_gate: dict[str, Any],
+    liquidity_activity_gate: dict[str, Any],
 ) -> dict[str, Any]:
     checks: list[dict[str, str]] = []
     if not (technical_operation.get("allow_buy_watch") or technical_operation.get("allow_t_watch")):
@@ -1035,6 +1119,21 @@ def build_post_unlock_review(
         checks.append(review_check("execution_quality", "执行质量评分", "pass", execution_quality_gate.get("reasons", ["执行质量允许观察。"])[0], "继续人工确认价格、数量、费用和失败后果。"))
     else:
         checks.append(review_check("execution_quality", "执行质量评分", "warn", execution_quality_gate.get("reasons", ["执行评分样本不足。"])[0], execution_quality_gate.get("next_step") or "只允许最小股数试做或继续观察。"))
+
+    if liquidity_activity_gate.get("status") == "blocked":
+        checks.append(
+            review_check(
+                "liquidity_activity",
+                "成交活跃度",
+                "block",
+                liquidity_activity_gate.get("reasons", ["成交活跃度未通过。"])[0],
+                liquidity_activity_gate.get("next_step") or "暂停主动买入或反T卖出。",
+            )
+        )
+    elif liquidity_activity_gate.get("status") == "pass":
+        checks.append(review_check("liquidity_activity", "成交活跃度", "pass", liquidity_activity_gate.get("reasons", ["成交活跃度可用。"])[0], "继续人工确认价格、数量和费用。"))
+    else:
+        checks.append(review_check("liquidity_activity", "成交活跃度", "warn", liquidity_activity_gate.get("reasons", ["成交活跃度需要谨慎复核。"])[0], liquidity_activity_gate.get("next_step") or "只允许最小股数试做或继续观察。"))
 
     blocking = [item for item in checks if item["status"] == "block"]
     minute_ready = any(item["code"] == "minute_confirmation" and item["status"] == "pass" for item in checks)
@@ -1878,8 +1977,14 @@ def build_evidence(
     minute_confirmation: dict[str, Any] | None = None,
     t_performance_gate: dict[str, Any] | None = None,
     execution_quality_gate: dict[str, Any] | None = None,
+    liquidity_activity_gate: dict[str, Any] | None = None,
 ) -> list[str]:
     evidence: list[str] = []
+    if liquidity_activity_gate:
+        evidence.append(f"[成交活跃度] {liquidity_activity_gate.get('status_label') or liquidity_activity_gate.get('status')}")
+        evidence.extend(f"[成交活跃度] {item}" for item in (liquidity_activity_gate.get("evidence") or [])[:3])
+        for reason in (liquidity_activity_gate.get("reasons") or [])[:2]:
+            evidence.append(f"[成交活跃度复核] {reason}")
     if execution_quality_gate:
         evidence.append(f"[执行质量评分] {execution_quality_gate.get('status_label') or execution_quality_gate.get('status')}")
         evidence.extend(f"[执行质量] {item}" for item in (execution_quality_gate.get("evidence") or [])[:2])
@@ -1968,6 +2073,7 @@ def build_blockers(
     technical_assessment: dict[str, Any] | None = None,
     t_performance_gate: dict[str, Any] | None = None,
     execution_quality_gate: dict[str, Any] | None = None,
+    liquidity_activity_gate: dict[str, Any] | None = None,
     daily_trade_rhythm: dict[str, Any] | None = None,
 ) -> list[str]:
     blockers: list[str] = []
@@ -1988,6 +2094,8 @@ def build_blockers(
         blockers.extend((t_performance_gate or {}).get("reasons") or ["做T实盘绩效门禁未通过。"])
     if (execution_quality_gate or {}).get("status") == "blocked":
         blockers.extend((execution_quality_gate or {}).get("reasons") or ["近期执行质量评分未通过。"])
+    if (liquidity_activity_gate or {}).get("status") == "blocked":
+        blockers.extend((liquidity_activity_gate or {}).get("reasons") or ["成交活跃度不足，主动交易暂停。"])
     if (daily_trade_rhythm or {}).get("status") in {"risk_exit_cooldown", "trade_frequency_caution"}:
         blockers.extend((daily_trade_rhythm or {}).get("blockers") or [(daily_trade_rhythm or {}).get("next_action")])
     if reverse_backtest and reverse_backtest.get("verdict") != "pass":
@@ -2632,6 +2740,7 @@ def build_action_steps(
     technical_operation: dict[str, Any] | None = None,
     t_performance_gate: dict[str, Any] | None = None,
     execution_quality_gate: dict[str, Any] | None = None,
+    liquidity_activity_gate: dict[str, Any] | None = None,
     manual_execution_plan: dict[str, Any] | None = None,
     daily_trade_rhythm: dict[str, Any] | None = None,
 ) -> list[str]:
@@ -2746,6 +2855,8 @@ def build_action_steps(
             steps.append(f"做T实盘绩效提示：{(t_performance_gate.get('reasons') or ['样本不足，不放大单次股数。'])[0]}")
         if execution_quality_gate and execution_quality_gate.get("status") == "caution":
             steps.append(f"执行质量提示：{(execution_quality_gate.get('reasons') or ['执行评分样本不足，不放大单次股数。'])[0]}")
+        if liquidity_activity_gate and liquidity_activity_gate.get("status") != "pass":
+            steps.append(f"成交活跃度提示：{(liquidity_activity_gate.get('reasons') or ['成交活跃度未完全确认。'])[0]}")
         if technical_operation and not technical_operation.get("allow_buy_watch"):
             steps.append(f"技术操作档位为“{technical_operation.get('tier_label')}”：{technical_operation.get('next_step')}")
         if capital_plan and capital_plan.get("status") == "watch":
@@ -2764,6 +2875,8 @@ def build_action_steps(
             steps.append(f"做T实盘绩效提示：{(t_performance_gate.get('reasons') or ['样本不足，不放大单次股数。'])[0]}")
         if execution_quality_gate and execution_quality_gate.get("status") == "caution":
             steps.append(f"执行质量提示：{(execution_quality_gate.get('reasons') or ['执行评分样本不足，不放大单次股数。'])[0]}")
+        if liquidity_activity_gate and liquidity_activity_gate.get("status") != "pass":
+            steps.append(f"成交活跃度提示：{(liquidity_activity_gate.get('reasons') or ['成交活跃度未完全确认。'])[0]}")
         if technical_operation and not technical_operation.get("allow_t_watch"):
             steps.append(f"技术操作档位为“{technical_operation.get('tier_label')}”：{technical_operation.get('next_step')}")
         return steps
@@ -2775,6 +2888,9 @@ def build_action_steps(
         if execution_quality_gate and execution_quality_gate.get("status") == "blocked":
             steps.append(f"执行质量阻断：{(execution_quality_gate.get('reasons') or ['近期执行评分未通过。'])[0]}")
             steps.append(execution_quality_gate.get("next_step") or "暂停新的买入/做T，只保留观察、止损或减仓。")
+        if liquidity_activity_gate and liquidity_activity_gate.get("status") == "blocked":
+            steps.append(f"成交活跃度阻断：{(liquidity_activity_gate.get('reasons') or ['成交活跃度不足。'])[0]}")
+            steps.append(liquidity_activity_gate.get("next_step") or "暂停主动买入和反T卖出。")
         if technical_operation and technical_operation.get("tier") in {"risk_control_first", "forbid_chase", "observe_only"}:
             steps.append(f"技术操作档位为“{technical_operation.get('tier_label')}”：{technical_operation.get('next_step')}")
         if action_backtest and (action_backtest.get("weak_rule_count") or 0) > 0:
@@ -2865,6 +2981,7 @@ def build_price_action_table(
     execution_quality_gate: dict[str, Any],
     data_quality: dict[str, Any] | None,
     minute_confirmation: dict[str, Any] | None = None,
+    liquidity_activity_gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     current = as_float(levels.get("current_price"))
     stop_loss = as_float(levels.get("stop_loss_price"))
@@ -2880,6 +2997,9 @@ def build_price_action_table(
     minute_confirmed = minute_status == "confirm"
     minute_blocked = minute_status == "block"
     minute_status_label = str((minute_confirmation or {}).get("status_label") or "分钟未确认")
+    liquidity_status = str((liquidity_activity_gate or {}).get("status") or "")
+    liquidity_blocked = liquidity_status == "blocked"
+    liquidity_caution = liquidity_status == "caution"
     rows: list[dict[str, Any]] = []
 
     rows.append(
@@ -2978,12 +3098,14 @@ def build_price_action_table(
     suggested_buy_shares = int(capital_plan.get("suggested_buy_shares") or 0)
     if buy_zone:
         buy_high = as_float(buy_zone[1]) if isinstance(buy_zone, list) and len(buy_zone) >= 2 else None
-        buy_ready = state == "positive_t_watch" and data_allowed and minute_confirmed and current is not None and buy_high is not None and current <= buy_high
+        buy_ready = state == "positive_t_watch" and data_allowed and minute_confirmed and not liquidity_blocked and current is not None and buy_high is not None and current <= buy_high
         buy_gate_blocked = t_performance_gate.get("status") == "blocked" or execution_quality_gate.get("status") == "blocked"
-        buy_blocked = state not in {"positive_t_watch"} or buy_gate_blocked or not data_allowed or not minute_confirmed
+        buy_blocked = state not in {"positive_t_watch"} or buy_gate_blocked or liquidity_blocked or not data_allowed or not minute_confirmed
         buy_status_label = (
             "执行评分阻断" if execution_quality_gate.get("status") == "blocked" else
             "绩效阻断" if t_performance_gate.get("status") == "blocked" else
+            "活跃度阻断" if liquidity_blocked else
+            "活跃度谨慎" if liquidity_caution and not buy_blocked else
             "分钟阻断" if minute_blocked else
             "等待分钟确认" if not minute_confirmed else
             "禁止" if buy_blocked else
@@ -2999,7 +3121,7 @@ def build_price_action_table(
                 status="blocked" if buy_blocked else "ready" if buy_ready else "watch",
                 status_label=buy_status_label,
                 shares=suggested_buy_shares or None,
-                note=f"{minute_status_label}；高于买入上限不追，买入后目标是卖出新增仓位，不是长期补仓。",
+                note=f"{minute_status_label}；{(liquidity_activity_gate or {}).get('status_label') or '成交活跃度未单独确认'}；高于买入上限不追，买入后目标是卖出新增仓位，不是长期补仓。",
                 priority=price_action_priority("正T买入", "blocked" if buy_blocked else "ready" if buy_ready else "watch"),
             )
         )
@@ -3027,11 +3149,13 @@ def build_price_action_table(
     reverse_shares = int(reverse_plan.get("trade_shares") or 0)
     if reverse_zone:
         reverse_gate_blocked = t_performance_gate.get("status") == "blocked" or execution_quality_gate.get("status") == "blocked"
-        reverse_candidate = state == "reverse_t_watch" and reverse_plan.get("status") == "candidate" and minute_confirmed and not reverse_gate_blocked
+        reverse_candidate = state == "reverse_t_watch" and reverse_plan.get("status") == "candidate" and minute_confirmed and not reverse_gate_blocked and not liquidity_blocked
         reverse_status_label = (
             "可确认" if reverse_candidate else
             "执行评分阻断" if execution_quality_gate.get("status") == "blocked" else
             "绩效阻断" if t_performance_gate.get("status") == "blocked" else
+            "活跃度阻断" if liquidity_blocked else
+            "活跃度谨慎" if liquidity_caution else
             "分钟阻断" if minute_blocked else
             "等待分钟确认" if not minute_confirmed else
             "仅观察"
@@ -3042,11 +3166,11 @@ def build_price_action_table(
                 f"价格进入 {format_price_zone(reverse_zone)} 且分钟二次确认通过",
                 format_price_zone(reverse_zone),
                 "卖出计划股数",
-                status="ready" if reverse_candidate else "blocked" if reverse_gate_blocked or not minute_confirmed else "watch",
+                status="ready" if reverse_candidate else "blocked" if reverse_gate_blocked or liquidity_blocked or not minute_confirmed else "watch",
                 status_label=reverse_status_label,
                 shares=reverse_shares or None,
-                note=f"{minute_status_label}；没有回补上限或未接受卖出后果时，不执行反T卖出。",
-                priority=price_action_priority("反T卖出", "ready" if reverse_candidate else "blocked" if reverse_gate_blocked or not minute_confirmed else "watch"),
+                note=f"{minute_status_label}；{(liquidity_activity_gate or {}).get('status_label') or '成交活跃度未单独确认'}；没有回补上限或未接受卖出后果时，不执行反T卖出。",
+                priority=price_action_priority("反T卖出", "ready" if reverse_candidate else "blocked" if reverse_gate_blocked or liquidity_blocked or not minute_confirmed else "watch"),
             )
         )
 
@@ -3345,6 +3469,7 @@ def build_card(
     positive_timing = build_positive_timing(intraday, t_check, minute_bars, technical_assessment, technical_operation)
     t_performance_gate = build_t_performance_gate(intraday)
     execution_quality_gate = build_execution_quality_gate(intraday)
+    liquidity_activity_gate = build_liquidity_activity_gate(intraday, technical_assessment, data_quality)
     state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment, t_performance_gate, execution_quality_gate)
     evidence = build_evidence(
         intraday,
@@ -3359,6 +3484,7 @@ def build_card(
         minute_confirmation,
         t_performance_gate,
         execution_quality_gate,
+        liquidity_activity_gate,
     )
     daily_trade_rhythm = intraday.get("daily_trade_rhythm") or {}
     blockers = build_blockers(
@@ -3369,6 +3495,7 @@ def build_card(
         technical_assessment,
         t_performance_gate,
         execution_quality_gate,
+        liquidity_activity_gate,
         daily_trade_rhythm,
     )
     levels = price_levels(portfolio, t_check, intraday, reverse_forecast, generated_at, technical_assessment)
@@ -3383,6 +3510,7 @@ def build_card(
         intraday,
         t_performance_gate,
         execution_quality_gate,
+        liquidity_activity_gate,
     )
     post_unlock_review_summary = build_post_unlock_review_summary(technical_operation["post_unlock_review"])
     capital_plan = build_capital_plan(
@@ -3417,6 +3545,7 @@ def build_card(
         execution_quality_gate,
         data_quality,
         minute_confirmation,
+        liquidity_activity_gate,
     )
     action_arbitration = build_action_arbitration(state, price_action_table, decision_mode, minute_confirmation)
     next_step = build_next_step(state, action_backtest, levels)
@@ -3432,6 +3561,7 @@ def build_card(
         technical_operation=technical_operation,
         t_performance_gate=t_performance_gate,
         execution_quality_gate=execution_quality_gate,
+        liquidity_activity_gate=liquidity_activity_gate,
         manual_execution_plan=manual_execution_plan,
         daily_trade_rhythm=daily_trade_rhythm,
     )
@@ -3482,6 +3612,7 @@ def build_card(
         "capital_plan": capital_plan,
         "t_performance_gate": t_performance_gate,
         "execution_quality_gate": execution_quality_gate,
+        "liquidity_activity_gate": liquidity_activity_gate,
         "execution_quality_summary": intraday.get("execution_quality_summary") or {},
         "daily_trade_rhythm": daily_trade_rhythm,
         "t_closure_performance": intraday.get("t_closure_performance") or {},
@@ -3519,6 +3650,9 @@ def build_card(
             "execution_quality_status": execution_quality_gate.get("status"),
             "execution_quality_average_score": execution_quality_gate.get("average_score"),
             "execution_quality_review_count": execution_quality_gate.get("review_count"),
+            "liquidity_activity_status": liquidity_activity_gate.get("status"),
+            "liquidity_activity_turnover": liquidity_activity_gate.get("turnover"),
+            "liquidity_activity_daily_volume_ratio_20": liquidity_activity_gate.get("daily_volume_ratio_20"),
             "decision_mode": decision_mode.get("mode"),
             "decision_mode_label": decision_mode.get("label"),
         },

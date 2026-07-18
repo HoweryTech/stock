@@ -1418,6 +1418,17 @@ function buildExecutionPreflightChecks(item, decisionCard, liveTrigger = null) {
     add("数据可信度", "warn", decisionMode.reason || "未确认盘中数据可信度；执行前先刷新。");
   }
 
+  const liquidityGate = decisionCard?.liquidity_activity_gate || {};
+  if (liquidityGate.status === "blocked" && plan.candidate !== "risk_exit") {
+    add("成交活跃度", "block", `${liquidityGate.status_label || "成交活跃度阻断"}：${(liquidityGate.reasons || [])[0] || "主动交易前成交活跃度未通过。"}`);
+  } else if (liquidityGate.status === "caution" && plan.candidate !== "risk_exit") {
+    add("成交活跃度", "warn", `${liquidityGate.status_label || "成交活跃度谨慎"}：${(liquidityGate.reasons || [])[0] || "只允许最小股数并严格限价。"}`);
+  } else if (liquidityGate.status) {
+    add("成交活跃度", "pass", `${liquidityGate.status_label || "成交活跃度可用"}：${liquidityGate.scope || "不阻断当前计划。"}`);
+  } else {
+    add("成交活跃度", "warn", "没有成交活跃度过滤结果；执行前先刷新完整决策链。");
+  }
+
   const priceZone = plan.price_zone || primary.price_zone || [];
   if (!Number.isFinite(current)) {
     add("当前价", "block", "当前价缺失，不能确认计划仍在有效价格区间内。");
@@ -1460,6 +1471,30 @@ function renderExecutionPreflightSection(item, decisionCard, liveTrigger = null)
         <p>${escapeHtml(check.message)}</p>
       </div>`).join("")}</div>`,
     "execution-preflight"
+  );
+}
+
+function renderLiquidityActivityGate(gate) {
+  if (!gate?.status) return "";
+  const statusTone = gate.status === "pass" ? "pass" : gate.status === "blocked" ? "block" : "warn";
+  const metrics = [
+    ["成交额", money(gate.turnover)],
+    ["成交量", gate.volume == null ? "--" : Number(gate.volume).toLocaleString("zh-CN")],
+    ["日线量比20", gate.daily_volume_ratio_20 == null ? "--" : Number(gate.daily_volume_ratio_20).toFixed(2)],
+    ["5分钟量比", gate.minute_volume_ratio == null ? "--" : Number(gate.minute_volume_ratio).toFixed(2)],
+    ["行情延迟", gate.quote_lag_seconds == null ? "--" : `${Number(gate.quote_lag_seconds).toFixed(1)}s`],
+  ];
+  const messages = [...(gate.reasons || []), ...(gate.evidence || []), gate.scope].filter(Boolean);
+  return detailSection(
+    "盘口/成交活跃度",
+    `<div class="preflight-summary preflight-summary-${statusTone}">
+      <strong>${escapeHtml(gate.status_label || gate.status)}</strong>
+      <p>${escapeHtml(gate.next_step || "继续按系统计划复核。")}</p>
+    </div>
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    ${messages.length ? `<h4>判断依据</h4><ul class="reason-list">${messages.slice(0, 8).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`,
+    "liquidity-activity",
+    {collapsed: gate.status === "pass", summary: gate.status_label || "成交活跃度过滤"}
   );
 }
 
@@ -3004,6 +3039,7 @@ function openDetail(code, options = {}) {
     html += renderPositiveTiming(decisionCard.positive_timing, technicalOperation);
     html += renderCapitalPlan(decisionCard.capital_plan);
     html += renderReverseTPlanSection(item, decisionCard, technicalOperation);
+    html += renderLiquidityActivityGate(decisionCard.liquidity_activity_gate);
     html += renderTechnicalAssessment(decisionCard.technical_assessment);
     html += detailSection(
       "数据质量",

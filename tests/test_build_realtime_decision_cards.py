@@ -8,7 +8,7 @@ def intraday_item(code: str = "600000", *, signals=None, reverse_status: str = "
     return {
         "code": code,
         "name": "浦发银行",
-        "quote": {"latest_price": 10.0, "change_pct": 1.0, "quote_lag_seconds": 3.0},
+        "quote": {"latest_price": 10.0, "change_pct": 1.0, "quote_lag_seconds": 3.0, "turnover": 80_000_000.0, "volume": 800_000},
         "position": {"shares": 1000, "entry_price": 9.5, "return_pct": 5.2632},
         "technicals": {"ma5": 9.9, "ma20": 9.7},
         "capital_flow": {"main_net_inflow_ratio_pct": 1.2},
@@ -463,6 +463,59 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(card["capital_plan"]["max_additional_capital"], 2500.0)
         self.assertTrue(any("放宽到5%" in reason for reason in card["capital_plan"]["reasons"]))
         self.assertTrue(any("总资产 5.0%" in step for step in card["decision"]["action_steps"]))
+
+    def test_low_liquidity_blocks_positive_t_manual_candidate(self) -> None:
+        item = intraday_item()
+        item["position"]["shares"] = 100
+        item["position"]["market_value"] = 1000.0
+        item["position"]["live_position_pct"] = 2.0
+        item["quote"]["turnover"] = 5_000_000.0
+        report = build_report(
+            {"total_assets": 50000.0, "items": [item]},
+            portfolio_result(),
+            t_result(conclusion="positive_t_candidate"),
+            None,
+            None,
+            None,
+            None,
+            bullish_technical_doc(),
+            positive_minute_bars(),
+            generated_at=datetime(2026, 7, 16, 9, 35, 0),
+        )
+
+        card = report["cards"][0]
+        actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+
+        self.assertEqual(card["liquidity_activity_gate"]["status"], "blocked")
+        self.assertEqual(card["post_unlock_review_summary"]["status"], "blocked_after_unlock")
+        self.assertIn("成交活跃度", card["post_unlock_review_summary"]["blocking_checks"])
+        self.assertEqual(card["manual_execution_plan"]["status"], "not_applicable")
+        self.assertEqual(actions["正T买入"]["status"], "blocked")
+        self.assertEqual(actions["正T买入"]["status_label"], "活跃度阻断")
+        self.assertTrue(any("成交活跃度" in item for item in card["evidence"]))
+
+    def test_liquidity_gate_does_not_block_risk_exit_plan(self) -> None:
+        item = intraday_item()
+        item["quote"]["turnover"] = 5_000_000.0
+        portfolio = portfolio_result()
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 10.5
+        report = build_report(
+            {"items": [item]},
+            portfolio,
+            t_result(blockers=[{"code": "near_stop_loss", "message": "距离止损不足1%。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            None,
+            generated_at=datetime(2026, 7, 16, 9, 30, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["liquidity_activity_gate"]["status"], "blocked")
+        self.assertEqual(card["state"], "exit_risk_review")
+        self.assertEqual(card["manual_execution_plan"]["candidate"], "risk_exit")
+        self.assertEqual(card["manual_execution_plan"]["status"], "ready_for_manual_confirm")
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "止损减仓")
 
     def test_daily_trade_rhythm_blocks_new_positive_t_after_risk_exit(self) -> None:
         item = intraday_item()
