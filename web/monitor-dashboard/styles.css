@@ -179,10 +179,21 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 .blocker-primary {
   padding: 14px 16px;
   border-right: 1px solid var(--line);
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .blocker-primary span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 800; }
 .blocker-primary strong { display: block; font-size: 20px; line-height: 1.25; }
 .blocker-primary p { margin: 7px 0 0; color: var(--text); line-height: 1.45; }
+.blocker-primary:hover,
+.blocker-reason:hover { background: #f7f9fb; }
+.blocker-primary:focus-visible,
+.blocker-reason:focus-visible { outline: 2px solid rgba(23, 92, 211, 0.22); outline-offset: -2px; }
 .blocker-reasons {
   padding: 12px 14px;
   display: grid;
@@ -196,6 +207,9 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
   border-left: 4px solid var(--muted);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .blocker-reason-primary { background: #fff; }
 .blocker-reason-risk,
@@ -332,6 +346,28 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 .filter { height: 32px; padding: 0 12px; border: 0; border-right: 1px solid var(--line-strong); background: var(--surface); color: var(--muted); }
 .filter:last-child { border-right: 0; }
 .filter.active { background: #e8edf3; color: var(--text); font-weight: 600; }
+.focus-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--blue);
+  border-radius: 4px;
+  background: var(--blue-bg);
+  color: var(--blue);
+  font-weight: 750;
+}
+.focus-bar[hidden] { display: none; }
+.focus-bar button {
+  height: 24px;
+  border: 1px solid rgba(23, 92, 211, 0.25);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--blue);
+  font-weight: 750;
+  cursor: pointer;
+}
 
 .view { display: none; }
 .view.active { display: block; }

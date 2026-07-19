@@ -82,6 +82,10 @@
     return uniqueItems(cards.map(cardLabel)).slice(0, 3);
   }
 
+  function codesFrom(cards) {
+    return uniqueItems(cards.map(card => card?.code)).slice(0, 80);
+  }
+
   function buildBlockerSummary({cards = [], triggerReviewQueue = [], report = {}} = {}) {
     const categories = [];
     const activeQueue = activeReviewItems(triggerReviewQueue);
@@ -97,6 +101,7 @@
       count: report?.stale_due_to_snapshot_date ? Number(report.original_card_count || 1) : 0,
       summary: "实时决策卡早于行情快照，旧价格区间和操作步骤已停用。",
       nextStep: "先刷新完整日内决策链，再看新的唯一结论。",
+      targetView: "refresh",
     });
 
     addCategory(categories, {
@@ -108,6 +113,8 @@
       summary: expiredQueue.length ? "存在已过期触发计划，不能继续按旧区间交易。" : "已有盘中触发计划进入待处理队列。",
       nextStep: expiredQueue.length ? "先刷新过期计划；未过期的再逐个确认。" : "先处理事件队列，再看普通持仓机会。",
       examples: uniqueItems([...actionableQueue, ...expiredQueue].map(item => item.name || item.code)).slice(0, 3),
+      codes: uniqueItems([...actionableQueue, ...expiredQueue].map(item => item.code)).slice(0, 80),
+      targetView: "events",
     });
 
     const riskCards = cards.filter(card => ["exit_risk_review", "risk_reduction_review"].includes(card?.state));
@@ -120,6 +127,8 @@
       summary: "部分持仓处在止损、减仓或退出复核路径，主动买入和做T靠后。",
       nextStep: "先看对应个股的硬止损、反抽减仓、站稳降级三条路径。",
       examples: examplesFrom(riskCards),
+      codes: codesFrom(riskCards),
+      targetView: "positions",
     });
 
     const dataCards = cards.filter(cardMatchesDataBlocker);
@@ -133,6 +142,8 @@
       summary: "行情时段、快照新鲜度或数据可信度不足，不能扩大主动交易。",
       nextStep: "只处理已确认风控；等待数据恢复或下一轮刷新。",
       examples: examplesFrom(dataCards),
+      codes: codesFrom(dataCards),
+      targetView: "positions",
     });
 
     const usage = report?.intraday_capital_usage || {};
@@ -146,6 +157,8 @@
       summary: "组合日内新增资金或单票仓位限制正在约束买入计划。",
       nextStep: "先确认剩余额度；预算未释放前不继续追加正T或补仓。",
       examples: examplesFrom(capitalCards),
+      codes: codesFrom(capitalCards),
+      targetView: "positions",
     });
 
     const liquidityBlockedCards = liveGateCards.filter(cardMatchesLiquidityBlocker);
@@ -159,6 +172,8 @@
       summary: liquidityBlockedCards.length ? "盘口或成交活跃度未通过，主动交易被阻断。" : "成交活跃度偏弱，只适合小额限价观察。",
       nextStep: liquidityBlockedCards.length ? "等待量能或报价恢复后再评估。" : "若其他门禁通过，也只按最小股数限价。",
       examples: examplesFrom(liquidityBlockedCards.length ? liquidityBlockedCards : liquidityCautionCards),
+      codes: codesFrom(liquidityBlockedCards.length ? liquidityBlockedCards : liquidityCautionCards),
+      targetView: "positions",
     });
 
     const minuteCards = liveGateCards.filter(cardMatchesMinuteBlocker);
@@ -171,6 +186,8 @@
       summary: "日线条件可能接近，但分时没有二次确认。",
       nextStep: "等待分钟确认，不提前挂主动单。",
       examples: examplesFrom(minuteCards),
+      codes: codesFrom(minuteCards),
+      targetView: "positions",
     });
 
     const technicalCards = liveGateCards.filter(cardMatchesTechnicalBlocker);
@@ -183,6 +200,8 @@
       summary: "指标反弹或观察信号还没有转成可执行结论。",
       nextStep: "只保留观察；等趋势、量能和分时同时修复。",
       examples: examplesFrom(technicalCards),
+      codes: codesFrom(technicalCards),
+      targetView: "positions",
     });
 
     const executionCards = cards.filter(cardMatchesExecutionBlocker);
@@ -195,6 +214,8 @@
       summary: "做T或执行评分没有通过，避免继续放大低质量交易。",
       nextStep: "先复盘历史执行质量；未解除前不按该方向做T。",
       examples: examplesFrom(executionCards),
+      codes: codesFrom(executionCards),
+      targetView: "positions",
     });
 
     addCategory(categories, {
@@ -206,6 +227,8 @@
       summary: "存在未处理的人工复核项，系统不会把它们当成可直接执行。",
       nextStep: "先打开今日处理顺序，完成复核后再看是否可交易。",
       examples: uniqueItems(reviewQueue.map(item => item.name || item.code)).slice(0, 3),
+      codes: uniqueItems(reviewQueue.map(item => item.code)).slice(0, 80),
+      targetView: "events",
     });
 
     categories.sort((left, right) => right.priority - left.priority || right.count - left.count);
@@ -218,30 +241,32 @@
       summary: "当前没有聚合级硬阻断，但仍需以个股唯一结论为准。",
       nextStep: "继续盯盘；只在详情页执行前检查全部通过后操作。",
       examples: [],
+      codes: [],
+      targetView: "positions",
     };
     return {primary, categories: categories.slice(0, 4)};
   }
 
   function renderReason(category, isPrimary) {
     const examples = category.examples?.length ? ` · ${category.examples.join("、")}` : "";
-    return `<article class="blocker-reason blocker-reason-${escapeHtml(category.tone)}${isPrimary ? " blocker-reason-primary" : ""}">
+    return `<button class="blocker-reason blocker-reason-${escapeHtml(category.tone)}${isPrimary ? " blocker-reason-primary" : ""}" type="button" data-blocker-key="${escapeHtml(category.key)}">
       <div>
         <strong>${escapeHtml(category.title)}</strong>
         <span>${category.count ? `涉及 ${category.count} 项${examples}` : "当前通过"}</span>
       </div>
       <p>${escapeHtml(category.nextStep)}</p>
-    </article>`;
+    </button>`;
   }
 
   function renderBlockerSummary(input) {
     const summary = buildBlockerSummary(input);
     const reasons = summary.categories.length ? summary.categories : [summary.primary];
     return `<section class="blocker-summary blocker-summary-${escapeHtml(summary.primary.tone)}" id="blockerSummaryPanel" aria-label="当前阻断原因">
-      <div class="blocker-primary">
+      <button class="blocker-primary" type="button" data-blocker-key="${escapeHtml(summary.primary.key)}">
         <span>当前首要阻断</span>
         <strong>${escapeHtml(summary.primary.title)}</strong>
         <p>${escapeHtml(summary.primary.summary)}</p>
-      </div>
+      </button>
       <div class="blocker-reasons">
         ${reasons.map(reason => renderReason(reason, reason.key === summary.primary.key)).join("")}
       </div>

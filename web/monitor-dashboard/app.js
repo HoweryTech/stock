@@ -11,6 +11,7 @@ const state = {
   triggerReviewQueue: [],
   flowHistory: new Map(),
   filter: "all",
+  blockerFocus: null,
   search: "",
   selectedCode: null,
   detailDirty: false,
@@ -816,6 +817,7 @@ function uniqueConclusionForCode(code, fallback = "--") {
 
 function filteredItems() {
   const items = state.snapshot?.items || [];
+  const focusCodes = new Set(state.blockerFocus?.codes || []);
   return items.filter(item => {
     const card = decisionCardFor(item);
     const decisionState = card?.state;
@@ -827,7 +829,8 @@ function filteredItems() {
       || (state.filter === "reverse_t" ? (decisionState === "reverse_t_watch" || isReverseTWatch(item)) : decisionState === state.filter || item.state === state.filter);
     const query = state.search.trim().toLowerCase();
     const matchesSearch = !query || item.code.includes(query) || String(item.name).toLowerCase().includes(query);
-    return matchesFilter && matchesSearch;
+    const matchesFocus = !focusCodes.size || focusCodes.has(item.code);
+    return matchesFilter && matchesSearch && matchesFocus;
   }).sort((left, right) => {
     if (state.filter !== "technical_unlock") return 0;
     const leftGap = Number(technicalUnlockAlertFor(left)?.min_gap ?? 9999);
@@ -992,6 +995,55 @@ function renderBlockerSummaryPanel() {
   }) || "";
 }
 
+function activateView(viewName) {
+  document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item.dataset.view === viewName));
+  document.querySelectorAll(".view").forEach(view => view.classList.remove("active"));
+  document.querySelector(`#${viewName}View`)?.classList.add("active");
+  document.querySelector("#positionsToolbar").style.display = viewName === "positions" ? "flex" : "none";
+}
+
+function setFilter(filterName) {
+  state.filter = filterName;
+  document.querySelectorAll(".filter").forEach(item => item.classList.toggle("active", item.dataset.filter === filterName));
+}
+
+function blockerCategoryForKey(key) {
+  const summary = window.DashboardBlockers?.buildBlockerSummary({
+    cards: [...state.decisionCards.values()],
+    triggerReviewQueue: state.triggerReviewQueue,
+    report: state.decisionReport,
+  });
+  if (!summary) return null;
+  return [summary.primary, ...(summary.categories || [])].find(category => category.key === key) || null;
+}
+
+function applyBlockerFocus(key) {
+  const category = blockerCategoryForKey(key);
+  if (!category) return;
+  if (category.targetView === "events") {
+    activateView("events");
+    document.querySelector("#eventList")?.scrollIntoView({behavior: "smooth", block: "start"});
+    return;
+  }
+  if (category.targetView === "refresh") {
+    document.querySelector("#refreshAlert")?.scrollIntoView({behavior: "smooth", block: "center"});
+    return;
+  }
+  const codes = category.codes || [];
+  state.blockerFocus = codes.length ? {key: category.key, title: category.title, codes} : null;
+  state.search = "";
+  document.querySelector("#searchInput").value = "";
+  setFilter("all");
+  activateView("positions");
+  renderPositions();
+  document.querySelector("#positionsToolbar")?.scrollIntoView({behavior: "smooth", block: "start"});
+}
+
+function clearBlockerFocus() {
+  state.blockerFocus = null;
+  renderPositions();
+}
+
 function renderPriorityQueue() {
   const queue = state.decisionReport?.priority_queue || {};
   const items = queue.top_items || [];
@@ -1111,10 +1163,26 @@ function bindPositionOpeners() {
 
 function renderPositions() {
   const items = filteredItems();
+  renderFocusBar();
   document.querySelector("#positionsBody").innerHTML = items.map(tableRow).join("");
   document.querySelector("#mobileList").innerHTML = items.map(mobileCard).join("");
   document.querySelector("#emptyState").hidden = items.length > 0;
   bindPositionOpeners();
+}
+
+function renderFocusBar() {
+  const container = document.querySelector("#focusBar");
+  if (!container) return;
+  const focus = state.blockerFocus;
+  container.hidden = !focus;
+  if (!focus) {
+    container.innerHTML = "";
+    return;
+  }
+  const count = focus.codes?.length || 0;
+  container.innerHTML = `
+    <span>正在聚焦：${escapeHtml(focus.title)} · ${count}只</span>
+    <button type="button" data-clear-blocker-focus>清除</button>`;
 }
 
 function detailSection(title, body, key = "", options = {}) {
@@ -3391,21 +3459,28 @@ async function loadData() {
 }
 
 document.querySelectorAll(".tab").forEach(button => button.addEventListener("click", () => {
-  document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === button));
-  document.querySelectorAll(".view").forEach(view => view.classList.remove("active"));
-  document.querySelector(`#${button.dataset.view}View`).classList.add("active");
-  document.querySelector("#positionsToolbar").style.display = button.dataset.view === "positions" ? "flex" : "none";
+  activateView(button.dataset.view);
 }));
 
 document.querySelectorAll(".filter").forEach(button => button.addEventListener("click", () => {
-  document.querySelectorAll(".filter").forEach(item => item.classList.toggle("active", item === button));
-  state.filter = button.dataset.filter;
+  state.blockerFocus = null;
+  setFilter(button.dataset.filter);
   renderPositions();
 }));
 
 document.querySelector("#searchInput").addEventListener("input", event => {
+  state.blockerFocus = null;
   state.search = event.target.value;
   renderPositions();
+});
+document.querySelector("#blockerSummaryMount").addEventListener("click", event => {
+  const button = event.target.closest("[data-blocker-key]");
+  if (!button) return;
+  applyBlockerFocus(button.dataset.blockerKey);
+});
+document.querySelector("#focusBar").addEventListener("click", event => {
+  if (!event.target.closest("[data-clear-blocker-focus]")) return;
+  clearBlockerFocus();
 });
 document.querySelector("#closeDetail").addEventListener("click", closeDetail);
 document.querySelector("#scrim").addEventListener("click", closeDetail);
