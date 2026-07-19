@@ -6,6 +6,7 @@ const state = {
   decisionCards: new Map(),
   decisionReport: null,
   refreshCheck: null,
+  monitorStatus: null,
   events: [],
   triggerRefreshEvents: [],
   triggerReviewQueue: [],
@@ -1120,6 +1121,18 @@ function renderRefreshAlert() {
       ${autoRefreshHtml}
     </div>
     ${check?.action_required || staleDecisionReport ? commandHtml : ""}`;
+}
+
+function renderSessionPreflightPanel() {
+  const container = document.querySelector("#sessionPreflightMount");
+  if (!container) return;
+  container.innerHTML = window.DashboardPreflight?.renderSessionPreflight({
+    snapshot: state.snapshot,
+    report: state.decisionReport,
+    refreshCheck: state.refreshCheck,
+    monitorStatus: state.monitorStatus,
+    triggerReviewQueue: state.triggerReviewQueue,
+  }) || "";
 }
 
 function tableRow(item) {
@@ -3430,6 +3443,7 @@ async function loadData() {
       : decisionCards;
     state.decisionCards = staleDecisionCards ? new Map() : new Map((decisionCards.cards || []).map(card => [card.code, card]));
     state.refreshCheck = refreshCheck;
+    state.monitorStatus = status;
     state.events = events.events || [];
     state.triggerRefreshEvents = triggerRefreshEvents.events || [];
     state.triggerReviewQueue = triggerReviewQueue.items || [];
@@ -3443,6 +3457,7 @@ async function loadData() {
     updateHeader(status);
     renderUrgentTriggerAlert();
     renderRefreshAlert();
+    renderSessionPreflightPanel();
     renderSummary();
     renderStrategyHealth();
     renderBlockerSummaryPanel();

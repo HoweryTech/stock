@@ -27,6 +27,7 @@
   <main>
     <section class="urgent-trigger-alert" id="urgentTriggerAlert" hidden></section>
     <section class="refresh-alert" id="refreshAlert" hidden></section>
+    <section id="sessionPreflightMount"></section>
     <section class="summary-band" id="summaryBand" aria-label="账户汇总"></section>
     <section class="strategy-health" id="strategyHealth" aria-label="盘中策略健康度"></section>
     <section id="blockerSummaryMount"></section>
@@ -111,8 +112,9 @@
   <div class="scrim" id="scrim" hidden></div>
 
   <script src="/replay.js?v=20260718-replay" defer></script>
+  <script src="/preflight.js?v=20260720-preflight" defer></script>
   <script src="/blockers.js?v=20260719-blockers" defer></script>
   <script src="/capital.js?v=20260719-capital" defer></script>
-  <script src="/app.js?v=20260719-blockers" defer></script>
+  <script src="/app.js?v=20260720-preflight" defer></script>
 </body>
 </html>
