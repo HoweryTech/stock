@@ -995,6 +995,12 @@ function renderStrategyHealth() {
     </div>`;
 }
 
+function renderCapitalUsagePanel() {
+  const container = document.querySelector("#capitalUsageMount");
+  if (!container) return;
+  container.innerHTML = window.DashboardCapital?.renderPortfolioUsage(state.decisionReport?.intraday_capital_usage) || "";
+}
+
 function renderPriorityQueue() {
   const queue = state.decisionReport?.priority_queue || {};
   const items = queue.top_items || [];
@@ -1589,7 +1595,8 @@ function renderCapitalPlan(plan) {
   const reasons = plan.reasons || [];
   return detailSection(
     "追加资金正T计划",
-    `<div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    `${window.DashboardCapital?.renderPlanLink(plan) || ""}
+    <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
     <p>${escapeHtml(plan.failure_plan || "")}</p>
     ${steps.length ? `<h4>操作步骤</h4><ol class="reason-list">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
     ${reasons.length ? `<h4>限制原因</h4><ul class="reason-list">${reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`,
@@ -3379,6 +3386,7 @@ async function loadData() {
     renderRefreshAlert();
     renderSummary();
     renderStrategyHealth();
+    renderCapitalUsagePanel();
     renderPriorityQueue();
     renderPositions();
     renderEvents();

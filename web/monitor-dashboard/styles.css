@@ -179,6 +179,61 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
   line-height: 1.25;
 }
 
+.capital-usage {
+  margin: -2px 0 14px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--green);
+  border-radius: 6px;
+  background: var(--surface);
+  display: grid;
+  grid-template-columns: minmax(260px, 0.95fr) minmax(360px, 1.25fr);
+  gap: 0;
+  overflow: hidden;
+}
+.capital-usage-caution { border-left-color: var(--amber); background: #fffdf6; }
+.capital-usage-blocked { border-left-color: var(--red); background: var(--red-bg); }
+.capital-usage-missing { border-left-color: var(--muted); background: #f6f7f9; padding: 12px 14px; }
+.capital-usage-head { padding: 13px 15px; border-right: 1px solid var(--line); }
+.capital-usage-head span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; font-weight: 800; }
+.capital-usage-head strong { display: block; font-size: 18px; line-height: 1.25; }
+.capital-usage-head p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
+.capital-usage-metrics {
+  padding: 13px 15px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.capital-usage-metrics dl,
+.capital-plan-link-grid dl { margin: 0; min-width: 0; }
+.capital-usage-metrics dt,
+.capital-plan-link-grid dt { color: var(--muted); font-size: 11px; }
+.capital-usage-metrics dd,
+.capital-plan-link-grid dd { margin: 3px 0 0; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capital-usage-metrics em,
+.capital-plan-link-grid em { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; font-style: normal; }
+.capital-usage-allocations {
+  grid-column: 1 / -1;
+  padding: 0 15px 13px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.capital-allocation { padding: 4px 7px; border-radius: 4px; background: #eef1f4; color: var(--muted); font-size: 12px; font-weight: 750; }
+.capital-allocation-allocated { color: var(--green); background: var(--green-bg); }
+.capital-allocation-portfolio_budget_blocked { color: var(--red); background: var(--red-bg); }
+.capital-plan-link {
+  margin-bottom: 12px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--green);
+  border-radius: 6px;
+  background: var(--green-bg);
+}
+.capital-plan-link-block { border-left-color: var(--red); background: var(--red-bg); }
+.capital-plan-link strong { display: block; margin-bottom: 4px; }
+.capital-plan-link p { margin: 0 0 9px; color: var(--muted); line-height: 1.45; }
+.capital-plan-link-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+
 .priority-queue {
   margin: -2px 0 14px;
   border: 1px solid var(--line);
@@ -928,6 +983,10 @@ th:nth-child(8) { width: 100px; }
   .strategy-health-main,
   .strategy-health-actions { border-right: 0; border-bottom: 1px solid var(--line); }
   .strategy-health-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .capital-usage { grid-template-columns: 1fr; }
+  .capital-usage-head { border-right: 0; border-bottom: 1px solid var(--line); }
+  .capital-usage-metrics,
+  .capital-plan-link-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .refresh-alert { align-items: stretch; flex-direction: column; }
   .refresh-command { max-width: 100%; width: 100%; }
   .refresh-command code { flex: 1; }

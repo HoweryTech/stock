@@ -53,6 +53,7 @@ SUPPLEMENTAL_CAPITAL_POLICY = {
     "base_single_add_pct_total_assets": 3.0,
     "strong_single_add_pct_total_assets": 5.0,
     "max_single_add_pct_total_assets": 5.0,
+    "max_intraday_add_pct_total_assets": 8.0,
     "max_stock_position_pct_after_add": 12.0,
     "max_added_risk_pct_total_assets": 0.5,
     "min_stop_buffer_pct": 3.0,
@@ -3668,6 +3669,124 @@ def build_card(
     }
 
 
+def manual_buy_amount_today(card: dict[str, Any]) -> float:
+    total = 0.0
+    for trade in (card.get("daily_trade_rhythm") or {}).get("recent_trades") or []:
+        if str(trade.get("side") or "").lower() != "buy":
+            continue
+        price = as_float(trade.get("price"))
+        shares = as_float(trade.get("shares"))
+        if price is not None and shares is not None:
+            total += price * shares
+    return total
+
+
+def link_intraday_capital_usage(cards: list[dict[str, Any]], total_assets: float | None) -> dict[str, Any]:
+    policy = SUPPLEMENTAL_CAPITAL_POLICY
+    if total_assets in (None, 0):
+        return {
+            "available": False,
+            "status": "missing_total_assets",
+            "status_label": "缺少总资产，不能联动盘中资金预算",
+            "total_assets": total_assets,
+            "max_intraday_add_amount": None,
+            "used_buy_amount": None,
+            "reserved_candidate_amount": None,
+            "remaining_add_amount": None,
+            "candidate_count": 0,
+        }
+
+    budget = float(total_assets) * float(policy["max_intraday_add_pct_total_assets"]) / 100
+    used_buy_amount = sum(manual_buy_amount_today(card) for card in cards)
+    remaining = max(0.0, budget - used_buy_amount)
+    candidates = [
+        card
+        for card in cards
+        if (card.get("capital_plan") or {}).get("applicable")
+        and (card.get("capital_plan") or {}).get("suggested_buy_shares")
+        and (card.get("capital_plan") or {}).get("estimated_buy_amount")
+    ]
+    candidates.sort(
+        key=lambda card: (
+            -decision_priority(str(card.get("state") or "")),
+            0 if (card.get("post_unlock_review_summary") or {}).get("status") == "manual_candidate" else 1,
+            str(card.get("code") or ""),
+        )
+    )
+
+    reserved = 0.0
+    allocations: list[dict[str, Any]] = []
+    for card in candidates:
+        plan = card.get("capital_plan") or {}
+        estimated = as_float(plan.get("estimated_buy_amount"), 0.0) or 0.0
+        enough = estimated <= remaining
+        allocated = estimated if enough else 0.0
+        if enough:
+            remaining -= estimated
+            reserved += estimated
+        link = {
+            "status": "allocated" if enough else "portfolio_budget_blocked",
+            "status_label": "组合预算已预留" if enough else "组合日内新增预算不足",
+            "allocated_amount": rounded(allocated),
+            "requested_amount": rounded(estimated),
+            "remaining_after_allocation": rounded(remaining),
+            "max_intraday_add_amount": rounded(budget),
+            "used_buy_amount": rounded(used_buy_amount),
+            "max_intraday_add_pct_total_assets": policy["max_intraday_add_pct_total_assets"],
+            "next_step": "可继续做个股执行前检查。" if enough else "今天不再为该候选追加资金；除非先释放预算或下一轮重新排序。",
+        }
+        plan["portfolio_capital_link"] = link
+        if not enough and plan.get("status") in {"watch", "ready_for_manual_confirm"}:
+            plan["status"] = "portfolio_budget_blocked"
+            plan["status_label"] = "组合日内新增资金预算不足"
+            plan.setdefault("reasons", []).append("多个候选共享日内新增资金预算，本候选未获得预算预留。")
+            plan.setdefault("steps", []).insert(0, "组合日内新增资金预算不足，本轮不买入；只观察价格和技术确认。")
+            manual_plan = card.get("manual_execution_plan") or {}
+            if manual_plan.get("candidate") == "positive_t":
+                manual_plan["status"] = "blocked"
+                manual_plan["status_label"] = "组合预算不足，禁止正T买入"
+                manual_plan["steps"] = [
+                    "组合日内新增资金预算不足，本轮不填写买入单。",
+                    "继续观察该股价格和技术确认；若下一轮预算释放，系统会重新计算。",
+                ]
+            for row in (card.get("price_action_table") or {}).get("rows") or []:
+                if row.get("action") == "正T买入":
+                    row["status"] = "blocked"
+                    row["status_label"] = "组合预算阻断"
+                    row["operation"] = "不买入"
+                    row["note"] = "组合日内新增资金预算不足，本轮不执行正T买入。"
+                    row["priority"] = price_action_priority("正T买入", "blocked")
+            rows = (card.get("price_action_table") or {}).get("rows") or []
+            if rows:
+                ordered_rows = sorted(enumerate(rows), key=lambda item: (-int(item[1].get("priority") or 0), item[0]))
+                card["price_action_table"]["rows"] = [row for _, row in ordered_rows]
+                card["price_action_table"]["primary_action"] = card["price_action_table"]["rows"][0]
+        allocations.append(
+            {
+                "code": card.get("code"),
+                "name": card.get("name"),
+                "status": link["status"],
+                "requested_amount": link["requested_amount"],
+                "allocated_amount": link["allocated_amount"],
+            }
+        )
+
+    return {
+        "available": True,
+        "status": "budget_available" if remaining > 0 else "budget_exhausted",
+        "status_label": "日内新增资金预算可用" if remaining > 0 else "日内新增资金预算已用尽",
+        "total_assets": rounded(float(total_assets)),
+        "max_intraday_add_pct_total_assets": policy["max_intraday_add_pct_total_assets"],
+        "max_intraday_add_amount": rounded(budget),
+        "used_buy_amount": rounded(used_buy_amount),
+        "reserved_candidate_amount": rounded(reserved),
+        "remaining_add_amount": rounded(remaining),
+        "candidate_count": len(candidates),
+        "allocations": allocations,
+        "scope": "只约束新增买入和正T买入；反T回补、风控卖出、减仓不占用新增资金预算。",
+    }
+
+
 def build_report(
     intraday_snapshot: dict[str, Any],
     portfolio_check: dict[str, Any] | None,
@@ -3707,6 +3826,7 @@ def build_report(
         )
         for item in intraday_snapshot.get("items", [])
     ]
+    intraday_capital_usage = link_intraday_capital_usage(cards, total_assets)
     state_counts: dict[str, int] = {}
     for card in cards:
         state_counts[card["state"]] = state_counts.get(card["state"], 0) + 1
@@ -3738,6 +3858,7 @@ def build_report(
         },
         "card_count": len(cards),
         "state_counts": dict(sorted(state_counts.items())),
+        "intraday_capital_usage": intraday_capital_usage,
         "intraday_trigger_alerts": intraday_trigger_alerts,
         "technical_unlock_alerts": technical_unlock_alerts,
         "post_unlock_review_alerts": post_unlock_review_alerts,

@@ -464,6 +464,53 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertTrue(any("放宽到5%" in reason for reason in card["capital_plan"]["reasons"]))
         self.assertTrue(any("总资产 5.0%" in step for step in card["decision"]["action_steps"]))
 
+    def test_intraday_capital_budget_links_multiple_positive_t_candidates(self) -> None:
+        codes = ["600000", "600001", "600002"]
+        items = []
+        for code in codes:
+            item = intraday_item(code)
+            item["position"]["shares"] = 100
+            item["position"]["market_value"] = 1000.0
+            item["position"]["live_position_pct"] = 2.0
+            items.append(item)
+        portfolio = {"positions": [portfolio_result(code)["positions"][0] for code in codes]}
+        t_doc = {"items": [t_result(code, conclusion="positive_t_candidate")["items"][0] for code in codes]}
+        technical_doc = {"items": [bullish_technical_doc(code)["items"][0] for code in codes]}
+        minute_doc = {}
+        for code in codes:
+            minute_doc.update(positive_minute_bars(code))
+
+        report = build_report(
+            {"total_assets": 50000.0, "items": items},
+            portfolio,
+            t_doc,
+            None,
+            None,
+            None,
+            None,
+            technical_doc,
+            minute_doc,
+            generated_at=datetime(2026, 7, 16, 9, 35, 0),
+        )
+
+        usage = report["intraday_capital_usage"]
+        cards = {card["code"]: card for card in report["cards"]}
+
+        self.assertEqual(usage["max_intraday_add_pct_total_assets"], 8.0)
+        self.assertEqual(usage["max_intraday_add_amount"], 4000.0)
+        self.assertEqual(usage["candidate_count"], 3)
+        self.assertEqual(usage["reserved_candidate_amount"], 3992.0)
+        self.assertEqual(usage["remaining_add_amount"], 8.0)
+        self.assertEqual(cards["600000"]["capital_plan"]["portfolio_capital_link"]["status"], "allocated")
+        self.assertEqual(cards["600001"]["capital_plan"]["portfolio_capital_link"]["status"], "allocated")
+        self.assertEqual(cards["600002"]["capital_plan"]["portfolio_capital_link"]["status"], "portfolio_budget_blocked")
+        self.assertEqual(cards["600002"]["capital_plan"]["status"], "portfolio_budget_blocked")
+        self.assertEqual(cards["600002"]["manual_execution_plan"]["status"], "blocked")
+        self.assertEqual(
+            {row["action"]: row for row in cards["600002"]["price_action_table"]["rows"]}["正T买入"]["status_label"],
+            "组合预算阻断",
+        )
+
     def test_low_liquidity_blocks_positive_t_manual_candidate(self) -> None:
         item = intraday_item()
         item["position"]["shares"] = 100
