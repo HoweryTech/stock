@@ -981,6 +981,17 @@ function renderCapitalUsagePanel() {
   container.innerHTML = window.DashboardCapital?.renderPortfolioUsage(state.decisionReport?.intraday_capital_usage) || "";
 }
 
+function renderBlockerSummaryPanel() {
+  const container = document.querySelector("#blockerSummaryMount");
+  if (!container) return;
+  const cards = [...state.decisionCards.values()];
+  container.innerHTML = window.DashboardBlockers?.renderBlockerSummary({
+    cards,
+    triggerReviewQueue: state.triggerReviewQueue,
+    report: state.decisionReport,
+  }) || "";
+}
+
 function renderPriorityQueue() {
   const queue = state.decisionReport?.priority_queue || {};
   const items = queue.top_items || [];
@@ -3366,6 +3377,7 @@ async function loadData() {
     renderRefreshAlert();
     renderSummary();
     renderStrategyHealth();
+    renderBlockerSummaryPanel();
     renderCapitalUsagePanel();
     renderPriorityQueue();
     renderPositions();
