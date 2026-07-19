@@ -157,6 +157,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         data_quality,
         technical_indicators,
         load_minute_bars(Path(args.minute_cache_dir)),
+        investment_profile=profile,
     )
     write_json(Path(args.decision_cards_output), decision_cards)
     write_text(Path(args.decision_cards_markdown_output), render_decision_cards_markdown(decision_cards))

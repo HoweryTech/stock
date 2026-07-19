@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from tools.risk_check import as_float, value_at
+    from tools.risk_check import as_float, load_yaml, value_at
 except ModuleNotFoundError:
-    from risk_check import as_float, value_at
+    from risk_check import as_float, load_yaml, value_at
 
 
 STATE_LABELS = {
@@ -47,7 +47,7 @@ DATA_BLOCKERS = {"insufficient_daily_bars", "missing_price_or_stop_loss"}
 QUALITY_BLOCKER_STATUSES = {"missing", "insufficient"}
 LIMITED_HISTORY_STATUS = "limited_history"
 POSITIVE_T_SCORE_THRESHOLD = 65.0
-SUPPLEMENTAL_CAPITAL_POLICY = {
+DEFAULT_SUPPLEMENTAL_CAPITAL_POLICY = {
     "supplemental_capital_allowed": True,
     "account_cash_required": False,
     "base_single_add_pct_total_assets": 3.0,
@@ -59,6 +59,36 @@ SUPPLEMENTAL_CAPITAL_POLICY = {
     "min_stop_buffer_pct": 3.0,
     "min_target_gap_pct": 1.2,
 }
+
+
+def supplemental_capital_policy_from_profile(profile: dict[str, Any] | None = None) -> dict[str, Any]:
+    policy = dict(DEFAULT_SUPPLEMENTAL_CAPITAL_POLICY)
+    source = value_at(profile or {}, "t_trading.supplemental_capital") or {}
+    mapping = {
+        "supplemental_capital_allowed": "supplemental_capital_allowed",
+        "account_cash_required": "account_cash_required",
+        "base_single_add_pct_total_assets": "base_single_add_pct_total_assets",
+        "strong_single_add_pct_total_assets": "strong_single_add_pct_total_assets",
+        "max_single_add_pct_total_assets": "max_single_add_pct_total_assets",
+        "max_intraday_add_pct_total_assets": "max_intraday_add_pct_total_assets",
+        "max_stock_position_pct_after_add": "max_stock_position_pct_after_add",
+        "max_added_risk_pct_total_assets": "max_added_risk_pct_total_assets",
+        "min_stop_buffer_pct": "min_stop_buffer_pct",
+        "min_target_gap_pct": "min_target_gap_pct",
+    }
+    for source_key, target_key in mapping.items():
+        if source_key not in source:
+            continue
+        value = source[source_key]
+        if isinstance(policy[target_key], bool):
+            policy[target_key] = bool(value)
+        else:
+            numeric = as_float(value)
+            if numeric is not None:
+                policy[target_key] = numeric
+    policy["base_single_add_pct_total_assets"] = min(policy["base_single_add_pct_total_assets"], policy["max_single_add_pct_total_assets"])
+    policy["strong_single_add_pct_total_assets"] = min(policy["strong_single_add_pct_total_assets"], policy["max_single_add_pct_total_assets"])
+    return policy
 
 
 def load_json_if_exists(path: Path | None) -> dict[str, Any] | None:
@@ -2577,8 +2607,9 @@ def build_capital_plan(
     technical_assessment: dict[str, Any] | None = None,
     positive_timing: dict[str, Any] | None = None,
     minute_confirmation: dict[str, Any] | None = None,
+    supplemental_capital_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    policy = dict(SUPPLEMENTAL_CAPITAL_POLICY)
+    policy = dict(supplemental_capital_policy or supplemental_capital_policy_from_profile())
     technical_label = str((technical_assessment or {}).get("label") or "")
     technical_score = as_float((technical_assessment or {}).get("score"))
     strong_setup = technical_label == "bullish" and technical_score is not None and technical_score >= 18
@@ -3461,6 +3492,7 @@ def build_card(
     total_assets: float | None = None,
     minute_bars: list[dict[str, Any]] | None = None,
     generated_at: datetime | None = None,
+    supplemental_capital_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     technical_assessment = build_technical_assessment(technical_indicators)
     technical_operation = build_technical_operation(technical_assessment)
@@ -3522,6 +3554,7 @@ def build_card(
         technical_assessment=technical_assessment,
         positive_timing=positive_timing,
         minute_confirmation=minute_confirmation,
+        supplemental_capital_policy=supplemental_capital_policy,
     )
     manual_execution_plan = build_manual_execution_plan(
         post_unlock_review_summary,
@@ -3681,8 +3714,12 @@ def manual_buy_amount_today(card: dict[str, Any]) -> float:
     return total
 
 
-def link_intraday_capital_usage(cards: list[dict[str, Any]], total_assets: float | None) -> dict[str, Any]:
-    policy = SUPPLEMENTAL_CAPITAL_POLICY
+def link_intraday_capital_usage(
+    cards: list[dict[str, Any]],
+    total_assets: float | None,
+    supplemental_capital_policy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    policy = supplemental_capital_policy or supplemental_capital_policy_from_profile()
     if total_assets in (None, 0):
         return {
             "available": False,
@@ -3799,8 +3836,10 @@ def build_report(
     minute_bars: dict[str, list[dict[str, Any]]] | None = None,
     *,
     generated_at: datetime | None = None,
+    investment_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     generated_at_value = generated_at or datetime.now().astimezone()
+    supplemental_capital_policy = supplemental_capital_policy_from_profile(investment_profile)
     portfolio_by_code = index_portfolio_check(portfolio_check)
     t_by_code = index_t_checks(t_opportunities)
     action_backtest_by_code = index_action_backtests(action_backtests)
@@ -3823,10 +3862,11 @@ def build_report(
             total_assets,
             minute_by_code.get(str(item.get("code"))),
             generated_at_value,
+            supplemental_capital_policy,
         )
         for item in intraday_snapshot.get("items", [])
     ]
-    intraday_capital_usage = link_intraday_capital_usage(cards, total_assets)
+    intraday_capital_usage = link_intraday_capital_usage(cards, total_assets, supplemental_capital_policy)
     state_counts: dict[str, int] = {}
     for card in cards:
         state_counts[card["state"]] = state_counts.get(card["state"], 0) + 1
@@ -3855,6 +3895,7 @@ def build_report(
             "data_quality_available": data_quality is not None,
             "technical_indicators_available": technical_indicators is not None,
             "minute_bars_available": bool(minute_by_code),
+            "investment_profile_available": investment_profile is not None,
         },
         "card_count": len(cards),
         "state_counts": dict(sorted(state_counts.items())),
@@ -3998,6 +4039,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-quality", default="data/metadata/data-quality-snapshot.json")
     parser.add_argument("--technical-indicators", default="data/metadata/technical-indicators.json")
     parser.add_argument("--minute-cache-dir", default="data/processed/minute-bars")
+    parser.add_argument("--profile", default="config/investment-profile.yaml")
     parser.add_argument("--output", default="data/metadata/realtime-decision-cards.json")
     parser.add_argument("--markdown-output", default="reports/realtime-decision-cards.md")
     parser.add_argument("--json", action="store_true")
@@ -4020,6 +4062,7 @@ def main() -> int:
             load_json_if_exists(Path(args.data_quality)),
             load_json_if_exists(Path(args.technical_indicators)),
             load_minute_bars(Path(args.minute_cache_dir)),
+            investment_profile=load_yaml(Path(args.profile)) if Path(args.profile).exists() else None,
         )
         write_json(Path(args.output), report)
         Path(args.markdown_output).parent.mkdir(parents=True, exist_ok=True)

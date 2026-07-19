@@ -901,10 +901,6 @@ function buildStrategyHealth() {
   const manualCandidates = cards.filter(card => card.post_unlock_review_summary?.status === "manual_candidate").length;
   const activeCandidates = positiveT + reverseT + manualCandidates;
   const staleReport = Boolean(state.decisionReport?.stale_due_to_snapshot_date);
-  const totalCards = cards.length || state.snapshot?.items?.length || 0;
-  const items = state.snapshot?.items || [];
-  const pnl = items.reduce((sum, item) => sum + Number(item.position?.unrealized_pnl || 0), 0);
-
   let toneClass = "observe";
   let title = "观察为主";
   let headline = "今天没有已确认的盘中执行信号，继续监控，不主动加仓或做T。";
@@ -960,14 +956,6 @@ function buildStrategyHealth() {
     title,
     headline,
     actions: actions.slice(0, 3),
-    metrics: [
-      ["触发待办", `${actionableQueue.length}/${activeQueue.length}`, "可执行/未关闭"],
-      ["风控票数", `${exitRisk + riskReduction}`, "退出或减仓"],
-      ["数据阻断", `${dataBlocked}`, "等待/过期/不足"],
-      ["候选机会", `${activeCandidates}`, "正T/反T/人工"],
-      ["可信数据", `${highTrust}/${totalCards}`, "高可信/全部"],
-      ["浮动盈亏", money(pnl), "当前组合"],
-    ],
   };
 }
 
@@ -984,14 +972,6 @@ function renderStrategyHealth() {
     </div>
     <div class="strategy-health-actions">
       ${health.actions.map(action => `<div class="strategy-action">${escapeHtml(action)}</div>`).join("")}
-    </div>
-    <div class="strategy-health-metrics">
-      ${health.metrics.map(([label, value, sub]) => `
-        <div>
-          <span>${escapeHtml(label)}</span>
-          <strong>${escapeHtml(value)}</strong>
-          <em>${escapeHtml(sub)}</em>
-        </div>`).join("")}
     </div>`;
 }
 

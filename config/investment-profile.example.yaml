@@ -40,6 +40,17 @@ t_trading:
   minimum_net_profit_cny: 10.0
   max_round_trips_per_stock_per_day: 1
   max_position_ratio_pct_per_trade: 50.0
+  supplemental_capital:
+    supplemental_capital_allowed: true
+    account_cash_required: false
+    base_single_add_pct_total_assets: 3.0
+    strong_single_add_pct_total_assets: 5.0
+    max_single_add_pct_total_assets: 5.0
+    max_intraday_add_pct_total_assets: 8.0
+    max_stock_position_pct_after_add: 12.0
+    max_added_risk_pct_total_assets: 0.5
+    min_stop_buffer_pct: 3.0
+    min_target_gap_pct: 1.2
 
 universe_filters:
   exclude_st: true

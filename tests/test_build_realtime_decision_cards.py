@@ -511,6 +511,42 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
             "组合预算阻断",
         )
 
+    def test_intraday_capital_budget_uses_profile_config(self) -> None:
+        codes = ["600000", "600001"]
+        items = []
+        for code in codes:
+            item = intraday_item(code)
+            item["position"]["shares"] = 100
+            item["position"]["market_value"] = 1000.0
+            item["position"]["live_position_pct"] = 2.0
+            items.append(item)
+        portfolio = {"positions": [portfolio_result(code)["positions"][0] for code in codes]}
+        t_doc = {"items": [t_result(code, conclusion="positive_t_candidate")["items"][0] for code in codes]}
+        technical_doc = {"items": [bullish_technical_doc(code)["items"][0] for code in codes]}
+        minute_doc = {}
+        for code in codes:
+            minute_doc.update(positive_minute_bars(code))
+
+        report = build_report(
+            {"total_assets": 50000.0, "items": items},
+            portfolio,
+            t_doc,
+            None,
+            None,
+            None,
+            None,
+            technical_doc,
+            minute_doc,
+            generated_at=datetime(2026, 7, 16, 9, 35, 0),
+            investment_profile={"t_trading": {"supplemental_capital": {"max_intraday_add_pct_total_assets": 4.0}}},
+        )
+
+        cards = {card["code"]: card for card in report["cards"]}
+
+        self.assertEqual(report["intraday_capital_usage"]["max_intraday_add_amount"], 2000.0)
+        self.assertEqual(cards["600000"]["capital_plan"]["portfolio_capital_link"]["status"], "allocated")
+        self.assertEqual(cards["600001"]["capital_plan"]["portfolio_capital_link"]["status"], "portfolio_budget_blocked")
+
     def test_low_liquidity_blocks_positive_t_manual_candidate(self) -> None:
         item = intraday_item()
         item["position"]["shares"] = 100
