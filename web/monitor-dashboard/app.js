@@ -1135,6 +1135,28 @@ function renderSessionPreflightPanel() {
   }) || "";
 }
 
+function setMonitorMessage(message) {
+  document.querySelector("#monitorStatus").textContent = message;
+}
+
+async function copyTextWithFeedback(text, button, doneLabel = "已复制") {
+  if (!text) {
+    setMonitorMessage("暂无可复制命令。");
+    return;
+  }
+  try {
+    await navigator.clipboard?.writeText(text);
+    const original = button?.textContent;
+    if (button) {
+      button.textContent = doneLabel;
+      setTimeout(() => { button.textContent = original; }, 1200);
+    }
+    setMonitorMessage("刷新命令已复制。");
+  } catch (_error) {
+    setMonitorMessage("复制失败，请手动复制刷新提醒里的命令。");
+  }
+}
+
 function tableRow(item) {
   const lag = item.quote.quote_lag_seconds;
   const displayState = displayStateFor(item);
@@ -3497,14 +3519,29 @@ document.querySelector("#focusBar").addEventListener("click", event => {
   if (!event.target.closest("[data-clear-blocker-focus]")) return;
   clearBlockerFocus();
 });
+document.querySelector("#sessionPreflightMount").addEventListener("click", event => {
+  const button = event.target.closest("[data-preflight-action]");
+  if (!button) return;
+  const action = button.dataset.preflightAction;
+  if (action === "copy_command") {
+    void copyTextWithFeedback(button.dataset.preflightValue || state.refreshCheck?.refresh_command?.shell || "", button);
+    return;
+  }
+  if (action === "open_events") {
+    activateView("events");
+    document.querySelector("#eventList")?.scrollIntoView({behavior: "smooth", block: "start"});
+    return;
+  }
+  if (action === "status") {
+    setMonitorMessage(button.dataset.preflightValue || button.textContent || "请按自检提示处理。");
+  }
+});
 document.querySelector("#closeDetail").addEventListener("click", closeDetail);
 document.querySelector("#scrim").addEventListener("click", closeDetail);
 document.querySelector("#refreshAlert").addEventListener("click", event => {
   const button = event.target.closest(".copy-refresh");
   if (!button) return;
-  navigator.clipboard?.writeText(button.dataset.command || "");
-  button.textContent = "已复制";
-  setTimeout(() => { button.textContent = "复制"; }, 1200);
+  void copyTextWithFeedback(button.dataset.command || "", button);
 });
 document.querySelector("#urgentTriggerAlert").addEventListener("click", async event => {
   const openButton = event.target.closest("[data-urgent-open]");

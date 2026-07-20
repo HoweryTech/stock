@@ -204,6 +204,20 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 .session-check strong { min-width: 0; font-size: 14px; line-height: 1.25; }
 .session-check span { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session-check p { margin: 6px 0 0; color: var(--text); line-height: 1.4; }
+.session-check-action {
+  margin-top: 8px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+  font-weight: 750;
+  cursor: pointer;
+}
+.session-check-block .session-check-action { color: var(--red); border-color: rgba(192, 57, 43, 0.32); }
+.session-check-warn .session-check-action { color: var(--amber); border-color: rgba(188, 122, 0, 0.32); }
+.session-check-wait .session-check-action { color: var(--blue); border-color: rgba(23, 92, 211, 0.28); }
 .blocker-summary {
   margin: -2px 0 14px;
   border: 1px solid var(--line);
