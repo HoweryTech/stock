@@ -21,6 +21,14 @@
     return `data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}"`;
   }
 
+  function primaryActionCode(primary) {
+    return primary?.item?.code || "";
+  }
+
+  function primaryActionTarget(primary) {
+    return primary?.item?.target || "decision-card";
+  }
+
   function classify({cards = [], triggerReviewQueue = [], report = {}} = {}) {
     const queue = activeQueue(triggerReviewQueue);
     const expired = queue.filter(item => item.expired);
@@ -189,5 +197,63 @@
     </section>`;
   }
 
-  window.IntradayReviewDesk = {classify, renderIntradayReviewDesk};
+  function shouldShowGlobalBar(primary) {
+    return ["block", "risk"].includes(primary?.tone) && primary?.target !== "positions";
+  }
+
+  function notificationKey(input) {
+    const desk = classify(input);
+    if (!shouldShowGlobalBar(desk.primary)) return "";
+    const item = desk.primary.item || {};
+    return [
+      desk.primary.tone,
+      desk.primary.target,
+      item.code || "",
+      item.active_path || "",
+      item.event_generated_at || "",
+      desk.primary.title,
+    ].join("|");
+  }
+
+  function notificationBody(input) {
+    const desk = classify(input);
+    if (!shouldShowGlobalBar(desk.primary)) return "";
+    return `${desk.primary.headline} ${desk.primary.action}`.trim();
+  }
+
+  function renderGlobalReviewBar(input) {
+    const desk = classify(input);
+    const primary = desk.primary;
+    if (!shouldShowGlobalBar(primary)) return "";
+    const notifyButton = typeof Notification !== "undefined" && Notification.permission === "default"
+      ? `<button class="secondary-action" type="button" data-enable-review-notifications>启用桌面通知</button>`
+      : "";
+    const primaryData = primary.target === "expired" && primary.item
+      ? `data-review-desk-action="refresh_item" ${reviewAttrs(primary.item)}`
+      : primary.target === "refresh"
+        ? `data-review-desk-action="refresh_alert"`
+        : primary.item
+          ? `data-review-desk-action="open_detail" data-review-code="${escapeHtml(primaryActionCode(primary))}" data-review-target="${escapeHtml(primaryActionTarget(primary))}"`
+          : `data-review-desk-action="events"`;
+    const label = primary.target === "expired" ? "刷新后看详情" : primary.target === "refresh" ? "看刷新提醒" : "打开详情";
+    return `<section class="global-review-bar global-review-${escapeHtml(primary.tone)}" aria-label="盘中必须处理">
+      <div>
+        <span>盘中必须处理</span>
+        <strong>${escapeHtml(primary.title)}</strong>
+        <p>${escapeHtml(primary.action)}</p>
+      </div>
+      <div class="global-review-actions">
+        <button class="primary-action" type="button" ${primaryData}>${escapeHtml(label)}</button>
+        ${notifyButton}
+      </div>
+    </section>`;
+  }
+
+  window.IntradayReviewDesk = {
+    classify,
+    notificationBody,
+    notificationKey,
+    renderGlobalReviewBar,
+    renderIntradayReviewDesk,
+  };
 }());

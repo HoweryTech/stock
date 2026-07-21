@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>持仓监控台</title>
-  <link rel="stylesheet" href="/styles.css?v=20260717-stop-reference">
+  <link rel="stylesheet" href="/styles.css?v=20260722-review-alert">
 </head>
 <body>
   <header class="app-header">
@@ -23,6 +23,7 @@
     <button class="tab active" data-view="positions">持仓</button>
     <button class="tab" data-view="events">事件</button>
   </nav>
+  <section id="globalReviewBar" hidden></section>
 
   <main>
     <section class="urgent-trigger-alert" id="urgentTriggerAlert" hidden></section>
@@ -113,10 +114,10 @@
   <div class="scrim" id="scrim" hidden></div>
 
   <script src="/replay.js?v=20260718-replay" defer></script>
-  <script src="/review.js?v=20260721-review" defer></script>
+  <script src="/review.js?v=20260722-review-alert" defer></script>
   <script src="/preflight.js?v=20260720-preflight" defer></script>
   <script src="/blockers.js?v=20260719-blockers" defer></script>
   <script src="/capital.js?v=20260719-capital" defer></script>
-  <script src="/app.js?v=20260720-preflight" defer></script>
+  <script src="/app.js?v=20260722-review-alert" defer></script>
 </body>
 </html>

@@ -26,6 +26,7 @@ const state = {
   lastTriggerRefresh: null,
   pendingDetailOpen: null,
   lastUrgentNotificationKey: "",
+  lastReviewDeskNotificationKey: "",
   originalTitle: document.title,
 };
 
@@ -1084,14 +1085,84 @@ function renderBlockerSummaryPanel() {
   }) || "";
 }
 
-function renderIntradayReviewDesk() {
-  const container = document.querySelector("#intradayReviewMount");
-  if (!container) return;
-  container.innerHTML = window.IntradayReviewDesk?.renderIntradayReviewDesk({
+function intradayReviewInput() {
+  return {
     cards: [...state.decisionCards.values()],
     triggerReviewQueue: state.triggerReviewQueue,
     report: state.decisionReport,
-  }) || "";
+  };
+}
+
+function notifyIntradayReviewDesk(input) {
+  const review = window.IntradayReviewDesk;
+  const key = review?.notificationKey?.(input) || "";
+  if (!key) {
+    state.lastReviewDeskNotificationKey = "";
+    return;
+  }
+  if (key === state.lastReviewDeskNotificationKey) return;
+  state.lastReviewDeskNotificationKey = key;
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    new Notification("盘中必须处理", {
+      body: review.notificationBody(input) || "有新的盘中待办需要处理。",
+      tag: `review-desk-${key}`,
+      renotify: true,
+    });
+  } catch (_) {
+    // Browser notification can fail in restricted contexts; the in-page bar remains the source of truth.
+  }
+}
+
+function renderGlobalReviewBar(input) {
+  const container = document.querySelector("#globalReviewBar");
+  if (!container) return;
+  const html = window.IntradayReviewDesk?.renderGlobalReviewBar(input) || "";
+  container.hidden = !html;
+  container.innerHTML = html;
+}
+
+function renderIntradayReviewDesk(input = intradayReviewInput()) {
+  const container = document.querySelector("#intradayReviewMount");
+  if (!container) return;
+  container.innerHTML = window.IntradayReviewDesk?.renderIntradayReviewDesk(input) || "";
+}
+
+async function requestNotificationPermission(button) {
+  if (!("Notification" in window)) return;
+  const permission = await Notification.requestPermission();
+  button.textContent = permission === "granted" ? "桌面通知已启用" : "通知未启用";
+  if (permission === "granted") {
+    state.lastUrgentNotificationKey = "";
+    state.lastReviewDeskNotificationKey = "";
+  }
+  renderUrgentTriggerAlert();
+  const input = intradayReviewInput();
+  notifyIntradayReviewDesk(input);
+  renderGlobalReviewBar(input);
+}
+
+function handleReviewDeskAction(button) {
+  const action = button.dataset.reviewDeskAction;
+  if (action === "refresh_item") {
+    const item = triggerReviewItemFromDataset(button.dataset);
+    void refreshTriggerReviewItem(item, button);
+    return true;
+  }
+  if (action === "open_detail") {
+    openDetail(button.dataset.reviewCode, {target: button.dataset.reviewTarget || "decision-card"});
+    return true;
+  }
+  if (action === "refresh_alert") {
+    document.querySelector("#refreshAlert")?.scrollIntoView({behavior: "smooth", block: "center"});
+    return true;
+  }
+  if (action === "events") {
+    activateView("events");
+    document.querySelector("#eventList")?.scrollIntoView({behavior: "smooth", block: "start"});
+    return true;
+  }
+  return false;
 }
 
 function activateView(viewName) {
@@ -3831,7 +3902,10 @@ async function loadData() {
     updateHeader(status);
     renderUrgentTriggerAlert();
     renderRefreshAlert();
-    renderIntradayReviewDesk();
+    const reviewInput = intradayReviewInput();
+    renderGlobalReviewBar(reviewInput);
+    notifyIntradayReviewDesk(reviewInput);
+    renderIntradayReviewDesk(reviewInput);
     renderSessionPreflightPanel();
     renderSummary();
     renderStrategyHealth();
@@ -3900,24 +3974,16 @@ document.querySelector("#refreshAlert").addEventListener("click", event => {
 document.querySelector("#intradayReviewMount").addEventListener("click", event => {
   const button = event.target.closest("[data-review-desk-action]");
   if (!button) return;
-  const action = button.dataset.reviewDeskAction;
-  if (action === "refresh_item") {
-    const item = triggerReviewItemFromDataset(button.dataset);
-    void refreshTriggerReviewItem(item, button);
+  handleReviewDeskAction(button);
+});
+document.querySelector("#globalReviewBar").addEventListener("click", event => {
+  const actionButton = event.target.closest("[data-review-desk-action]");
+  if (actionButton) {
+    handleReviewDeskAction(actionButton);
     return;
   }
-  if (action === "open_detail") {
-    openDetail(button.dataset.reviewCode, {target: button.dataset.reviewTarget || "decision-card"});
-    return;
-  }
-  if (action === "refresh_alert") {
-    document.querySelector("#refreshAlert")?.scrollIntoView({behavior: "smooth", block: "center"});
-    return;
-  }
-  if (action === "events") {
-    activateView("events");
-    document.querySelector("#eventList")?.scrollIntoView({behavior: "smooth", block: "start"});
-  }
+  const notifyButton = event.target.closest("[data-enable-review-notifications]");
+  if (notifyButton) void requestNotificationPermission(notifyButton);
 });
 document.querySelector("#urgentTriggerAlert").addEventListener("click", async event => {
   const openButton = event.target.closest("[data-urgent-open]");
@@ -3926,11 +3992,7 @@ document.querySelector("#urgentTriggerAlert").addEventListener("click", async ev
     return;
   }
   const notifyButton = event.target.closest("[data-enable-notifications]");
-  if (notifyButton && "Notification" in window) {
-    const permission = await Notification.requestPermission();
-    notifyButton.textContent = permission === "granted" ? "桌面通知已启用" : "通知未启用";
-    renderUrgentTriggerAlert();
-  }
+  if (notifyButton) await requestNotificationPermission(notifyButton);
 });
 document.querySelector("#priorityQueue").addEventListener("click", event => {
   const item = event.target.closest("[data-queue-code]");

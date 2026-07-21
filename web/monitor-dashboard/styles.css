@@ -70,6 +70,26 @@ button { cursor: pointer; }
 }
 .tab.active { color: var(--text); border-bottom-color: var(--blue); font-weight: 600; }
 
+.global-review-bar {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  min-height: 54px;
+  padding: 9px 24px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 8px 18px rgba(17, 24, 32, 0.08);
+}
+.global-review-block { background: #fff3f1; border-left: 5px solid var(--red); }
+.global-review-risk { background: var(--red-bg); border-left: 5px solid var(--red); }
+.global-review-bar span { display: block; margin-bottom: 2px; color: var(--red); font-size: 11px; font-weight: 800; }
+.global-review-bar strong { display: block; font-size: 16px; line-height: 1.25; }
+.global-review-bar p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.global-review-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; flex: 0 0 auto; }
+
 main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 
 .urgent-trigger-alert {
@@ -1339,6 +1359,9 @@ th:nth-child(8) { width: 100px; }
   .app-header h1 { font-size: 18px; }
   .latency { display: none; }
   .tabs { padding: 0 14px; }
+  .global-review-bar { align-items: stretch; flex-direction: column; padding: 10px 14px; }
+  .global-review-actions { justify-content: flex-start; }
+  .global-review-actions button { flex: 1 1 auto; }
   main { padding: 12px 12px 28px; }
   .summary-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .review-desk { grid-template-columns: 1fr; }
