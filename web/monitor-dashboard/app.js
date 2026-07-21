@@ -1084,6 +1084,16 @@ function renderBlockerSummaryPanel() {
   }) || "";
 }
 
+function renderIntradayReviewDesk() {
+  const container = document.querySelector("#intradayReviewMount");
+  if (!container) return;
+  container.innerHTML = window.IntradayReviewDesk?.renderIntradayReviewDesk({
+    cards: [...state.decisionCards.values()],
+    triggerReviewQueue: state.triggerReviewQueue,
+    report: state.decisionReport,
+  }) || "";
+}
+
 function activateView(viewName) {
   document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item.dataset.view === viewName));
   document.querySelectorAll(".view").forEach(view => view.classList.remove("active"));
@@ -3821,6 +3831,7 @@ async function loadData() {
     updateHeader(status);
     renderUrgentTriggerAlert();
     renderRefreshAlert();
+    renderIntradayReviewDesk();
     renderSessionPreflightPanel();
     renderSummary();
     renderStrategyHealth();
@@ -3885,6 +3896,28 @@ document.querySelector("#refreshAlert").addEventListener("click", event => {
   const button = event.target.closest(".copy-refresh");
   if (!button) return;
   void copyTextWithFeedback(button.dataset.command || "", button);
+});
+document.querySelector("#intradayReviewMount").addEventListener("click", event => {
+  const button = event.target.closest("[data-review-desk-action]");
+  if (!button) return;
+  const action = button.dataset.reviewDeskAction;
+  if (action === "refresh_item") {
+    const item = triggerReviewItemFromDataset(button.dataset);
+    void refreshTriggerReviewItem(item, button);
+    return;
+  }
+  if (action === "open_detail") {
+    openDetail(button.dataset.reviewCode, {target: button.dataset.reviewTarget || "decision-card"});
+    return;
+  }
+  if (action === "refresh_alert") {
+    document.querySelector("#refreshAlert")?.scrollIntoView({behavior: "smooth", block: "center"});
+    return;
+  }
+  if (action === "events") {
+    activateView("events");
+    document.querySelector("#eventList")?.scrollIntoView({behavior: "smooth", block: "start"});
+  }
 });
 document.querySelector("#urgentTriggerAlert").addEventListener("click", async event => {
   const openButton = event.target.closest("[data-urgent-open]");
