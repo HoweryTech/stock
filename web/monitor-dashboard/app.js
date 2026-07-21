@@ -3269,6 +3269,83 @@ function closeDetail() {
   document.querySelector("#scrim").hidden = true;
 }
 
+function triggerQueueGroupFor(item) {
+  const text = `${item.title || ""} ${item.after_plan_type || ""} ${item.active_path || ""} ${item.after_label || ""}`;
+  const riskAction = item.status === "action_required"
+    && !item.expired
+    && (
+      ["hard_exit", "risk_reduce", "risk_exit", "stop_loss"].includes(item.after_plan_type)
+      || ["hard_exit", "risk_reduce", "risk_exit", "stop_loss", "price_action_ready"].includes(item.active_path)
+      || /硬退出|止损|减仓|退出风险/.test(text)
+    );
+  if (riskAction) {
+    return {
+      key: "risk-action",
+      title: "已触发风控",
+      summary: "先核对当前价、执行价区间和数量；需要处理时打开详情执行计划。",
+      rank: 0,
+    };
+  }
+  if (item.expired) {
+    return {
+      key: "expired",
+      title: "过期需刷新",
+      summary: "旧触发计划已失效，先刷新完整日内决策链，再看新步骤。",
+      rank: 1,
+    };
+  }
+  if (item.status === "action_required") {
+    return {
+      key: "action",
+      title: "已触发待处理",
+      summary: "先打开详情核对执行前检查，不从列表直接下单。",
+      rank: 2,
+    };
+  }
+  if (item.status === "review_required") {
+    return {
+      key: "review",
+      title: "需要复核",
+      summary: "先看复核原因，未通过前不当成可执行计划。",
+      rank: 3,
+    };
+  }
+  return {
+    key: "watch",
+    title: "只观察",
+    summary: "仅保留盘中背景，不优先处理。",
+    rank: 4,
+  };
+}
+
+function compareTriggerQueueItems(left, right) {
+  const leftGroup = triggerQueueGroupFor(left);
+  const rightGroup = triggerQueueGroupFor(right);
+  if (leftGroup.rank !== rightGroup.rank) return leftGroup.rank - rightGroup.rank;
+  const leftPriority = Number(left.priority ?? 999);
+  const rightPriority = Number(right.priority ?? 999);
+  if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+  const leftRemaining = left.remaining_seconds == null ? 999999 : Number(left.remaining_seconds);
+  const rightRemaining = right.remaining_seconds == null ? 999999 : Number(right.remaining_seconds);
+  if (leftRemaining !== rightRemaining) return leftRemaining - rightRemaining;
+  return String(right.event_generated_at || right.decision_generated_at || "").localeCompare(String(left.event_generated_at || left.decision_generated_at || ""));
+}
+
+function renderEventGroup({key, title, summary, items, bodyHtml}) {
+  const count = items?.length ?? 0;
+  if (!count && !bodyHtml) return "";
+  return `<section class="event-group event-group-${escapeHtml(key)}">
+    <div class="event-group-head">
+      <div>
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(summary || "")}</p>
+      </div>
+      <span>${count}项</span>
+    </div>
+    <div class="event-group-body">${bodyHtml || ""}</div>
+  </section>`;
+}
+
 function renderEvents() {
   const container = document.querySelector("#eventList");
   const triggerAlerts = liveIntradayTriggerAlerts();
@@ -3280,7 +3357,11 @@ function renderEvents() {
     container.innerHTML = '<div class="empty-state">暂无状态变化事件</div>';
     return;
   }
-  const triggerQueueHtml = triggerQueue.map(item => {
+  const triggerQueueCards = triggerQueue
+    .slice()
+    .sort(compareTriggerQueueItems)
+    .map(item => {
+      const group = triggerQueueGroupFor(item);
     const statusClass = item.expired ? "expired" : item.status === "action_required" ? "action" : item.status === "review_required" ? "watch" : "observe";
     const remainingText = item.remaining_seconds == null
       ? ""
@@ -3296,7 +3377,7 @@ function renderEvents() {
       item.after_shares ? `${item.after_shares}股` : "",
       item.after_price || "",
     ].filter(Boolean);
-    return `<article class="event-item event-trigger-queue event-clickable" tabindex="0" data-event-code="${escapeHtml(item.code || "")}" data-event-target="${escapeHtml(item.target || "decision-card")}">
+    return {group, html: `<article class="event-item event-trigger-queue event-trigger-queue-${escapeHtml(group.key)} event-clickable" tabindex="0" data-event-code="${escapeHtml(item.code || "")}" data-event-target="${escapeHtml(item.target || "decision-card")}">
       <div class="event-time">${escapeHtml(item.event_generated_at || item.decision_generated_at || "")}</div>
       <div class="event-title">${escapeHtml(item.code || "")} ${escapeHtml(item.name || "")} · ${escapeHtml(item.title || "触发后复核")}</div>
       <div class="event-action event-action-${escapeHtml(statusClass)}">${escapeHtml(item.status_label || "--")} · ${escapeHtml(item.action_label || "--")}</div>
@@ -3310,7 +3391,18 @@ function renderEvents() {
         <button class="secondary-action" type="button" data-review-status="ignored" data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}">暂不处理</button>
         <button class="primary-action" type="button" data-review-status="handled" data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}">已处理</button>
       </div>
-    </article>`;
+    </article>`};
+  });
+  const groupedTriggerQueueHtml = ["risk-action", "expired", "action", "review", "watch"].map(key => {
+    const cards = triggerQueueCards.filter(card => card.group.key === key);
+    if (!cards.length) return "";
+    return renderEventGroup({
+      key,
+      title: cards[0].group.title,
+      summary: cards[0].group.summary,
+      items: cards,
+      bodyHtml: cards.map(card => card.html).join(""),
+    });
   }).join("");
   const triggerHtml = triggerAlerts.map(alert => {
     const triggerTags = (alert.triggers || []).map(trigger => trigger.condition || trigger.label).filter(Boolean);
@@ -3332,7 +3424,7 @@ function renderEvents() {
       </div>
     </article>`;
   }).join("");
-  const triggerHistoryHtml = triggerHistory.map(event => {
+  const triggerHistoryCards = triggerHistory.map(event => {
     const diffs = event.diffs || [];
     const actionSnapshots = event.trigger_action_snapshots || [];
     const firstDiff = diffs[0] || {};
@@ -3352,7 +3444,7 @@ function renderEvents() {
       ${snapshotItems.length ? `<ol class="event-checklist">${snapshotItems.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : ""}
       ${diffs.length ? `<ol class="event-checklist">${diffs.slice(0, 3).map(diff => `<li>${escapeHtml(diff.message || "")}</li>`).join("")}</ol>` : `<p class="secondary">已刷新决策链，等待下一轮触发。</p>`}
     </article>`;
-  }).join("");
+  });
   const alertHtml = technicalAlerts.map(alert => {
     const conditions = alert.matched_conditions || [];
     const conditionText = conditions.map(condition => `${condition.label || condition.code}: ${condition.current ?? "--"} / ${condition.target || "--"}`).join("；");
@@ -3388,7 +3480,42 @@ function renderEvents() {
     const tags = Object.entries(event.signature || {}).map(([code, info]) => `<span class="event-tag">${code} · ${labels[info.state] || info.state}${info.reverse_t_price_alert ? " · 反T价格提醒" : ""}</span>`).join("");
     return `<article class="event-item"><div class="event-time">${escapeHtml(event.generated_at)}</div><div class="event-changes">${tags}</div></article>`;
   }).join("");
-  container.innerHTML = triggerQueueHtml + triggerHtml + triggerHistoryHtml + reviewHtml + alertHtml + monitorHtml;
+  const liveAlertHtml = triggerHtml ? renderEventGroup({
+    key: "live-alert",
+    title: "实时触发提醒",
+    summary: "价格或路径正在触发，优先打开详情确认当前计划。",
+    items: triggerAlerts,
+    bodyHtml: triggerHtml,
+  }) : "";
+  const reviewGroupHtml = reviewHtml ? renderEventGroup({
+    key: "auto-review",
+    title: "自动复核提醒",
+    summary: "技术候选或复核阻断，未通过前不直接执行。",
+    items: reviewAlerts,
+    bodyHtml: reviewHtml,
+  }) : "";
+  const technicalGroupHtml = alertHtml ? renderEventGroup({
+    key: "technical",
+    title: "技术接近解锁",
+    summary: "只表示接近阈值，仍需详情页门禁通过。",
+    items: technicalAlerts,
+    bodyHtml: alertHtml,
+  }) : "";
+  const historyGroupHtml = triggerHistoryCards.length ? renderEventGroup({
+    key: "history",
+    title: "自动刷新历史",
+    summary: "用于回看触发后系统如何刷新，不是当前优先待办。",
+    items: triggerHistoryCards,
+    bodyHtml: triggerHistoryCards.join(""),
+  }) : "";
+  const monitorGroupHtml = monitorHtml ? renderEventGroup({
+    key: "monitor",
+    title: "普通状态变化",
+    summary: "记录行情和状态变化，优先级低于触发队列。",
+    items: state.events,
+    bodyHtml: monitorHtml,
+  }) : "";
+  container.innerHTML = groupedTriggerQueueHtml + liveAlertHtml + reviewGroupHtml + technicalGroupHtml + historyGroupHtml + monitorGroupHtml;
 }
 
 async function updateTriggerReviewStatus(button) {
