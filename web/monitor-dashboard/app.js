@@ -517,6 +517,79 @@ async function maybeRefreshTriggeredDecisionChain() {
   }
 }
 
+async function refreshTriggerReviewItem(item, button = null) {
+  if (!item || state.triggerRefreshInFlight) return;
+  const original = button?.textContent || "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "刷新中...";
+  }
+  state.triggerRefreshInFlight = true;
+  state.lastTriggerRefresh = {
+    status: "running",
+    started_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+    trigger_count: 1,
+    trigger_summary: `${item.name || item.code || "--"} ${item.active_path || "--"}`,
+    message: "正在刷新这条触发后的完整决策链。",
+  };
+  renderRefreshAlert();
+  document.querySelector("#monitorStatus").textContent = "正在刷新这条触发后的决策链...";
+  try {
+    const response = await fetch("/api/intraday-trigger-refresh", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        snapshot_generated_at: state.snapshot?.generated_at || "",
+        decision_generated_at: state.decisionReport?.generated_at || item.decision_generated_at || "",
+        triggers: [{
+          code: item.code,
+          name: item.name,
+          active_path: item.active_path,
+          current_price: item.current_price ?? item.confirmed_price,
+          title: item.title,
+          confirmation: {
+            status: "confirmed",
+            confirmed_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+            confirmed_price: item.current_price ?? item.confirmed_price,
+          },
+        }],
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    state.lastTriggerRefresh = {
+      status: "success",
+      started_at: state.lastTriggerRefresh.started_at,
+      finished_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+      trigger_count: 1,
+      trigger_summary: `${item.name || item.code || "--"} ${item.active_path || "--"}`,
+      generated_at: result.generated_at || "",
+      state_counts: result.state_counts || {},
+      diffs: result.diffs || [],
+      trigger_action_snapshots: result.trigger_action_snapshots || [],
+      message: "已刷新这条触发后的完整决策链。",
+    };
+    await loadData();
+  } catch (error) {
+    state.lastTriggerRefresh = {
+      status: "failed",
+      started_at: state.lastTriggerRefresh?.started_at || new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+      finished_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+      trigger_count: 1,
+      trigger_summary: `${item.name || item.code || "--"} ${item.active_path || "--"}`,
+      message: `触发后刷新失败：${error.message}`,
+    };
+    renderRefreshAlert();
+    document.querySelector("#monitorStatus").textContent = `触发后刷新失败：${error.message}`;
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  } finally {
+    state.triggerRefreshInFlight = false;
+  }
+}
+
 function notifyUrgentTriggers(alerts) {
   const key = triggerRefreshKey(alerts);
   if (!key || key === state.lastUrgentNotificationKey) return;
@@ -1509,6 +1582,17 @@ function matchingTriggerReviewItem(code, activePath = "") {
     if (activePath && item.active_path !== activePath) return false;
     return true;
   }) || null;
+}
+
+function triggerReviewItemFromDataset(dataset) {
+  const code = dataset.reviewCode || dataset.triggerCode || "";
+  const activePath = dataset.reviewPath || dataset.triggerPath || "";
+  const eventGeneratedAt = dataset.reviewEvent || dataset.triggerEvent || "";
+  return (state.triggerReviewQueue || []).find(item =>
+    String(item.code || "") === String(code)
+    && String(item.active_path || "") === String(activePath)
+    && String(item.event_generated_at || "") === String(eventGeneratedAt)
+  ) || matchingTriggerReviewItem(code, activePath);
 }
 
 function priceWithinZone(price, zone) {
@@ -3452,19 +3536,38 @@ function renderEvents() {
       item.after_shares ? `${item.after_shares}股` : "",
       item.after_price || "",
     ].filter(Boolean);
+    const reviewAttrs = `data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}"`;
+    const queueInstruction = item.expired
+      ? "现在不要按旧价格执行，先刷新完整决策链，再打开新的详情结论。"
+      : item.status === "action_required"
+        ? "现在先打开详情，按唯一主指令、执行前检查和人工计划处理。"
+        : item.status === "review_required"
+          ? "现在先打开详情看阻断或复核原因，未通过前不下单。"
+          : "当前只观察；如果确认无需继续提醒，可以标记暂不处理。";
+    const primaryQueueAction = item.expired
+      ? `<button class="primary-action" type="button" data-trigger-refresh ${reviewAttrs}>刷新后再看</button>`
+      : `<button class="primary-action" type="button" data-trigger-open data-trigger-code="${escapeHtml(item.code || "")}" data-trigger-target="${escapeHtml(item.target || "decision-card")}">打开详情处理</button>`;
+    const resultActions = item.expired
+      ? `<button class="secondary-action" type="button" data-review-status="ignored" ${reviewAttrs}>确认不按旧计划处理</button>`
+      : `<button class="secondary-action" type="button" data-review-status="viewed" ${reviewAttrs}>只标记已查看</button>
+        <button class="secondary-action" type="button" data-review-status="ignored" ${reviewAttrs}>本轮暂不处理</button>
+        <button class="secondary-action" type="button" data-review-status="handled" ${reviewAttrs}>已按计划处理</button>`;
     return {group, html: `<article class="event-item event-trigger-queue event-trigger-queue-${escapeHtml(group.key)} event-clickable" tabindex="0" data-event-code="${escapeHtml(item.code || "")}" data-event-target="${escapeHtml(item.target || "decision-card")}">
       <div class="event-time">${escapeHtml(item.event_generated_at || item.decision_generated_at || "")}</div>
       <div class="event-title">${escapeHtml(item.code || "")} ${escapeHtml(item.name || "")} · ${escapeHtml(item.title || "触发后复核")}</div>
       <div class="event-action event-action-${escapeHtml(statusClass)}">${escapeHtml(item.status_label || "--")} · ${escapeHtml(item.action_label || "--")}</div>
+      <div class="event-next-step">
+        <span>现在该做什么</span>
+        <strong>${escapeHtml(queueInstruction)}</strong>
+      </div>
       <p>${escapeHtml(item.expired ? item.expiry_action || "该计划已过期，先刷新后再处理。" : item.after_label || "查看刷新后的执行计划和阻断原因。")}</p>
       <div class="event-changes">
         <span class="event-tag">${escapeHtml(item.review_resolution_label || "待处理")}</span>
         ${details.map(detail => `<span class="event-tag">${escapeHtml(detail)}</span>`).join("")}
       </div>
       <div class="event-actions">
-        <button class="secondary-action" type="button" data-review-status="viewed" data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}">已查看</button>
-        <button class="secondary-action" type="button" data-review-status="ignored" data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}">暂不处理</button>
-        <button class="primary-action" type="button" data-review-status="handled" data-review-code="${escapeHtml(item.code || "")}" data-review-path="${escapeHtml(item.active_path || "")}" data-review-event="${escapeHtml(item.event_generated_at || "")}">已处理</button>
+        ${primaryQueueAction}
+        ${resultActions}
       </div>
     </article>`};
   });
@@ -3594,11 +3697,18 @@ function renderEvents() {
 }
 
 async function updateTriggerReviewStatus(button) {
+  const resolution = button.dataset.reviewStatus || "";
+  const note = {
+    viewed: "用户已查看详情或队列项，继续保留待办观察。",
+    handled: "用户确认本轮触发已按计划处理，不再重复提醒。",
+    ignored: "用户确认本轮暂不处理或不按过期旧计划处理。",
+  }[resolution] || "";
   const payload = {
     code: button.dataset.reviewCode || "",
     active_path: button.dataset.reviewPath || "",
     event_generated_at: button.dataset.reviewEvent || "",
-    resolution: button.dataset.reviewStatus || "",
+    resolution,
+    note,
   };
   const original = button.textContent;
   button.disabled = true;
@@ -3764,6 +3874,19 @@ document.querySelector("#priorityQueue").addEventListener("click", event => {
   openDetail(item.dataset.queueCode, { target: item.dataset.queueTarget });
 });
 document.querySelector("#eventList").addEventListener("click", event => {
+  const refreshTriggerButton = event.target.closest("[data-trigger-refresh]");
+  if (refreshTriggerButton) {
+    event.stopPropagation();
+    const item = triggerReviewItemFromDataset(refreshTriggerButton.dataset);
+    void refreshTriggerReviewItem(item, refreshTriggerButton);
+    return;
+  }
+  const openTriggerButton = event.target.closest("[data-trigger-open]");
+  if (openTriggerButton) {
+    event.stopPropagation();
+    openDetail(openTriggerButton.dataset.triggerCode, { target: openTriggerButton.dataset.triggerTarget });
+    return;
+  }
   const reviewButton = event.target.closest("[data-review-status]");
   if (reviewButton) {
     event.stopPropagation();

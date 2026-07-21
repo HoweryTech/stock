@@ -1225,8 +1225,24 @@ th:nth-child(8) { width: 100px; }
 .event-action-watch { color: var(--amber); background: var(--amber-bg); }
 .event-action-observe { color: var(--muted); background: #eef1f4; }
 .event-action-expired { color: var(--red); background: var(--red-bg); }
+.event-next-step {
+  margin: 7px 0 8px;
+  padding: 9px 10px;
+  border: 1px solid rgba(23, 92, 211, 0.18);
+  border-left: 4px solid var(--blue);
+  border-radius: 6px;
+  background: var(--blue-bg);
+}
+.event-trigger-queue-expired .event-next-step {
+  border-color: rgba(192, 57, 43, 0.2);
+  border-left-color: var(--red);
+  background: var(--red-bg);
+}
+.event-next-step span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; font-weight: 800; }
+.event-next-step strong { display: block; line-height: 1.42; }
 .event-changes { display: flex; flex-wrap: wrap; gap: 6px; }
 .event-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.event-actions .primary-action { flex: 1 1 150px; }
 .event-tag { padding: 3px 7px; border-radius: 3px; background: #eef1f4; font-size: 12px; }
 .event-checklist { margin: 8px 0 0; padding-left: 18px; line-height: 1.55; color: var(--muted); }
 .preflight-summary { margin-bottom: 10px; padding: 10px 11px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px; background: #fbfcfd; }
