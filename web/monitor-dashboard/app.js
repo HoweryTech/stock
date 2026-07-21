@@ -24,6 +24,7 @@ const state = {
   triggerRefreshInFlight: false,
   lastTriggerRefreshKey: "",
   lastTriggerRefresh: null,
+  pendingDetailOpen: null,
   lastUrgentNotificationKey: "",
   originalTitle: document.title,
 };
@@ -438,6 +439,27 @@ function triggerRefreshSummary(alerts) {
     .join("；");
 }
 
+async function postTriggerRefresh(payload, timeoutMs = 90000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch("/api/intraday-trigger-refresh", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    return result;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("刷新超过90秒未返回，请稍后重试或检查服务日志。");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function maybeRefreshTriggeredDecisionChain() {
   const actionable = actionableTriggerAlerts();
   if (!actionable.length) {
@@ -459,35 +481,29 @@ async function maybeRefreshTriggeredDecisionChain() {
   renderRefreshAlert();
   document.querySelector("#monitorStatus").textContent = "触发路径已出现，正在刷新决策链...";
   try {
-    const response = await fetch("/api/intraday-trigger-refresh", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        snapshot_generated_at: state.snapshot?.generated_at || "",
-        decision_generated_at: state.decisionReport?.generated_at || "",
-        triggers: actionable.map(alert => ({
-          code: alert.code,
-          name: alert.name,
-          active_path: alert.active_path,
-          current_price: alert.current_price,
-          title: alert.title,
-          confirmation_status: alert.confirmation_status,
-          confirmation_first_seen_at: alert.confirmation_first_seen_at,
-          confirmation_window_seconds: alert.confirmation_window_seconds,
-          confirmation_elapsed_seconds: alert.confirmation_elapsed_seconds,
-          confirmation: {
-            status: alert.confirmation_status || "confirmed",
-            first_seen_at: alert.confirmation_first_seen_at || "",
-            window_seconds: alert.confirmation_window_seconds || null,
-            elapsed_seconds: alert.confirmation_elapsed_seconds || null,
-            confirmed_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
-            confirmed_price: alert.current_price,
-          },
-        })),
-      }),
+    const result = await postTriggerRefresh({
+      snapshot_generated_at: state.snapshot?.generated_at || "",
+      decision_generated_at: state.decisionReport?.generated_at || "",
+      triggers: actionable.map(alert => ({
+        code: alert.code,
+        name: alert.name,
+        active_path: alert.active_path,
+        current_price: alert.current_price,
+        title: alert.title,
+        confirmation_status: alert.confirmation_status,
+        confirmation_first_seen_at: alert.confirmation_first_seen_at,
+        confirmation_window_seconds: alert.confirmation_window_seconds,
+        confirmation_elapsed_seconds: alert.confirmation_elapsed_seconds,
+        confirmation: {
+          status: alert.confirmation_status || "confirmed",
+          first_seen_at: alert.confirmation_first_seen_at || "",
+          window_seconds: alert.confirmation_window_seconds || null,
+          elapsed_seconds: alert.confirmation_elapsed_seconds || null,
+          confirmed_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+          confirmed_price: alert.current_price,
+        },
+      })),
     });
-    const result = await response.json();
-    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     state.lastTriggerRefresh = {
       status: "success",
       started_at: state.lastTriggerRefresh.started_at,
@@ -535,28 +551,22 @@ async function refreshTriggerReviewItem(item, button = null) {
   renderRefreshAlert();
   document.querySelector("#monitorStatus").textContent = "正在刷新这条触发后的决策链...";
   try {
-    const response = await fetch("/api/intraday-trigger-refresh", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        snapshot_generated_at: state.snapshot?.generated_at || "",
-        decision_generated_at: state.decisionReport?.generated_at || item.decision_generated_at || "",
-        triggers: [{
-          code: item.code,
-          name: item.name,
-          active_path: item.active_path,
-          current_price: item.current_price ?? item.confirmed_price,
-          title: item.title,
-          confirmation: {
-            status: "confirmed",
-            confirmed_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
-            confirmed_price: item.current_price ?? item.confirmed_price,
-          },
-        }],
-      }),
+    const result = await postTriggerRefresh({
+      snapshot_generated_at: state.snapshot?.generated_at || "",
+      decision_generated_at: state.decisionReport?.generated_at || item.decision_generated_at || "",
+      triggers: [{
+        code: item.code,
+        name: item.name,
+        active_path: item.active_path,
+        current_price: item.current_price ?? item.confirmed_price,
+        title: item.title,
+        confirmation: {
+          status: "confirmed",
+          confirmed_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+          confirmed_price: item.current_price ?? item.confirmed_price,
+        },
+      }],
     });
-    const result = await response.json();
-    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     state.lastTriggerRefresh = {
       status: "success",
       started_at: state.lastTriggerRefresh.started_at,
@@ -567,7 +577,12 @@ async function refreshTriggerReviewItem(item, button = null) {
       state_counts: result.state_counts || {},
       diffs: result.diffs || [],
       trigger_action_snapshots: result.trigger_action_snapshots || [],
-      message: "已刷新这条触发后的完整决策链。",
+      message: "已刷新这条触发后的完整决策链，正在打开刷新后的详情。",
+    };
+    state.pendingDetailOpen = {
+      code: item.code,
+      target: "decision-card",
+      reason: "trigger_refresh",
     };
     await loadData();
   } catch (error) {
@@ -1183,6 +1198,7 @@ function renderRefreshAlert() {
       <strong>${escapeHtml(autoRefresh.status === "running" ? "自动刷新中" : autoRefresh.status === "success" ? "最近自动刷新成功" : "最近自动刷新失败")}</strong>
       <span>${escapeHtml(autoRefresh.started_at || "--")}${autoRefresh.finished_at ? ` - ${escapeHtml(autoRefresh.finished_at)}` : ""} · ${escapeHtml(autoRefresh.trigger_summary || "--")} · ${escapeHtml(autoRefresh.trigger_count ?? 0)} 条触发</span>
       ${autoRefresh.generated_at ? `<span>新决策卡：${escapeHtml(String(autoRefresh.generated_at).replace("T", " "))}</span>` : ""}
+      ${autoRefresh.status === "success" && autoRefresh.message ? `<span>${escapeHtml(autoRefresh.message)}</span>` : ""}
       ${(autoRefresh.diffs || []).length ? `<ul>${autoRefresh.diffs.slice(0, 3).map(diff => `<li>${escapeHtml(diff.message || "")}</li>`).join("")}</ul>` : ""}
     </div>` : "";
   alert.hidden = false;
@@ -3237,6 +3253,20 @@ function refreshCurrentDetail() {
   openDetail(state.selectedCode);
 }
 
+function consumePendingDetailOpen() {
+  const pending = state.pendingDetailOpen;
+  if (!pending?.code) return;
+  state.pendingDetailOpen = null;
+  const item = state.snapshot?.items?.find(entry => entry.code === pending.code);
+  if (!item) {
+    document.querySelector("#monitorStatus").textContent = `已刷新，但未找到 ${pending.code} 的最新持仓详情。`;
+    return;
+  }
+  const target = pending.target || detailTargetForCode(pending.code) || "decision-card";
+  openDetail(pending.code, { target });
+  document.querySelector("#monitorStatus").textContent = "已刷新并打开最新详情，请按唯一主指令复核。";
+}
+
 function openDetail(code, options = {}) {
   const item = state.snapshot?.items.find(entry => entry.code === code);
   if (!item) return;
@@ -3800,6 +3830,7 @@ async function loadData() {
     renderPositions();
     renderEvents();
     if (state.selectedCode && state.snapshot?.generated_at !== state.detailRenderedAt) markDetailDirty();
+    consumePendingDetailOpen();
     void maybeRefreshTriggeredDecisionChain();
   } catch (error) {
     document.querySelector("#monitorStatus").textContent = "数据连接失败";
