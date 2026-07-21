@@ -208,6 +208,56 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(report["intraday_trigger_alerts"][0]["active_path"], "price_action_ready")
         self.assertIn("止损减仓", report["intraday_trigger_alerts"][0]["title"])
 
+    def test_open_reverse_t_leg_takes_buyback_review_over_exit_risk(self) -> None:
+        item = intraday_item(reverse_status="buyback_ready")
+        item["quote"]["latest_price"] = 5.79
+        item["position"]["shares"] = 100
+        item["position"]["entry_price"] = 11.88
+        item["reverse_t_plan"].update(
+            {
+                "trade_shares": 100,
+                "sell_zone": [6.17, 6.17],
+                "buyback_max_price": 5.96,
+                "open_reverse_t_leg": {
+                    "id": "MANUAL-OPEN",
+                    "side": "sell",
+                    "shares": 100,
+                    "sell_price": 6.17,
+                    "trade_intent": "reverse_t_open",
+                },
+            }
+        )
+        portfolio = portfolio_result()
+        portfolio["positions"][0]["result"]["calculations"]["current_price"] = 5.79
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 6.04
+        report = build_report(
+            {"items": [item]},
+            portfolio,
+            t_result(blockers=[{"code": "stop_loss_triggered", "message": "已触发止损价。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "pass", "verdict_label": "反T回测通过"}]},
+            {"items": [{"code": "600000", "as_of": "2026-07-16 09:39", "predicted_sell_zone": [6.17, 6.17], "predicted_buyback_max_price": 5.96}]},
+            None,
+            bullish_technical_doc(),
+            positive_minute_bars(),
+            generated_at=datetime(2026, 7, 16, 9, 39, 0),
+        )
+
+        card = report["cards"][0]
+        actions = {row["action"]: row for row in card["price_action_table"]["rows"]}
+
+        self.assertEqual(card["state"], "reverse_buyback_review")
+        self.assertEqual(card["state_label"], "反T回补复核")
+        self.assertEqual(card["decision"]["action"], "review_reverse_t_buyback")
+        self.assertEqual(card["decision"]["action_label"], "反T回补复核：只处理已卖出腿")
+        self.assertEqual(card["manual_execution_plan"]["candidate"], "reverse_t_buyback")
+        self.assertEqual(card["manual_execution_plan"]["trade_intent"], "reverse_t_close")
+        self.assertEqual(card["price_action_table"]["primary_action"]["action"], "反T回补")
+        self.assertEqual(actions["反T回补"]["status"], "ready")
+        self.assertEqual(actions["反T回补"]["shares"], 100)
+        self.assertEqual(actions["止损风险复核"]["status"], "watch")
+        self.assertEqual(report["priority_queue"]["top_items"][0]["category"], "manual_candidate")
+
     def test_stop_loss_with_reversal_uses_rebound_reduce_plan(self) -> None:
         portfolio = portfolio_result()
         portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 10.1

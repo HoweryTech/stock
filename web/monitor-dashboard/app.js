@@ -2254,7 +2254,43 @@ function renderManualExecutionPlan(plan, liveTrigger = null) {
       : liveTrigger.action_label || "按触发路径处理"
     : plan.status === "near_stop_review" ? "等待三路径触发" : plan.status === "wait_rebound_reduce" ? `等 ${priceZone}` : `${plan.side_label || "卖出"} ${plan.shares || "--"} 股`;
   const displayedSteps = liveSteps.length ? liveSteps : steps;
+  const currentPrice = liveTrigger?.current_price ?? plan.current_price;
+  const finalNotSellRisk = plan.stop_loss_price && currentPrice && Number(currentPrice) <= Number(plan.stop_loss_price)
+    ? `现价 ${money(currentPrice)} 已不高于硬止损 ${money(plan.stop_loss_price)}；继续等待会把风险留在账户内，且系统禁止用补仓或做T替代风控。`
+    : plan.reason || "未触发执行价前不交易；若触发后仍不处理，下一轮继续按退出风险复核。";
+  const finalNextStep = plan.post_trade_plan || "成交后立即写入本系统并刷新建议；刷新前不新增买入。";
+  const finalSummaryMetrics = [
+    ["当前价", money(currentPrice)],
+    ["计划价区间", priceZone],
+    ["操作", `${plan.side_label || "卖出"} ${plan.shares || "--"} 股`],
+    ["成交后", plan.post_trade_shares == null ? "刷新后重算" : `剩余 ${num(plan.post_trade_shares, 0)} 股`],
+    ["预计盈亏", plan.estimated_realized_pnl == null ? "--" : money(plan.estimated_realized_pnl)],
+    ["预估费用", fees.total_fees == null ? "--" : money(fees.total_fees)],
+  ];
+  const finalSummaryHtml = isRiskExit ? `
+      <div class="risk-final-summary">
+        <div class="risk-final-head">
+          <span>执行前最终确认</span>
+          <strong>${escapeHtml(riskNow)}</strong>
+          <p>${escapeHtml(riskReason)}</p>
+        </div>
+        <div class="risk-final-grid">
+          ${finalSummaryMetrics.map(([key, value]) => `<dl><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}
+        </div>
+        <div class="risk-final-consequence">
+          <section>
+            <span>如果不执行</span>
+            <p>${escapeHtml(finalNotSellRisk)}</p>
+          </section>
+          <section>
+            <span>成交后计划</span>
+            <p>${escapeHtml(finalNextStep)}</p>
+          </section>
+        </div>
+        ${presetButton}
+      </div>` : "";
   const body = isRiskExit ? `
+      ${finalSummaryHtml}
       <div class="risk-exit-brief">
         <section class="risk-exit-block risk-exit-decision">
           <span>当前结论</span>
@@ -2274,7 +2310,6 @@ function renderManualExecutionPlan(plan, liveTrigger = null) {
       </div>
       <div class="metric-grid">${metrics.map(([key, value]) => `<dl class="metric"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
       ${failures.length ? `<h4>失败条件</h4><ul class="reason-list">${failures.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
-      ${presetButton}
       <p class="secondary">这是人工确认计划，不会自动下单；只有券商软件真实成交后，才在本系统写入成交。</p>`
     : `
       ${plan.reason ? `<div class="action-panel action-exit_risk_review"><div class="action-panel-title">当前结论</div><p>${escapeHtml(plan.reason)}</p></div>` : ""}

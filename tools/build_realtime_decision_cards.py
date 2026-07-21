@@ -22,6 +22,7 @@ STATE_LABELS = {
     "market_wait": "非交易时段，等待行情",
     "data_stale": "行情过期，暂停盘中判断",
     "exit_risk_review": "退出风险优先",
+    "reverse_buyback_review": "反T回补复核",
     "data_insufficient": "数据不足，暂不决策",
     "risk_reduction_review": "仓位风险复核",
     "positive_t_watch": "正T观察候选",
@@ -34,6 +35,7 @@ ACTION_LABELS = {
     "wait_for_market_session": "等待交易时段刷新",
     "pause_intraday_decision": "暂停实时决策，等待行情刷新",
     "create_exit_or_risk_review": "止损风险优先：不补仓、不做T",
+    "review_reverse_t_buyback": "反T回补复核：只处理已卖出腿",
     "complete_data_before_decision": "补齐行情、止损和样本数据",
     "review_position_reduction": "仓位超限：核算减仓",
     "watch_positive_t_only": "只进入正T人工观察",
@@ -365,6 +367,7 @@ def build_decision_mode(data_quality: dict[str, Any] | None) -> dict[str, Any]:
 def decision_priority(state: str) -> int:
     return {
         "exit_risk_review": 90,
+        "reverse_buyback_review": 92,
         "data_stale": 80,
         "market_wait": 75,
         "data_insufficient": 70,
@@ -1856,6 +1859,8 @@ def choose_state(
     trust_level = data_trust_level(data_quality)
     quote_wait = off_session_quote_wait(data_quality)
     states: list[tuple[str, str]] = []
+    reverse_status = str(value_at(intraday, "reverse_t_plan.status") or "")
+    has_open_reverse_leg = bool(value_at(intraday, "reverse_t_plan.open_reverse_t_leg"))
 
     if trust_level == "low":
         states.append(("data_insufficient", "数据可信等级为低，不能验证盘中建议。"))
@@ -1873,6 +1878,8 @@ def choose_state(
         states.append(("data_insufficient", "行情、日线或分钟线数据缺失或样本不足，不能验证盘中建议。"))
     if portfolio_action_codes & {"stop_loss_triggered"} or t_blockers & HARD_T_BLOCKERS:
         states.append(("exit_risk_review", "触发或逼近硬风控，退出风险优先于做T。"))
+    if has_open_reverse_leg or reverse_status in {"buyback_ready", "buyback_wait"}:
+        states.append(("reverse_buyback_review", "已有反T卖出腿，当前优先复核是否按回补价买回。"))
     hard_data_blockers = t_blockers & DATA_BLOCKERS
     if quality_status == LIMITED_HISTORY_STATUS:
         hard_data_blockers.discard("insufficient_daily_bars")
@@ -1883,7 +1890,7 @@ def choose_state(
     if value_at(intraday, "reduction_plan.status") == "actionable":
         states.append(("risk_reduction_review", "实时市值测算显示可复核降仓。"))
     positive_candidate = bool(t_check and t_check.get("conclusion") == "positive_t_candidate")
-    reverse_candidate = value_at(intraday, "reverse_t_plan.status") == "candidate"
+    reverse_candidate = reverse_status == "candidate"
     if positive_candidate:
         states.append(("positive_t_watch", "日线环境进入正T观察候选。"))
     if reverse_candidate:
@@ -2149,6 +2156,13 @@ def build_next_step(state: str, action_backtest: dict[str, Any] | None, levels: 
         if current is not None and near_block is not None and current <= near_block:
             return f"现价 {current:.2f} 已进入做T阻断区 {near_block:.2f} 附近：先做退出/减仓复核，不做T；若跌破止损价立即转止损退出。"
         return "退出风险优先：本轮不买、不做T；先核对止损价、持仓数量和可卖数量，再决定是否生成止损退出或降风险卖出计划。"
+    if state == "reverse_buyback_review":
+        buyback = as_float(levels.get("reverse_t_buyback_max_price"))
+        if buyback is None:
+            buyback = as_float(levels.get("reverse_t_intraday_reference_buyback_max_price"))
+        if buyback is not None:
+            return f"已有开放反T卖出腿；只在 {buyback:.2f} 元及以下买回同等股数。若决定不回补，则把该卖出腿按减仓/退出后果管理。"
+        return "已有开放反T卖出腿；先复核回补上限和卖出数量。若决定不回补，则把该卖出腿按减仓/退出后果管理。"
     if state == "data_insufficient":
         return "本轮不交易；先修复数据阻断，再重新生成实时决策卡。"
     if state == "risk_reduction_review":
@@ -2442,6 +2456,42 @@ def build_manual_execution_plan(
     minute_confirmation: dict[str, Any] | None = None,
     daily_trade_rhythm: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if state == "reverse_buyback_review":
+        reverse_plan = intraday.get("reverse_t_plan") or {}
+        open_leg = reverse_plan.get("open_reverse_t_leg") or {}
+        buyback_max = as_float(reverse_plan.get("buyback_max_price") or levels.get("reverse_t_buyback_max_price"))
+        current = as_float(levels.get("current_price"))
+        shares = int(as_float(open_leg.get("shares"), 0.0) or reverse_plan.get("trade_shares") or 0)
+        sell_price = as_float(open_leg.get("sell_price"))
+        buyback_ready = reverse_plan.get("status") == "buyback_ready" and current is not None and buyback_max is not None and current <= buyback_max
+        buy_fees = estimate_trade_fees("buy", min(current, buyback_max) if current is not None and buyback_max is not None else buyback_max, shares)
+        sell_fees = estimate_trade_fees("sell", sell_price, shares)
+        estimated_net = None
+        if sell_price is not None and buyback_max is not None and shares:
+            estimated_net = (sell_price - buyback_max) * shares - float(sell_fees.get("total_fees") or 0.0) - float(buy_fees.get("total_fees") or 0.0)
+        return {
+            "applicable": True,
+            "status": "ready_for_manual_confirm" if buyback_ready else "watch",
+            "status_label": "反T回补已到价" if buyback_ready else "等待反T回补价",
+            "candidate": "reverse_t_buyback",
+            "side": "buy",
+            "side_label": "买入",
+            "trade_intent": "reverse_t_close",
+            "shares": shares or None,
+            "price_zone": [rounded(buyback_max), rounded(buyback_max)] if buyback_max is not None else None,
+            "max_price": rounded(buyback_max),
+            "estimated_fees": buy_fees,
+            "expected_net_profit_at_buyback_max": rounded(estimated_net),
+            "open_reverse_t_leg": open_leg,
+            "steps": [
+                f"先确认这笔开放反T卖出腿：卖出价 {money_text(sell_price)}，数量 {shares or '-'} 股。",
+                f"只在价格不高于 {money_text(buyback_max)} 时买回同等股数；高于该价格不追买。",
+                "提交前核对方向是“买入”、数量等于原卖出腿数量；这不是新增补仓。",
+                f"如果你决定不买回，则把这笔卖出的 {shares or '-'} 股改按减仓/退出结果管理，不再挂回补单。",
+                "成交后立即记录为反T回补成交，关闭这条开放反T腿。",
+            ],
+            "post_trade_plan": "回补成交后只关闭这条反T腿；剩余持仓继续按独立止损/持仓风险复核，不用回补来扩大仓位。",
+        }
     stop_loss_plan = build_stop_loss_risk_plan(levels, position, technical_assessment)
     if stop_loss_plan.get("applicable"):
         return stop_loss_plan
@@ -2800,6 +2850,22 @@ def build_action_steps(
             "不新增补仓，不放大做T股数；只允许完成已打开的做T闭环或继续处理退出风险。",
             "下一步：等待下一轮触发价或下一交易日重新评估。",
         ]
+    if state == "reverse_buyback_review":
+        reverse_plan_steps = list((manual_execution_plan or {}).get("steps") or [])
+        steps = [
+            "当前不是新增买入，也不是补仓摊低成本；只处理已经卖出的反T腿是否闭环。",
+        ]
+        if reverse_plan_steps:
+            steps.extend(str(step) for step in reverse_plan_steps)
+        else:
+            buyback = as_float(levels.get("reverse_t_buyback_max_price"))
+            steps.append(f"只在价格不高于 {money_text(buyback)} 时买回原卖出股数；高于回补上限不追买。")
+            steps.append("如果不回补，则把这笔卖出按减仓结果管理。")
+        if stop_loss is not None:
+            steps.append(f"止损风险仍保留：剩余持仓继续参考止损价 {stop_loss:.2f}，但不覆盖这条已打开反T腿的回补判断。")
+        if blockers:
+            steps.append(f"本轮主要提示：{blockers[0]}")
+        return steps
     if state == "exit_risk_review":
         steps = ["本轮禁止买入、补仓、做T；只允许处理卖出风险。"]
         if rhythm_status != "clear":
@@ -2974,7 +3040,7 @@ def price_action_priority(action: str, status: str) -> int:
             "止损/退出": 100,
             "硬退出": 100,
             "止损减仓": 98,
-            "反T回补": 95,
+            "反T回补": 105,
             "正T目标卖出": 90,
             "正T买入": 82,
             "反T卖出": 80,
@@ -2991,7 +3057,7 @@ def price_action_priority(action: str, status: str) -> int:
     if status == "watch":
         return {
             "反弹减仓": 79,
-            "反T回补": 58,
+            "反T回补": 81,
             "正T目标卖出": 55,
             "正T买入": 50,
             "反T卖出": 48,
@@ -3051,18 +3117,25 @@ def build_price_action_table(
     if stop_loss is not None and stop_loss_confirmed:
         stop_ready = current is not None and current <= stop_loss
         stop_plan = manual_execution_plan if manual_execution_plan.get("candidate") == "risk_exit" else {}
-        stop_action = str(stop_plan.get("action_label") or ("止损风险复核" if state == "exit_risk_review" and not stop_ready else "止损/退出"))
+        stop_action = str(
+            "止损风险复核"
+            if state == "reverse_buyback_review" else
+            stop_plan.get("action_label") or ("止损风险复核" if state == "exit_risk_review" and not stop_ready else "止损/退出")
+        )
         plan_status = str(stop_plan.get("status") or "")
         row_status = "ready" if plan_status == "ready_for_manual_confirm" else "watch"
         if plan_status == "near_stop_review":
             row_status = "blocked"
+        if state == "reverse_buyback_review":
+            row_status = "watch"
         if not stop_plan:
-            row_status = "ready" if stop_ready else "blocked" if state == "exit_risk_review" else "watch"
+            row_status = "watch" if state == "reverse_buyback_review" else "ready" if stop_ready else "blocked" if state == "exit_risk_review" else "watch"
         row_status_label = (
             "可执行" if row_status == "ready" and stop_plan else
             "等反弹" if plan_status == "wait_rebound_reduce" else
             "近硬止损" if plan_status == "near_stop_review" else
             "近硬止损" if row_status == "blocked" and state == "exit_risk_review" else
+            "风险复核" if state == "reverse_buyback_review" else
             "已触发" if stop_ready else "未触发"
         )
         row_price = (
@@ -3086,7 +3159,7 @@ def build_price_action_table(
                 status=row_status,
                 status_label=row_status_label,
                 shares=row_shares,
-                note=str(stop_plan.get("reason") or "触发后优先处理退出风险；禁止补仓、禁止做T摊低成本。"),
+                note=str(stop_plan.get("reason") or ("剩余持仓止损风险仍需复核；但已打开反T卖出腿先按回补或转减仓处理。" if state == "reverse_buyback_review" else "触发后优先处理退出风险；禁止补仓、禁止做T摊低成本。")),
                 priority=price_action_priority(stop_action, row_status),
             )
         )
@@ -3266,7 +3339,9 @@ def build_action_arbitration(
     minute_label = str((minute_confirmation or {}).get("status_label") or minute_status)
     suppressed: list[dict[str, Any]] = []
     primary_action = str(primary.get("action") or "当前动作")
-    if state == "exit_risk_review":
+    if state == "reverse_buyback_review":
+        summary = f"{primary_action}优先；这是已打开的反T卖出腿闭环，不等同于新增补仓。"
+    elif state == "exit_risk_review":
         summary = f"{primary_action}优先；正T、反T和补仓全部让位于硬止损风险。"
     elif mode != "tradable":
         summary = f"{decision_mode.get('label') or '只观察'}优先；数据或交易时段未支持盘中人工确认。"
@@ -3282,7 +3357,9 @@ def build_action_arbitration(
         action = str(row.get("action") or "")
         if not action or action == primary_action:
             continue
-        if state == "exit_risk_review" and any(keyword in action for keyword in ("T", "买入", "追买")):
+        if state == "reverse_buyback_review" and action != "反T回补" and any(keyword in action for keyword in ("T", "买入", "追买")):
+            reason = "先处理已打开的反T腿；新增做T或追买不能和回补闭环混在一起。"
+        elif state == "exit_risk_review" and any(keyword in action for keyword in ("T", "买入", "追买")):
             reason = "硬止损或近硬止损优先，做T/买入不能扩大风险。"
         elif mode != "tradable":
             reason = f"盘中可信度为{decision_mode.get('label') or mode}，该动作只能保留观察。"
@@ -3334,6 +3411,8 @@ def build_structured_conclusion(
     current_action = "只观察，不下单"
     if primary_status == "ready":
         current_action = f"人工确认后执行{primary_action}"
+    elif state == "reverse_buyback_review":
+        current_action = f"先复核{primary_action}，不新增卖出腿"
     elif state == "exit_risk_review":
         current_action = f"先处理{primary_action}，不做其他交易"
     elif state in {"market_wait", "data_stale", "data_insufficient"}:
@@ -3344,6 +3423,8 @@ def build_structured_conclusion(
         current_action = f"只观察{primary_action}，等待触发和门禁确认"
 
     forbidden_actions: list[str] = []
+    if state == "reverse_buyback_review":
+        forbidden_actions.append("禁止新增反T卖出、补仓和追买；只允许处理已卖出腿的回补，或确认转为减仓。")
     if state == "exit_risk_review":
         forbidden_actions.append("禁止补仓、禁止正T、禁止反T，卖出风险优先。")
     if decision_mode.get("mode") != "tradable":
@@ -3377,7 +3458,7 @@ def build_structured_conclusion(
 
 
 def confidence_for(state: str, evidence: list[str], blockers: list[str]) -> str:
-    if state in {"exit_risk_review", "data_stale", "market_wait", "data_insufficient"}:
+    if state in {"exit_risk_review", "reverse_buyback_review", "data_stale", "market_wait", "data_insufficient"}:
         return "high"
     if blockers:
         return "medium"
@@ -3392,6 +3473,10 @@ def queue_category(card: dict[str, Any]) -> tuple[str, str, int]:
     primary_action = str(primary.get("action") or "")
     primary_status = str(primary.get("status") or "")
     review_status = str(value_at(card, "post_unlock_review_summary.status") or "")
+    if primary_action == "反T回补":
+        return "manual_candidate", "反T回补复核", 97 if primary_status == "ready" else 74
+    if state == "reverse_buyback_review":
+        return "manual_candidate", "反T回补复核", 74
     if primary_action in {"止损/退出", "止损减仓", "硬退出"} and primary_status == "ready":
         return "risk_exit", "优先处理卖出风险", 100
     if primary_action == "止损风险复核":
@@ -3614,6 +3699,7 @@ def build_card(
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
         "exit_risk_review": "create_exit_or_risk_review",
+        "reverse_buyback_review": "review_reverse_t_buyback",
         "data_insufficient": "complete_data_before_decision",
         "risk_reduction_review": "review_position_reduction",
         "positive_t_watch": "watch_positive_t_only",
