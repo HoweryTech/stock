@@ -1239,6 +1239,12 @@ function detailRefreshNotice() {
   </div>`;
 }
 
+function compactDecisionList(items, fallback) {
+  const values = (items || []).filter(Boolean);
+  if (!values.length) return `<p class="secondary">${escapeHtml(fallback)}</p>`;
+  return `<ul class="reason-list">${values.slice(0, 4).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
 function renderDecisionBrief(item, decisionCard, automaticDecision) {
   const liveTrigger = liveTriggerAlertForCode(item.code);
   const primary = decisionCard?.price_action_table?.primary_action || {};
@@ -1288,35 +1294,52 @@ function renderDecisionBrief(item, decisionCard, automaticDecision) {
     ["需要成交才看手工更新", "manual-trade"],
     ["想知道为什么再展开辅助信息", "technical-assessment"],
   ];
+  const primaryMetrics = [
+    ["主动作", arbitration.primary_action || primary.action || "--"],
+    ["价格", primary.price || structured.primary_price || "--"],
+    ["数量", primary.shares ? `${primary.shares}股` : structured.primary_shares ? `${structured.primary_shares}股` : "--"],
+    ["状态", primary.status_label || primary.status || "--"],
+  ];
+  const primaryReason = liveTrigger?.message
+    || arbitration.summary
+    || primary.note
+    || decision.next_step
+    || "按主动作处理；未触发前只观察。";
   return detailSection(
     "操作决策",
-    `<div class="decision-context-grid">${contextItems.map(([key, value]) => `
-      <dl><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
-    <div class="decision-focus-grid">
-      <div class="decision-focus-card decision-focus-now">
-        <span>当前动作</span>
-        <strong>${escapeHtml(nowText)}</strong>
-        ${actionSteps.length ? `<ol class="reason-list">${actionSteps.slice(0, 4).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
-      </div>
-      <div class="decision-focus-card decision-focus-trigger">
-        <span>触发条件</span>
-        ${triggerItems.length ? `<ol class="reason-list">${triggerItems.slice(0, 5).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : `<p class="secondary">当前没有可执行触发线，等待下一轮数据。</p>`}
-      </div>
-      <div class="decision-focus-card decision-focus-block">
-        <span>禁止动作</span>
-        ${blockerItems.length ? `<ul class="reason-list">${blockerItems.slice(0, 5).map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : `<p class="secondary">当前没有额外阻断；仍需按可操作步骤表人工确认。</p>`}
-      </div>
-      <div class="decision-focus-card decision-focus-effect">
-        <span>做了会怎样</span>
-        ${effectItems.length ? `<ul class="reason-list">${effectItems.slice(0, 5).map(effect => `<li>${escapeHtml(effect)}</li>`).join("")}</ul>` : `<p class="secondary">成交后系统会按真实成交价重新计算持仓、成本和下一步建议。</p>`}
-      </div>
-      <div class="decision-focus-card decision-focus-arbitration">
-        <span>仲裁结论</span>
-        <strong>${escapeHtml(arbitration.primary_action || primary.action || "--")}</strong>
-        <p class="secondary">${escapeHtml(arbitration.summary || "按可操作步骤表排序，只保留一个主动作。")}</p>
-        ${(arbitration.suppressed_actions || []).length ? `<ul class="reason-list">${arbitration.suppressed_actions.slice(0, 4).map(item => `<li>${escapeHtml(item.action || "--")}：${escapeHtml(item.reason || "--")}</li>`).join("")}</ul>` : ""}
-      </div>
+    `<div class="decision-priority-card">
+      <span>当前只看这一条</span>
+      <strong>${escapeHtml(nowText)}</strong>
+      <p>${escapeHtml(primaryReason)}</p>
+      <div class="decision-priority-metrics">${primaryMetrics.map(([key, value]) => `
+        <dl><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+      ${actionSteps.length ? `<ol class="reason-list decision-primary-steps">${actionSteps.slice(0, 3).map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
     </div>
+    <div class="decision-context-grid decision-context-compact">${contextItems.map(([key, value]) => `
+      <dl><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></dl>`).join("")}</div>
+    <details class="decision-secondary-details">
+      <summary><span>辅助判断与被压制动作</span><em>触发条件、禁止动作、后果和仲裁说明</em></summary>
+      <div class="decision-focus-grid">
+        <div class="decision-focus-card decision-focus-trigger">
+          <span>触发条件</span>
+          ${compactDecisionList(triggerItems, "当前没有可执行触发线，等待下一轮数据。")}
+        </div>
+        <div class="decision-focus-card decision-focus-block">
+          <span>禁止动作</span>
+          ${compactDecisionList(blockerItems, "当前没有额外阻断；仍需按可操作步骤表人工确认。")}
+        </div>
+        <div class="decision-focus-card decision-focus-effect">
+          <span>做了会怎样</span>
+          ${compactDecisionList(effectItems, "成交后系统会按真实成交价重新计算持仓、成本和下一步建议。")}
+        </div>
+        <div class="decision-focus-card decision-focus-arbitration">
+          <span>仲裁结论</span>
+          <strong>${escapeHtml(arbitration.primary_action || primary.action || "--")}</strong>
+          <p class="secondary">${escapeHtml(arbitration.summary || "按可操作步骤表排序，只保留一个主动作。")}</p>
+          ${compactDecisionList((arbitration.suppressed_actions || []).map(item => `${item.action || "--"}：${item.reason || "--"}`), "没有被压制的互斥动作。")}
+        </div>
+      </div>
+    </details>
     <h4>阅读顺序</h4>
     <div class="detail-nav">${readingOrder.map(([label, target], index) => `
       <button class="secondary-action" type="button" data-detail-target="${escapeHtml(target)}">${index + 1}. ${escapeHtml(label)}</button>`).join("")}</div>`,
@@ -1408,16 +1431,19 @@ function groupedExecutionRows(table) {
   };
 }
 
-function renderActionStepRows(rows, primary, item, decisionCard) {
-  if (!rows.length) return `<p class="secondary">当前没有对应步骤。</p>`;
-  const sameAction = (left, right) => left && right
+function sameActionRow(left, right) {
+  return left && right
     && left.action === right.action
     && left.price === right.price
     && left.status === right.status
     && String(left.shares || "") === String(right.shares || "");
+}
+
+function renderActionStepRows(rows, primary, item, decisionCard) {
+  if (!rows.length) return `<p class="secondary">当前没有对应步骤。</p>`;
   return rows.map(row => {
     const preset = priceActionPresetButton(row, item, decisionCard);
-    const isPrimary = sameAction(row, primary);
+    const isPrimary = sameActionRow(row, primary);
     return `<div class="action-step-row action-step-row-${escapeHtml(row.status || "unknown")}${isPrimary ? " action-step-primary" : ""}">
       <div class="action-step-main">
         <span>${isPrimary ? "当前主步骤" : "候选步骤"}</span>
@@ -1449,15 +1475,29 @@ function renderActionStepTable(table, item, decisionCard = null) {
     ["等待触发", "watch", "价格或条件还未到位，只观察触发线，不提前下单。"],
     ["禁止执行", "blocked", "当前规则明确阻断，不做补仓、卖出或做T动作。"],
   ];
+  const secondaryGroups = layerDefs.map(([label, key, hint]) => {
+    const groupRows = groups[key].filter(row => !sameActionRow(row, primary));
+    return [label, key, hint, groupRows];
+  });
+  const secondaryCount = secondaryGroups.reduce((total, entry) => total + entry[3].length, 0);
+  const secondarySummary = secondaryCount ? `${secondaryCount}项候选/阻断动作，默认收起` : "无其他候选动作";
   return detailSection(
     "可操作步骤表",
-    `<p class="secondary">${escapeHtml(table.summary || "按触发价执行；未触发前只观察。")}</p>
-    <div class="action-step-groups">${layerDefs.map(([label, key, hint]) => `
-      <div class="action-step-group action-step-group-${key}">
-        <div class="action-step-group-title"><strong>${label}</strong><span>${groups[key].length}项</span></div>
-        <p class="secondary">${hint}</p>
-        ${renderActionStepRows(groups[key], primary, item, decisionCard)}
-      </div>`).join("")}</div>`,
+    `<div class="action-step-primary-panel">
+      <span>当前主步骤</span>
+      <strong>${escapeHtml(primary.action || "--")}</strong>
+      <p>${escapeHtml(table.summary || primary.note || primary.trigger || "按触发价执行；未触发前只观察。")}</p>
+      ${renderActionStepRows([primary], primary, item, decisionCard)}
+    </div>
+    <details class="action-step-secondary-details">
+      <summary><span>其他候选/阻断动作</span><em>${escapeHtml(secondarySummary)}</em></summary>
+      <div class="action-step-groups">${secondaryGroups.map(([label, key, hint, groupRows]) => `
+        <div class="action-step-group action-step-group-${key}">
+          <div class="action-step-group-title"><strong>${label}</strong><span>${groupRows.length}项</span></div>
+          <p class="secondary">${hint}</p>
+          ${renderActionStepRows(groupRows, primary, item, decisionCard)}
+        </div>`).join("")}</div>
+    </details>`,
     "action-step-table"
   );
 }
