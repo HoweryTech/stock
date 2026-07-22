@@ -91,6 +91,28 @@ class MergeCandidatePoolTest(unittest.TestCase):
         self.assertEqual(candidates[0]["industry_strength_evidence"], "行业近 2 日收益率 1.52%")
         self.assertEqual(candidates[0]["combined_score"], 235.5)
 
+    def test_merges_event_catalyst_as_third_strategy(self) -> None:
+        candidates = merge_candidates(
+            [{"code": "300750", "score": "12.5", "reasons": "趋势强。", "risks": ""}],
+            [{"code": "300750", "score": "20", "reasons": "质量好。", "risks": ""}],
+            [
+                {
+                    "code": "300750",
+                    "event_date": "2026-07-02",
+                    "event_type": "major_order",
+                    "score": "46",
+                    "reasons": "事件真实可验证。",
+                    "risks": "需跟踪订单交付。",
+                }
+            ],
+        )
+
+        self.assertEqual(candidates[0]["strategies"], "event_catalyst|trend_strength|value_quality")
+        self.assertEqual(candidates[0]["event_score"], "46")
+        self.assertEqual(candidates[0]["event_date"], "2026-07-02")
+        self.assertEqual(candidates[0]["event_type"], "major_order")
+        self.assertEqual(candidates[0]["combined_score"], 378.5)
+
     def test_run_merge_writes_csv_and_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             trend_path = Path(tmp_dir) / "trend.csv"
@@ -117,7 +139,7 @@ class MergeCandidatePoolTest(unittest.TestCase):
                 writer.writeheader()
                 writer.writerow({"code": "300750", "industry_strength_score": "15", "industry_strength_evidence": "行业强。"})
 
-            metadata = run_merge(trend_path, value_path, output_path, metadata_path, universe_path, industry_path)
+            metadata = run_merge(trend_path, value_path, output_path, metadata_path, universe_path=universe_path, industry_strength_path=industry_path)
 
             with output_path.open(encoding="utf-8", newline="") as file:
                 rows = list(csv.DictReader(file))

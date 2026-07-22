@@ -29,6 +29,7 @@ def strategy_label(strategy: str) -> str:
         "multi_strategy": "多策略共振",
         "trend_strength": "趋势强度",
         "value_quality": "价值质量",
+        "event_catalyst": "事件催化",
     }
     return labels.get(strategy, strategy or "-")
 
@@ -55,6 +56,9 @@ def format_unified_candidate(candidate: dict[str, str], index: int) -> list[str]
         f"- 综合排序分：{candidate.get('combined_score') or '-'}",
         f"- 趋势分：{candidate.get('trend_score') or '-'}",
         f"- 价值质量分：{candidate.get('value_quality_score') or '-'}",
+        f"- 事件分：{candidate.get('event_score') or '-'}",
+        f"- 事件日期：{candidate.get('event_date') or '-'}",
+        f"- 事件类型：{candidate.get('event_type') or '-'}",
         f"- 流动性分：{candidate.get('liquidity_score') or '-'}",
         f"- 流动性证据：{candidate.get('liquidity_evidence') or '-'}",
         f"- 行业强度分：{candidate.get('industry_strength_score') or '-'}",

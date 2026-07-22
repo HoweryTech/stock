@@ -1,0 +1,4 @@
+event_date,code,event_type,title,expected_impact,impact_score,confidence,counter_evidence,risk_disclosure,source,updated_at
+2026-07-02,300750,major_order,签订储能系统重大订单,订单可能改善收入预期并提升市场关注度,4,3,订单交付节奏和毛利率仍需跟踪,若订单延期或毛利率低于预期则催化减弱,sample,2026-07-07
+2026-07-02,600000,shareholder_increase,主要股东增持计划,增持可能改善短期风险偏好,2,2,银行板块整体估值修复仍依赖基本面改善,增持金额有限时对盈利预期影响有限,sample,2026-07-07
+2026-07-02,000001,regulatory_inquiry,收到监管问询函,监管事项需要先完成风险复核,-4,3,需阅读问询函和公司回复,未回复或回复不充分前不进入买入观察,sample,2026-07-07

@@ -51,12 +51,15 @@ class GenerateWatchlistReportTest(unittest.TestCase):
                 "code": "300750",
                 "name": "宁德时代",
                 "industry": "电力设备",
-                "strategies": "trend_strength|value_quality",
-                "strategy_count": "2",
-                "combined_score": "232.377248",
+                "strategies": "event_catalyst|trend_strength|value_quality",
+                "strategy_count": "3",
+                "combined_score": "278.377248",
                 "primary_strategy": "multi_strategy",
                 "trend_score": "11.522248",
                 "value_quality_score": "20.855",
+                "event_score": "46",
+                "event_date": "2026-07-02",
+                "event_type": "major_order",
                 "liquidity_score": "100.0",
                 "liquidity_evidence": "趋势窗口平均成交额 10090000000",
                 "industry_strength_score": "15",
@@ -73,8 +76,10 @@ class GenerateWatchlistReportTest(unittest.TestCase):
         self.assertIn("主策略：多策略共振", report)
         self.assertIn("## 1. 300750 宁德时代", report)
         self.assertIn("行业：电力设备", report)
-        self.assertIn("策略来源：趋势强度, 价值质量", report)
-        self.assertIn("综合排序分：232.377248", report)
+        self.assertIn("策略来源：事件催化, 趋势强度, 价值质量", report)
+        self.assertIn("综合排序分：278.377248", report)
+        self.assertIn("事件分：46", report)
+        self.assertIn("事件类型：major_order", report)
         self.assertIn("流动性分：100.0", report)
         self.assertIn("趋势窗口平均成交额", report)
         self.assertIn("行业强度分：15", report)
@@ -151,7 +156,7 @@ class GenerateWatchlistReportTest(unittest.TestCase):
                 value_metadata,
                 ROOT / "samples/valuation_metrics.sample.csv",
             )
-            run_merge(trend_candidates, value_candidates, candidate_pool, pool_metadata, ROOT / "samples/stock_universe.sample.csv")
+            run_merge(trend_candidates, value_candidates, candidate_pool, pool_metadata, universe_path=ROOT / "samples/stock_universe.sample.csv")
             result = run_report(candidate_pool, report)
 
             content = report.read_text(encoding="utf-8")

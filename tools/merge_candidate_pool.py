@@ -27,6 +27,9 @@ OUTPUT_FIELDS = [
     "primary_strategy",
     "trend_score",
     "value_quality_score",
+    "event_score",
+    "event_date",
+    "event_type",
     "liquidity_score",
     "liquidity_evidence",
     "industry_strength_score",
@@ -92,6 +95,9 @@ def add_strategy_candidate(pool: dict[str, dict[str, Any]], strategy: str, row: 
             "strategies": [],
             "trend_score": "",
             "value_quality_score": "",
+            "event_score": "",
+            "event_date": "",
+            "event_type": "",
             "trend_turnover_avg": "",
             "trade_date": "",
             "report_period": "",
@@ -110,6 +116,10 @@ def add_strategy_candidate(pool: dict[str, dict[str, Any]], strategy: str, row: 
     elif strategy == "value_quality":
         candidate["value_quality_score"] = score
         candidate["report_period"] = row.get("report_period", candidate["report_period"])
+    elif strategy == "event_catalyst":
+        candidate["event_score"] = score
+        candidate["event_date"] = row.get("event_date", candidate.get("event_date", ""))
+        candidate["event_type"] = row.get("event_type", candidate.get("event_type", ""))
 
     candidate["reasons"].extend(prefixed_text(strategy, row.get("reasons", "")))
     candidate["risks"].extend(prefixed_text(strategy, row.get("risks", "")))
@@ -119,8 +129,9 @@ def combined_score(candidate: dict[str, Any]) -> float:
     strategy_count = len(candidate["strategies"])
     trend_score = as_float(candidate.get("trend_score"), 0.0) or 0.0
     value_quality_score = as_float(candidate.get("value_quality_score"), 0.0) or 0.0
+    event_score = as_float(candidate.get("event_score"), 0.0) or 0.0
     industry_strength_score = as_float(candidate.get("industry_strength_score"), 0.0) or 0.0
-    return round(strategy_count * 100.0 + trend_score + value_quality_score + industry_strength_score * 0.2, 6)
+    return round(strategy_count * 100.0 + trend_score + value_quality_score + event_score + industry_strength_score * 0.2, 6)
 
 
 def primary_strategy(candidate: dict[str, Any]) -> str:
@@ -168,6 +179,9 @@ def finalize_candidate(
         "primary_strategy": primary_strategy(candidate),
         "trend_score": candidate.get("trend_score", ""),
         "value_quality_score": candidate.get("value_quality_score", ""),
+        "event_score": candidate.get("event_score", ""),
+        "event_date": candidate.get("event_date", ""),
+        "event_type": candidate.get("event_type", ""),
         "liquidity_score": liquidity_score,
         "liquidity_evidence": liquidity_evidence,
         "industry_strength_score": industry_row.get("industry_strength_score", ""),
@@ -182,6 +196,7 @@ def finalize_candidate(
 def merge_candidates(
     trend_rows: list[dict[str, str]],
     value_quality_rows: list[dict[str, str]],
+    event_rows: list[dict[str, str]] | None = None,
     universe_context: dict[str, dict[str, str]] | None = None,
     industry_context: dict[str, dict[str, str]] | None = None,
     max_candidates: int | None = None,
@@ -193,6 +208,8 @@ def merge_candidates(
         add_strategy_candidate(pool, "trend_strength", row)
     for row in value_quality_rows:
         add_strategy_candidate(pool, "value_quality", row)
+    for row in event_rows or []:
+        add_strategy_candidate(pool, "event_catalyst", row)
 
     candidates = [
         finalize_candidate(candidate, universe_context.get(candidate["code"]), industry_context.get(candidate["code"]))
@@ -214,11 +231,13 @@ def write_candidates(path: Path, candidates: list[dict[str, Any]]) -> None:
 def build_metadata(
     trend_path: Path,
     value_quality_path: Path,
+    event_path: Path | None,
     universe_path: Path | None,
     industry_strength_path: Path | None,
     output_path: Path,
     trend_rows: list[dict[str, str]],
     value_quality_rows: list[dict[str, str]],
+    event_rows: list[dict[str, str]],
     universe_context: dict[str, dict[str, str]],
     industry_context: dict[str, dict[str, str]],
     candidates: list[dict[str, Any]],
@@ -228,6 +247,7 @@ def build_metadata(
         "inputs": {
             "trend_strength": str(trend_path),
             "value_quality": str(value_quality_path),
+            "event_catalyst": str(event_path) if event_path else None,
             "universe": str(universe_path) if universe_path else None,
             "industry_strength": str(industry_strength_path) if industry_strength_path else None,
         },
@@ -235,6 +255,7 @@ def build_metadata(
         "input_counts": {
             "trend_strength": len(trend_rows),
             "value_quality": len(value_quality_rows),
+            "event_catalyst": len(event_rows),
             "universe": len(universe_context),
             "industry_strength": len(industry_context),
         },
@@ -258,24 +279,28 @@ def run_merge(
     value_quality_path: Path,
     output_path: Path,
     metadata_path: Path,
+    event_path: Path | None = None,
     universe_path: Path | None = None,
     industry_strength_path: Path | None = None,
     max_candidates: int | None = None,
 ) -> dict[str, Any]:
     trend_rows = read_candidates(trend_path)
     value_quality_rows = read_candidates(value_quality_path)
+    event_rows = read_candidates(event_path) if event_path else []
     universe_context = read_universe_context(universe_path)
     industry_context = read_row_context(industry_strength_path)
-    candidates = merge_candidates(trend_rows, value_quality_rows, universe_context, industry_context, max_candidates)
+    candidates = merge_candidates(trend_rows, value_quality_rows, event_rows, universe_context, industry_context, max_candidates)
     write_candidates(output_path, candidates)
     metadata = build_metadata(
         trend_path,
         value_quality_path,
+        event_path,
         universe_path,
         industry_strength_path,
         output_path,
         trend_rows,
         value_quality_rows,
+        event_rows,
         universe_context,
         industry_context,
         candidates,
@@ -302,6 +327,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", default="data/processed/candidate_pool.csv", help="Output merged candidate pool CSV.")
     parser.add_argument("--metadata-output", default="data/metadata/candidate_pool.json", help="Merge metadata JSON.")
+    parser.add_argument("--event-candidates", help="Optional event catalyst candidate CSV.")
     parser.add_argument("--universe", help="Optional stock universe or tradable universe CSV for name, industry, and liquidity enrichment.")
     parser.add_argument("--industry-strength", help="Optional industry strength factor CSV.")
     parser.add_argument("--max-candidates", type=int, help="Limit output candidate count.")
@@ -317,6 +343,7 @@ def main() -> int:
             Path(args.value_quality_candidates),
             Path(args.output),
             Path(args.metadata_output),
+            Path(args.event_candidates) if args.event_candidates else None,
             Path(args.universe) if args.universe else None,
             Path(args.industry_strength) if args.industry_strength else None,
             args.max_candidates,

@@ -60,6 +60,7 @@
 - [趋势强度基础因子](./docs/趋势强度基础因子.md)
 - [多周期技术指标](./docs/多周期技术指标.md)
 - [趋势强度策略筛选](./docs/趋势强度策略筛选.md)
+- [事件催化策略筛选](./docs/事件催化策略筛选.md)
 - [多策略候选池合并](./docs/多策略候选池合并.md)
 - [观察池报告](./docs/观察池报告.md)
 - [观察池流水线](./docs/观察池流水线.md)
@@ -220,12 +221,23 @@ python3 tools/calc_industry_strength.py \
   --windows 5,20
 ```
 
+### 筛选事件催化候选股
+
+```bash
+python3 tools/screen_event_catalyst.py \
+  --profile config/investment-profile.example.yaml \
+  --events data/processed/event_catalyst_events.csv \
+  --output data/processed/event_catalyst_candidates.csv \
+  --metadata-output data/metadata/event_catalyst_candidates.json
+```
+
 ### 合并多策略候选池
 
 ```bash
 python3 tools/merge_candidate_pool.py \
   --trend-candidates data/processed/trend_candidates.csv \
   --value-quality-candidates data/processed/value_quality_candidates.csv \
+  --event-candidates data/processed/event_catalyst_candidates.csv \
   --universe data/processed/tradable_universe.csv \
   --industry-strength data/processed/industry_strength_factors.csv \
   --output data/processed/candidate_pool.csv \
@@ -254,6 +266,7 @@ python3 tools/run_watchlist_pipeline.py \
   --daily-bars data/processed/daily_bars.csv \
   --financial-metrics data/processed/financial_metrics.csv \
   --valuation-metrics data/processed/valuation_metrics.csv \
+  --event-catalyst-events data/processed/event_catalyst_events.csv \
   --universe data/processed/tradable_universe.csv \
   --report-output reports/watchlist.md
 ```

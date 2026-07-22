@@ -17,6 +17,7 @@ try:
     from tools.generate_watchlist_report import run_report
     from tools.merge_candidate_pool import run_merge
     from tools.risk_check import load_yaml
+    from tools.screen_event_catalyst import run_screen as run_event_catalyst_screen
     from tools.screen_trend_strength import run_screen as run_trend_screen
     from tools.screen_trend_strength import trend_screening_config
     from tools.screen_value_quality import run_screen as run_value_quality_screen
@@ -27,6 +28,7 @@ except ModuleNotFoundError:
     from generate_watchlist_report import run_report
     from merge_candidate_pool import run_merge
     from risk_check import load_yaml
+    from screen_event_catalyst import run_screen as run_event_catalyst_screen
     from screen_trend_strength import run_screen as run_trend_screen
     from screen_trend_strength import trend_screening_config
     from screen_value_quality import run_screen as run_value_quality_screen
@@ -51,6 +53,7 @@ def run_pipeline(
     daily_bars_path: Path,
     financial_metrics_path: Path,
     valuation_metrics_path: Path,
+    event_catalyst_events_path: Path | None,
     universe_path: Path | None,
     windows_override: str | None,
     trend_factors_output: Path,
@@ -59,6 +62,8 @@ def run_pipeline(
     trend_candidates_metadata: Path,
     value_quality_candidates_output: Path,
     value_quality_candidates_metadata: Path,
+    event_catalyst_candidates_output: Path,
+    event_catalyst_candidates_metadata: Path,
     industry_strength_output: Path,
     industry_strength_metadata: Path,
     candidate_pool_output: Path,
@@ -78,6 +83,14 @@ def run_pipeline(
         value_quality_candidates_metadata,
         valuation_metrics_path,
     )
+    event_catalyst_candidates = None
+    if event_catalyst_events_path is not None:
+        event_catalyst_candidates = run_event_catalyst_screen(
+            profile_path,
+            event_catalyst_events_path,
+            event_catalyst_candidates_output,
+            event_catalyst_candidates_metadata,
+        )
     industry_strength = None
     if universe_path is not None:
         industry_strength = run_industry_strength_calculation(
@@ -92,6 +105,7 @@ def run_pipeline(
         value_quality_candidates_output,
         candidate_pool_output,
         candidate_pool_metadata,
+        event_catalyst_candidates_output if event_catalyst_candidates is not None else None,
         universe_path,
         industry_strength_output if industry_strength is not None else None,
     )
@@ -105,6 +119,7 @@ def run_pipeline(
             "daily_bars": str(daily_bars_path),
             "financial_metrics": str(financial_metrics_path),
             "valuation_metrics": str(valuation_metrics_path),
+            "event_catalyst_events": str(event_catalyst_events_path) if event_catalyst_events_path else None,
             "universe": str(universe_path) if universe_path else None,
         },
         "windows": windows,
@@ -112,6 +127,7 @@ def run_pipeline(
             "trend_factors": trend_factors,
             "trend_candidates": trend_candidates,
             "value_quality_candidates": value_quality_candidates,
+            "event_catalyst_candidates": event_catalyst_candidates,
             "industry_strength": industry_strength,
             "candidate_pool": candidate_pool,
             "candidate_pool_check": candidate_pool_check,
@@ -121,6 +137,7 @@ def run_pipeline(
             "trend_factors": str(trend_factors_output),
             "trend_candidates": str(trend_candidates_output),
             "value_quality_candidates": str(value_quality_candidates_output),
+            "event_catalyst_candidates": str(event_catalyst_candidates_output) if event_catalyst_candidates is not None else None,
             "industry_strength": str(industry_strength_output) if industry_strength is not None else None,
             "candidate_pool": str(candidate_pool_output),
             "watchlist_report": str(report_output),
@@ -136,6 +153,8 @@ def print_summary(metadata: dict[str, Any]) -> None:
     print(f"trend factors: {steps['trend_factors']['row_count']}")
     print(f"trend candidates: {steps['trend_candidates']['candidate_count']}")
     print(f"value quality candidates: {steps['value_quality_candidates']['candidate_count']}")
+    if steps.get("event_catalyst_candidates"):
+        print(f"event catalyst candidates: {steps['event_catalyst_candidates']['candidate_count']}")
     if steps.get("industry_strength"):
         print(f"industry strength factors: {steps['industry_strength']['row_count']}")
     print(f"candidate pool: {steps['candidate_pool']['candidate_count']}")
@@ -149,6 +168,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--daily-bars", default="data/processed/daily_bars.csv", help="Input normalized daily bars CSV.")
     parser.add_argument("--financial-metrics", default="data/processed/financial_metrics.csv", help="Input normalized financial metrics CSV.")
     parser.add_argument("--valuation-metrics", default="data/processed/valuation_metrics.csv", help="Input normalized valuation metrics CSV.")
+    parser.add_argument("--event-catalyst-events", help="Optional structured event CSV.")
     parser.add_argument("--universe", help="Optional tradable universe CSV.")
     parser.add_argument("--windows", help="Optional comma-separated trend factor windows. Defaults to the trend screening window.")
     parser.add_argument("--trend-factors-output", default="data/processed/trend_factors.csv", help="Output trend factors CSV.")
@@ -165,6 +185,8 @@ def parse_args() -> argparse.Namespace:
         default="data/metadata/value_quality_candidates.json",
         help="Output value quality candidate metadata JSON.",
     )
+    parser.add_argument("--event-catalyst-candidates-output", default="data/processed/event_catalyst_candidates.csv", help="Output event catalyst candidate CSV.")
+    parser.add_argument("--event-catalyst-candidates-metadata", default="data/metadata/event_catalyst_candidates.json", help="Output event catalyst candidate metadata JSON.")
     parser.add_argument("--industry-strength-output", default="data/processed/industry_strength_factors.csv", help="Output industry strength factor CSV.")
     parser.add_argument("--industry-strength-metadata", default="data/metadata/industry_strength_factors.json", help="Output industry strength metadata JSON.")
     parser.add_argument("--candidate-pool-output", default="data/processed/candidate_pool.csv", help="Output candidate pool CSV.")
@@ -183,6 +205,7 @@ def main() -> int:
             Path(args.daily_bars),
             Path(args.financial_metrics),
             Path(args.valuation_metrics),
+            Path(args.event_catalyst_events) if args.event_catalyst_events else None,
             Path(args.universe) if args.universe else None,
             args.windows,
             Path(args.trend_factors_output),
@@ -191,6 +214,8 @@ def main() -> int:
             Path(args.trend_candidates_metadata),
             Path(args.value_quality_candidates_output),
             Path(args.value_quality_candidates_metadata),
+            Path(args.event_catalyst_candidates_output),
+            Path(args.event_catalyst_candidates_metadata),
             Path(args.industry_strength_output),
             Path(args.industry_strength_metadata),
             Path(args.candidate_pool_output),

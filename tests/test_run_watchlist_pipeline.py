@@ -24,6 +24,7 @@ class RunWatchlistPipelineTest(unittest.TestCase):
                 ROOT / "samples/daily_bars.sample.csv",
                 ROOT / "samples/financial_metrics.sample.csv",
                 ROOT / "samples/valuation_metrics.sample.csv",
+                ROOT / "samples/event_catalyst_events.sample.csv",
                 ROOT / "samples/stock_universe.sample.csv",
                 None,
                 base / "trend_factors.csv",
@@ -32,6 +33,8 @@ class RunWatchlistPipelineTest(unittest.TestCase):
                 base / "trend_candidates.json",
                 base / "value_quality_candidates.csv",
                 base / "value_quality_candidates.json",
+                base / "event_catalyst_candidates.csv",
+                base / "event_catalyst_candidates.json",
                 base / "industry_strength.csv",
                 base / "industry_strength.json",
                 base / "candidate_pool.csv",
@@ -46,8 +49,10 @@ class RunWatchlistPipelineTest(unittest.TestCase):
         self.assertEqual(metadata["steps"]["trend_factors"]["row_count"], 3)
         self.assertEqual(metadata["steps"]["trend_candidates"]["candidate_count"], 3)
         self.assertEqual(metadata["steps"]["value_quality_candidates"]["candidate_count"], 1)
+        self.assertEqual(metadata["steps"]["event_catalyst_candidates"]["candidate_count"], 1)
         self.assertEqual(metadata["steps"]["industry_strength"]["row_count"], 3)
         self.assertEqual(metadata["steps"]["candidate_pool"]["candidate_count"], 3)
+        self.assertEqual(metadata["steps"]["candidate_pool"]["input_counts"]["event_catalyst"], 1)
         self.assertEqual(metadata["steps"]["candidate_pool"]["enriched_count"], 3)
         self.assertEqual(metadata["steps"]["candidate_pool"]["liquidity_scored_count"], 3)
         self.assertEqual(metadata["steps"]["candidate_pool"]["industry_strength_scored_count"], 3)
@@ -56,6 +61,7 @@ class RunWatchlistPipelineTest(unittest.TestCase):
         self.assertTrue(metadata["steps"]["candidate_pool_check"]["context"]["tradable_universe_checked"])
         self.assertIn("主策略：多策略共振", report)
         self.assertIn("300750 宁德时代", report)
+        self.assertIn("事件催化", report)
         self.assertIn("行业强度分", report)
 
 

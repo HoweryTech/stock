@@ -107,6 +107,10 @@ def check_candidate(candidate: dict[str, str], context: CheckContext | None = No
         items.append(CheckItem(code, "blocker", "价值质量候选缺少价值质量分。"))
     if has_strategy(candidate, "trend_strength") and not candidate.get("trend_score"):
         items.append(CheckItem(code, "blocker", "趋势候选缺少趋势分。"))
+    if has_strategy(candidate, "event_catalyst") and not candidate.get("event_date"):
+        items.append(CheckItem(code, "blocker", "事件催化候选缺少事件日期。"))
+    if has_strategy(candidate, "event_catalyst") and not candidate.get("event_score"):
+        items.append(CheckItem(code, "blocker", "事件催化候选缺少事件分。"))
 
     if context.as_of is not None and has_strategy(candidate, "trend_strength") and candidate.get("trade_date"):
         trade_date = parse_date(candidate.get("trade_date", ""))
