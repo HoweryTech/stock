@@ -1,9 +1,10 @@
 import csv
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
-from tools.check_candidate_pool import check_candidate, check_candidates, run_check
+from tools.check_candidate_pool import CheckContext, check_candidate, check_candidates, run_check
 
 
 class CheckCandidatePoolTest(unittest.TestCase):
@@ -16,7 +17,7 @@ class CheckCandidatePoolTest(unittest.TestCase):
             "value_quality_score": "18.8",
             "trade_date": "2026-07-02",
             "report_period": "2026-03-31",
-            "reasons": "[trend_strength] 趋势强。 | [value_quality] PE 分位 68.00 <= 80.00。",
+            "reasons": "[trend_strength] 趋势强，近 2 日平均成交额 10090000000。 | [value_quality] PE 分位 68.00 <= 80.00。",
             "risks": "[value_quality] 估值分位接近上限，需确认安全边际。",
         }
 
@@ -48,6 +49,50 @@ class CheckCandidatePoolTest(unittest.TestCase):
 
         self.assertTrue(any(item.level == "warning" and "单策略候选" in item.message for item in items))
         self.assertTrue(any(item.level == "warning" and "缺少显式风险提示" in item.message for item in items))
+        self.assertTrue(any(item.level == "warning" and "少于 2 个非风险维度" in item.message for item in items))
+
+    def test_blocks_candidate_outside_tradable_universe(self) -> None:
+        result = check_candidates(
+            [
+                {
+                    "code": "300750",
+                    "strategies": "trend_strength|value_quality",
+                    "primary_strategy": "multi_strategy",
+                    "trend_score": "11.5",
+                    "value_quality_score": "18.8",
+                    "trade_date": "2026-07-02",
+                    "report_period": "2026-03-31",
+                    "reasons": "[trend_strength] 趋势强，近 2 日平均成交额 10090000000。 | [value_quality] PE 分位 68.00 <= 80.00。",
+                    "risks": "[value_quality] 估值分位接近上限。",
+                }
+            ],
+            context=CheckContext(tradable_codes={"600000"}),
+        )
+
+        self.assertEqual(result["conclusion"], "blocked")
+        self.assertTrue(any("不在可交易股票池" in item["message"] for item in result["blockers"]))
+
+    def test_warns_stale_trend_candidate_when_as_of_is_supplied(self) -> None:
+        context = CheckContext(
+            as_of=datetime(2026, 7, 20),
+            max_trend_age_days=5,
+        )
+        items = check_candidate(
+            {
+                "code": "300750",
+                "strategies": "trend_strength|value_quality",
+                "primary_strategy": "multi_strategy",
+                "trend_score": "11.5",
+                "value_quality_score": "18.8",
+                "trade_date": "2026-07-02",
+                "report_period": "2026-03-31",
+                "reasons": "[trend_strength] 趋势强，近 2 日平均成交额 10090000000。 | [value_quality] PE 分位 68.00 <= 80.00。",
+                "risks": "[value_quality] 估值分位接近上限。",
+            },
+            context,
+        )
+
+        self.assertTrue(any(item.level == "warning" and "趋势交易日早于检查日" in item.message for item in items))
 
     def test_run_check_reads_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -77,7 +122,7 @@ class CheckCandidatePoolTest(unittest.TestCase):
                         "value_quality_score": "18.8",
                         "trade_date": "2026-07-02",
                         "report_period": "2026-03-31",
-                        "reasons": "[value_quality] PE 分位 68.00 <= 80.00。",
+                        "reasons": "[trend_strength] 趋势强，近 2 日平均成交额 10090000000。 | [value_quality] PE 分位 68.00 <= 80.00。",
                         "risks": "[value_quality] 估值分位接近上限。",
                     }
                 )

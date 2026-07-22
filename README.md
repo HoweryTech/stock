@@ -209,12 +209,25 @@ python3 tools/screen_trend_strength.py \
   --metadata-output data/metadata/trend_candidates.json
 ```
 
+### 计算行业强度因子
+
+```bash
+python3 tools/calc_industry_strength.py \
+  --daily-bars data/processed/daily_bars.csv \
+  --universe data/processed/tradable_universe.csv \
+  --output data/processed/industry_strength_factors.csv \
+  --metadata-output data/metadata/industry_strength_factors.json \
+  --windows 5,20
+```
+
 ### 合并多策略候选池
 
 ```bash
 python3 tools/merge_candidate_pool.py \
   --trend-candidates data/processed/trend_candidates.csv \
   --value-quality-candidates data/processed/value_quality_candidates.csv \
+  --universe data/processed/tradable_universe.csv \
+  --industry-strength data/processed/industry_strength_factors.csv \
   --output data/processed/candidate_pool.csv \
   --metadata-output data/metadata/candidate_pool.json
 ```

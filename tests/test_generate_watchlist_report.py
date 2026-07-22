@@ -49,12 +49,18 @@ class GenerateWatchlistReportTest(unittest.TestCase):
         candidates = [
             {
                 "code": "300750",
+                "name": "宁德时代",
+                "industry": "电力设备",
                 "strategies": "trend_strength|value_quality",
                 "strategy_count": "2",
                 "combined_score": "232.377248",
                 "primary_strategy": "multi_strategy",
                 "trend_score": "11.522248",
                 "value_quality_score": "20.855",
+                "liquidity_score": "100.0",
+                "liquidity_evidence": "趋势窗口平均成交额 10090000000",
+                "industry_strength_score": "15",
+                "industry_strength_evidence": "行业近 2 日收益率 1.52%",
                 "trade_date": "2026-07-02",
                 "report_period": "2026-03-31",
                 "reasons": "[trend_strength] 趋势强。 | [value_quality] 质量好。",
@@ -65,8 +71,14 @@ class GenerateWatchlistReportTest(unittest.TestCase):
         report = generate_report(candidates, generated_at=datetime(2026, 7, 7, 10, 0, 0))
 
         self.assertIn("主策略：多策略共振", report)
+        self.assertIn("## 1. 300750 宁德时代", report)
+        self.assertIn("行业：电力设备", report)
         self.assertIn("策略来源：趋势强度, 价值质量", report)
         self.assertIn("综合排序分：232.377248", report)
+        self.assertIn("流动性分：100.0", report)
+        self.assertIn("趋势窗口平均成交额", report)
+        self.assertIn("行业强度分：15", report)
+        self.assertIn("行业近 2 日收益率", report)
         self.assertIn("[value_quality] 质量好。", report)
 
     def test_run_report_writes_markdown_from_candidate_csv(self) -> None:
@@ -139,13 +151,15 @@ class GenerateWatchlistReportTest(unittest.TestCase):
                 value_metadata,
                 ROOT / "samples/valuation_metrics.sample.csv",
             )
-            run_merge(trend_candidates, value_candidates, candidate_pool, pool_metadata)
+            run_merge(trend_candidates, value_candidates, candidate_pool, pool_metadata, ROOT / "samples/stock_universe.sample.csv")
             result = run_report(candidate_pool, report)
 
             content = report.read_text(encoding="utf-8")
 
         self.assertEqual(result["candidate_count"], 3)
         self.assertIn("主策略：多策略共振", content)
+        self.assertIn("300750 宁德时代", content)
+        self.assertIn("行业：电力设备", content)
         self.assertIn("策略来源：趋势强度, 价值质量", content)
 
 

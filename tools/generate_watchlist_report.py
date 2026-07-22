@@ -35,20 +35,30 @@ def strategy_label(strategy: str) -> str:
 
 def format_unified_candidate(candidate: dict[str, str], index: int) -> list[str]:
     code = candidate.get("code", "")
+    name = candidate.get("name", "")
+    industry = candidate.get("industry", "")
     strategy_codes = split_text(candidate.get("strategies", ""))
     strategies = [strategy_label(strategy) for strategy in strategy_codes]
     primary_strategy = candidate.get("primary_strategy", "")
     plan_strategy = primary_strategy if primary_strategy != "multi_strategy" else (strategy_codes[0] if strategy_codes else "")
+    title = f"{code} {name}".strip()
+    trade_plan_name = name or "待补充"
+    trade_plan_industry = industry or "待补充"
 
     lines = [
-        f"## {index}. {code}",
+        f"## {index}. {title}",
         "",
+        f"- 行业：{industry or '-'}",
         f"- 主策略：{strategy_label(primary_strategy)}",
         f"- 策略来源：{', '.join(strategies) if strategies else '-'}",
         f"- 策略数量：{candidate.get('strategy_count') or '-'}",
         f"- 综合排序分：{candidate.get('combined_score') or '-'}",
         f"- 趋势分：{candidate.get('trend_score') or '-'}",
         f"- 价值质量分：{candidate.get('value_quality_score') or '-'}",
+        f"- 流动性分：{candidate.get('liquidity_score') or '-'}",
+        f"- 流动性证据：{candidate.get('liquidity_evidence') or '-'}",
+        f"- 行业强度分：{candidate.get('industry_strength_score') or '-'}",
+        f"- 行业强度证据：{candidate.get('industry_strength_evidence') or '-'}",
         f"- 交易日：{candidate.get('trade_date') or '-'}",
         f"- 报告期：{candidate.get('report_period') or '-'}",
         "",
@@ -78,7 +88,7 @@ def format_unified_candidate(candidate: dict[str, str], index: int) -> list[str]
             "",
             "交易计划入口：",
             "```bash",
-            f"python3 tools/new_trade_plan.py --code {code} --name 待补充 --strategy {plan_strategy or '待补充'} --planned-buy-price 待补充 --stop-loss-price 待补充 --position-pct 待补充",
+            f"python3 tools/new_trade_plan.py --code {code} --name \"{trade_plan_name}\" --industry \"{trade_plan_industry}\" --strategy {plan_strategy or '待补充'} --planned-buy-price 待补充 --stop-loss-price 待补充 --position-pct 待补充",
             "```",
             "",
         ]

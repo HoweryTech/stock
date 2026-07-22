@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.calc_industry_strength import run_calculation as run_industry_strength_calculation
     from tools.calc_trend_factors import parse_windows, run_calculation
     from tools.check_candidate_pool import run_check as run_candidate_pool_check
     from tools.generate_watchlist_report import run_report
@@ -20,6 +21,7 @@ try:
     from tools.screen_trend_strength import trend_screening_config
     from tools.screen_value_quality import run_screen as run_value_quality_screen
 except ModuleNotFoundError:
+    from calc_industry_strength import run_calculation as run_industry_strength_calculation
     from calc_trend_factors import parse_windows, run_calculation
     from check_candidate_pool import run_check as run_candidate_pool_check
     from generate_watchlist_report import run_report
@@ -57,6 +59,8 @@ def run_pipeline(
     trend_candidates_metadata: Path,
     value_quality_candidates_output: Path,
     value_quality_candidates_metadata: Path,
+    industry_strength_output: Path,
+    industry_strength_metadata: Path,
     candidate_pool_output: Path,
     candidate_pool_metadata: Path,
     report_output: Path,
@@ -74,13 +78,24 @@ def run_pipeline(
         value_quality_candidates_metadata,
         valuation_metrics_path,
     )
+    industry_strength = None
+    if universe_path is not None:
+        industry_strength = run_industry_strength_calculation(
+            daily_bars_path,
+            universe_path,
+            industry_strength_output,
+            industry_strength_metadata,
+            windows,
+        )
     candidate_pool = run_merge(
         trend_candidates_output,
         value_quality_candidates_output,
         candidate_pool_output,
         candidate_pool_metadata,
+        universe_path,
+        industry_strength_output if industry_strength is not None else None,
     )
-    candidate_pool_check = run_candidate_pool_check(candidate_pool_output)
+    candidate_pool_check = run_candidate_pool_check(candidate_pool_output, universe_path)
     report = run_report(candidate_pool_output, report_output)
 
     metadata = {
@@ -97,6 +112,7 @@ def run_pipeline(
             "trend_factors": trend_factors,
             "trend_candidates": trend_candidates,
             "value_quality_candidates": value_quality_candidates,
+            "industry_strength": industry_strength,
             "candidate_pool": candidate_pool,
             "candidate_pool_check": candidate_pool_check,
             "watchlist_report": report,
@@ -105,6 +121,7 @@ def run_pipeline(
             "trend_factors": str(trend_factors_output),
             "trend_candidates": str(trend_candidates_output),
             "value_quality_candidates": str(value_quality_candidates_output),
+            "industry_strength": str(industry_strength_output) if industry_strength is not None else None,
             "candidate_pool": str(candidate_pool_output),
             "watchlist_report": str(report_output),
         },
@@ -119,6 +136,8 @@ def print_summary(metadata: dict[str, Any]) -> None:
     print(f"trend factors: {steps['trend_factors']['row_count']}")
     print(f"trend candidates: {steps['trend_candidates']['candidate_count']}")
     print(f"value quality candidates: {steps['value_quality_candidates']['candidate_count']}")
+    if steps.get("industry_strength"):
+        print(f"industry strength factors: {steps['industry_strength']['row_count']}")
     print(f"candidate pool: {steps['candidate_pool']['candidate_count']}")
     print(f"candidate pool check: {steps['candidate_pool_check']['conclusion']}")
     print(f"watchlist report: {metadata['outputs']['watchlist_report']}")
@@ -146,6 +165,8 @@ def parse_args() -> argparse.Namespace:
         default="data/metadata/value_quality_candidates.json",
         help="Output value quality candidate metadata JSON.",
     )
+    parser.add_argument("--industry-strength-output", default="data/processed/industry_strength_factors.csv", help="Output industry strength factor CSV.")
+    parser.add_argument("--industry-strength-metadata", default="data/metadata/industry_strength_factors.json", help="Output industry strength metadata JSON.")
     parser.add_argument("--candidate-pool-output", default="data/processed/candidate_pool.csv", help="Output candidate pool CSV.")
     parser.add_argument("--candidate-pool-metadata", default="data/metadata/candidate_pool.json", help="Output candidate pool metadata JSON.")
     parser.add_argument("--report-output", default="reports/watchlist.md", help="Output watchlist report Markdown.")
@@ -170,6 +191,8 @@ def main() -> int:
             Path(args.trend_candidates_metadata),
             Path(args.value_quality_candidates_output),
             Path(args.value_quality_candidates_metadata),
+            Path(args.industry_strength_output),
+            Path(args.industry_strength_metadata),
             Path(args.candidate_pool_output),
             Path(args.candidate_pool_metadata),
             Path(args.report_output),
