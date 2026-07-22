@@ -24,6 +24,8 @@ class DashboardCandidatePoolApiTest(unittest.TestCase):
                         "combined_score",
                         "portfolio_fit_status",
                         "data_quality_status",
+                        "technical_health_status",
+                        "technical_health_score",
                     ],
                 )
                 writer.writeheader()
@@ -37,6 +39,8 @@ class DashboardCandidatePoolApiTest(unittest.TestCase):
                         "combined_score": "180",
                         "portfolio_fit_status": "watch",
                         "data_quality_status": "partial",
+                        "technical_health_status": "weak",
+                        "technical_health_score": "-12",
                     }
                 )
                 writer.writerow(
@@ -49,6 +53,8 @@ class DashboardCandidatePoolApiTest(unittest.TestCase):
                         "combined_score": "220",
                         "portfolio_fit_status": "ready_for_plan",
                         "data_quality_status": "complete",
+                        "technical_health_status": "strong",
+                        "technical_health_score": "18",
                     }
                 )
 
@@ -60,8 +66,9 @@ class DashboardCandidatePoolApiTest(unittest.TestCase):
                 result = dashboard.filtered_candidates(
                     {
                         "board": ["star"],
-                        "sort": ["combined_score"],
-                        "direction": ["desc"],
+                        "technical_health_status": ["weak"],
+                        "sort": ["technical_health_score"],
+                        "direction": ["asc"],
                     }
                 )
             finally:
@@ -71,8 +78,12 @@ class DashboardCandidatePoolApiTest(unittest.TestCase):
         self.assertEqual(result["filtered_count"], 1)
         self.assertEqual(result["items"][0]["code"], "688001")
         self.assertEqual(result["items"][0]["board"], "star")
+        self.assertEqual(result["items"][0]["technical_health_status"], "weak")
+        self.assertEqual(result["items"][0]["technical_health_score"], -12)
         self.assertEqual(result["filters"]["board"]["chinext"], 1)
         self.assertEqual(result["filters"]["board"]["star"], 1)
+        self.assertEqual(result["filters"]["technical_health_status"]["strong"], 1)
+        self.assertEqual(result["filters"]["technical_health_status"]["weak"], 1)
 
 
 if __name__ == "__main__":

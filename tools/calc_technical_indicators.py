@@ -126,7 +126,17 @@ def ema_series(values: list[float], period: int) -> list[float | None]:
 
 def macd(closes: list[float]) -> dict[str, Any]:
     if len(closes) < 35:
-        return {"status": "insufficient", "dif": None, "dea": None, "histogram": None}
+        return {
+            "status": "insufficient",
+            "dif": None,
+            "dea": None,
+            "histogram": None,
+            "previous_dif": None,
+            "previous_dea": None,
+            "previous_histogram": None,
+            "histogram_delta": None,
+            "cross_status": "insufficient",
+        }
     ema12 = ema_series(closes, 12)
     ema26 = ema_series(closes, 26)
     dif_values = [None if fast is None or slow is None else fast - slow for fast, slow in zip(ema12, ema26)]
@@ -135,8 +145,35 @@ def macd(closes: list[float]) -> dict[str, Any]:
     dea: list[float | None] = [None] * (len(dif_values) - len(dea_valid)) + dea_valid
     latest_dif = dif_values[-1]
     latest_dea = dea[-1]
+    previous_dif = dif_values[-2] if len(dif_values) >= 2 else None
+    previous_dea = dea[-2] if len(dea) >= 2 else None
     histogram = None if latest_dif is None or latest_dea is None else 2 * (latest_dif - latest_dea)
-    return {"status": "ok", "dif": rounded(latest_dif), "dea": rounded(latest_dea), "histogram": rounded(histogram)}
+    previous_histogram = None if previous_dif is None or previous_dea is None else 2 * (previous_dif - previous_dea)
+    histogram_delta = None if histogram is None or previous_histogram is None else histogram - previous_histogram
+    cross_status = "neutral"
+    if latest_dif is None or latest_dea is None or previous_dif is None or previous_dea is None:
+        cross_status = "insufficient"
+    elif previous_dif >= previous_dea and latest_dif < latest_dea:
+        cross_status = "dead_cross"
+    elif previous_dif <= previous_dea and latest_dif > latest_dea:
+        cross_status = "golden_cross"
+    elif latest_dif < latest_dea:
+        cross_status = "bearish"
+    elif latest_dif > latest_dea and histogram_delta is not None and histogram_delta < 0:
+        cross_status = "turning_weak"
+    elif latest_dif > latest_dea:
+        cross_status = "bullish"
+    return {
+        "status": "ok",
+        "dif": rounded(latest_dif),
+        "dea": rounded(latest_dea),
+        "histogram": rounded(histogram),
+        "previous_dif": rounded(previous_dif),
+        "previous_dea": rounded(previous_dea),
+        "previous_histogram": rounded(previous_histogram),
+        "histogram_delta": rounded(histogram_delta),
+        "cross_status": cross_status,
+    }
 
 
 def bollinger(closes: list[float], period: int = 20) -> dict[str, Any]:

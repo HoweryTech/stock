@@ -1535,6 +1535,11 @@ th:nth-child(8) { width: 100px; }
 .candidate-ready .candidate-status-pill { background: var(--green-bg); color: var(--green); }
 .candidate-watch .candidate-status-pill { background: var(--amber-bg); color: var(--amber); }
 .candidate-deferred .candidate-status-pill { background: var(--red-bg); color: var(--red); }
+.candidate-status-pill.candidate-tech-strong { background: var(--green-bg); color: var(--green); }
+.candidate-status-pill.candidate-tech-watch { background: var(--blue-bg); color: var(--blue); }
+.candidate-status-pill.candidate-tech-weak { background: var(--amber-bg); color: var(--amber); }
+.candidate-status-pill.candidate-tech-blocked { background: var(--red-bg); color: var(--red); }
+.candidate-status-pill.candidate-tech-insufficient { background: #eef1f4; color: var(--muted); }
 .candidate-evidence-row td { background: #fafbfc; border-top: 0; color: var(--muted); font-size: 12px; line-height: 1.45; padding-top: 0; }
 .candidate-card {
   background: var(--surface);

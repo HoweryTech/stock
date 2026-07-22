@@ -97,6 +97,45 @@ class MergeCandidatePoolTest(unittest.TestCase):
         self.assertEqual(candidates[0]["risk_penalty_score"], 0.0)
         self.assertEqual(candidates[0]["combined_score"], 243.5)
 
+    def test_adds_multi_period_technical_health_penalty(self) -> None:
+        candidates = merge_candidates(
+            [{"code": "600000", "score": "7", "reasons": "趋势强。", "risks": ""}],
+            [],
+            technical_context={
+                "600000": {
+                    "code": "600000",
+                    "periods": {
+                        "daily": {
+                            "bar_count": 80,
+                            "close": 9.8,
+                            "macd": {"status": "ok", "cross_status": "dead_cross", "histogram": -0.06},
+                            "boll": {"status": "ok", "middle": 10.2, "percent_b": 0.18},
+                            "rsi": {"status": "ok", "rsi14": 32},
+                            "kdj": {"status": "ok", "k": 28, "d": 35, "j": 14},
+                            "atr": {"status": "ok", "atr_pct": 3.2},
+                            "volume": {"status": "ok", "volume_ratio_20": 0.68},
+                        },
+                        "weekly": {
+                            "bar_count": 40,
+                            "close": 9.8,
+                            "macd": {"status": "ok", "cross_status": "bearish", "histogram": -0.12},
+                            "boll": {"status": "ok", "middle": 10.5, "percent_b": 0.25},
+                            "rsi": {"status": "ok", "rsi14": 38},
+                            "kdj": {"status": "ok", "k": 35, "d": 42, "j": 21},
+                            "atr": {"status": "ok", "atr_pct": 3.8},
+                            "volume": {"status": "ok", "volume_ratio_20": 0.9},
+                        },
+                        "monthly": {"bar_count": 6, "macd": {"status": "insufficient"}},
+                    },
+                }
+            },
+        )
+
+        self.assertEqual(candidates[0]["technical_health_status"], "blocked")
+        self.assertLess(candidates[0]["technical_health_score"], 0)
+        self.assertIn("daily MACD偏弱", candidates[0]["technical_health_evidence"])
+        self.assertIn("daily_macd_dead_cross", candidates[0]["technical_risk_flags"])
+
     def test_merges_event_catalyst_as_third_strategy(self) -> None:
         candidates = merge_candidates(
             [{"code": "300750", "score": "12.5", "reasons": "趋势强。", "risks": ""}],

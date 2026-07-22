@@ -105,6 +105,7 @@ def read_candidate_pool(path: Path) -> list[dict[str, object]]:
                 "industry_strength_score",
                 "data_quality_score",
                 "risk_penalty_score",
+                "technical_health_score",
                 "current_stock_position_pct",
                 "current_industry_position_pct",
                 "current_total_position_pct",
@@ -138,6 +139,7 @@ def candidate_filters(items: list[dict[str, object]]) -> dict[str, object]:
         "strategy": option_counts(items, "strategies_list"),
         "portfolio_fit_status": option_counts(items, "portfolio_fit_status"),
         "data_quality_status": option_counts(items, "data_quality_status"),
+        "technical_health_status": option_counts(items, "technical_health_status"),
     }
 
 
@@ -151,6 +153,7 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
         "industry": query.get("industry", [""])[0],
         "portfolio_fit_status": query.get("portfolio_fit_status", [""])[0],
         "data_quality_status": query.get("data_quality_status", [""])[0],
+        "technical_health_status": query.get("technical_health_status", [""])[0],
     }
     strategy = query.get("strategy", [""])[0]
 
@@ -175,6 +178,7 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
         "industry_strength_score",
         "liquidity_score",
         "risk_penalty_score",
+        "technical_health_score",
         "expected_total_position_pct_after_buy",
     }
     if sort_key in sortable_numeric:

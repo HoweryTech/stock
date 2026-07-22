@@ -82,6 +82,8 @@ def evidence_dimensions(candidate: dict[str, str], strategies: list[str], reason
         dimensions.add("industry")
     if "event_catalyst" in strategies or text_contains(text, ("公告", "回购", "增持", "减持", "解禁", "合同", "政策", "问询", "重组")):
         dimensions.add("event")
+    if candidate.get("technical_health_status") or candidate.get("technical_health_evidence") or text_contains(text, ("MACD", "BOLL", "RSI", "KDJ", "ATR", "量比")):
+        dimensions.add("technical")
     if risks:
         dimensions.add("risk")
 
@@ -131,6 +133,9 @@ def check_candidate(candidate: dict[str, str], context: CheckContext | None = No
         "data_quality_evidence": "数据质量证据",
         "risk_penalty_score": "风险扣分",
         "risk_penalty_evidence": "风险扣分证据",
+        "technical_health_score": "技术健康分",
+        "technical_health_status": "技术健康状态",
+        "technical_health_evidence": "技术健康证据",
     }
     missing_score_fields = [label for field, label in score_fields.items() if not candidate.get(field)]
     if missing_score_fields:
@@ -147,6 +152,14 @@ def check_candidate(candidate: dict[str, str], context: CheckContext | None = No
     liquidity_score = parse_float(candidate.get("liquidity_score", ""))
     if liquidity_score is not None and liquidity_score < 20:
         items.append(CheckItem(code, "warning", f"流动性评分 {liquidity_score:.2f} 偏低，需确认买卖可执行性。"))
+
+    technical_status = candidate.get("technical_health_status")
+    if technical_status == "blocked":
+        items.append(CheckItem(code, "blocker", "技术健康状态为 blocked，日线/周线技术面转弱，不能直接进入买入计划。"))
+    elif technical_status == "weak":
+        items.append(CheckItem(code, "warning", "技术健康状态为 weak，需等待转强或人工确认反转证据。"))
+    elif technical_status == "insufficient":
+        items.append(CheckItem(code, "warning", "多周期技术指标样本不足，需补齐日线/周线/月线后再确认技术面。"))
 
     if context.as_of is not None and has_strategy(candidate, "trend_strength") and candidate.get("trade_date"):
         trade_date = parse_date(candidate.get("trade_date", ""))

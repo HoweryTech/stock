@@ -37,6 +37,8 @@ class RunWatchlistPipelineTest(unittest.TestCase):
                 base / "event_catalyst_candidates.json",
                 base / "industry_strength.csv",
                 base / "industry_strength.json",
+                base / "technical-indicators.json",
+                base / "technical-indicators.md",
                 base / "candidate_pool.csv",
                 base / "candidate_pool.json",
                 base / "candidate_portfolio_fit.json",
@@ -52,8 +54,10 @@ class RunWatchlistPipelineTest(unittest.TestCase):
         self.assertEqual(metadata["steps"]["value_quality_candidates"]["candidate_count"], 1)
         self.assertEqual(metadata["steps"]["event_catalyst_candidates"]["candidate_count"], 1)
         self.assertEqual(metadata["steps"]["industry_strength"]["row_count"], 3)
+        self.assertEqual(metadata["steps"]["technical_indicators"]["code_count"], 3)
         self.assertEqual(metadata["steps"]["candidate_pool"]["candidate_count"], 3)
         self.assertEqual(metadata["steps"]["candidate_pool"]["input_counts"]["event_catalyst"], 1)
+        self.assertEqual(metadata["steps"]["candidate_pool"]["input_counts"]["technical_indicators"], 3)
         self.assertEqual(metadata["steps"]["candidate_pool"]["enriched_count"], 3)
         self.assertEqual(metadata["steps"]["candidate_pool"]["liquidity_scored_count"], 3)
         self.assertEqual(metadata["steps"]["candidate_pool"]["industry_strength_scored_count"], 3)

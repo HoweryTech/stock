@@ -17,6 +17,9 @@ def scoring_fields(**overrides: str) -> dict[str, str]:
         "data_quality_evidence": "已具备：入选证据, 风险提示, 流动性",
         "risk_penalty_score": "-3.0",
         "risk_penalty_evidence": "风险提示 1 条",
+        "technical_health_score": "8.0",
+        "technical_health_status": "watch",
+        "technical_health_evidence": "daily MACD偏强；weekly RSI14健康",
         "liquidity_score": "100.0",
         "liquidity_evidence": "趋势窗口平均成交额 10090000000",
     }
@@ -68,6 +71,25 @@ class CheckCandidatePoolTest(unittest.TestCase):
         self.assertTrue(any(item.level == "warning" and "单策略候选" in item.message for item in items))
         self.assertTrue(any(item.level == "warning" and "缺少显式风险提示" in item.message for item in items))
         self.assertTrue(any(item.level == "warning" and "少于 2 个非风险维度" in item.message for item in items))
+
+    def test_blocks_technical_health_blocked_candidate(self) -> None:
+        candidate = {
+            "code": "600000",
+            "strategies": "trend_strength|value_quality",
+            "primary_strategy": "multi_strategy",
+            "trend_score": "7.6",
+            "value_quality_score": "18.8",
+            "trade_date": "2026-07-02",
+            "report_period": "2026-03-31",
+            "reasons": "[trend_strength] 趋势强，近 2 日平均成交额 10090000000。 | [value_quality] PE 分位 68.00 <= 80.00。",
+            "risks": "[trend_strength] 日线MACD死叉。",
+            **scoring_fields(technical_health_status="blocked", technical_health_score="-24.0", technical_health_evidence="daily MACD偏弱；weekly MACD偏弱"),
+        }
+
+        result = check_candidates([candidate])
+
+        self.assertEqual(result["conclusion"], "blocked")
+        self.assertTrue(any("技术健康状态为 blocked" in item["message"] for item in result["blockers"]))
 
     def test_blocks_candidate_outside_tradable_universe(self) -> None:
         result = check_candidates(
@@ -136,6 +158,9 @@ class CheckCandidatePoolTest(unittest.TestCase):
                         "data_quality_evidence",
                         "risk_penalty_score",
                         "risk_penalty_evidence",
+                        "technical_health_score",
+                        "technical_health_status",
+                        "technical_health_evidence",
                         "liquidity_score",
                         "liquidity_evidence",
                         "reasons",

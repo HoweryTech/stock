@@ -13,6 +13,9 @@ from typing import Any
 try:
     from tools.apply_candidate_portfolio_fit import apply_portfolio_fit
     from tools.calc_industry_strength import run_calculation as run_industry_strength_calculation
+    from tools.calc_technical_indicators import build_report as build_technical_indicators_report
+    from tools.calc_technical_indicators import render_markdown as render_technical_indicators_markdown
+    from tools.calc_technical_indicators import write_json as write_technical_indicators_json
     from tools.calc_trend_factors import parse_windows, run_calculation
     from tools.check_candidate_pool import run_check as run_candidate_pool_check
     from tools.generate_watchlist_report import run_report
@@ -25,6 +28,9 @@ try:
 except ModuleNotFoundError:
     from apply_candidate_portfolio_fit import apply_portfolio_fit
     from calc_industry_strength import run_calculation as run_industry_strength_calculation
+    from calc_technical_indicators import build_report as build_technical_indicators_report
+    from calc_technical_indicators import render_markdown as render_technical_indicators_markdown
+    from calc_technical_indicators import write_json as write_technical_indicators_json
     from calc_trend_factors import parse_windows, run_calculation
     from check_candidate_pool import run_check as run_candidate_pool_check
     from generate_watchlist_report import run_report
@@ -68,6 +74,8 @@ def run_pipeline(
     event_catalyst_candidates_metadata: Path,
     industry_strength_output: Path,
     industry_strength_metadata: Path,
+    technical_indicators_output: Path,
+    technical_indicators_markdown_output: Path,
     candidate_pool_output: Path,
     candidate_pool_metadata: Path,
     candidate_portfolio_fit_metadata: Path,
@@ -106,6 +114,10 @@ def run_pipeline(
             industry_strength_metadata,
             windows,
         )
+    technical_indicators = build_technical_indicators_report(daily_bars_path)
+    write_technical_indicators_json(technical_indicators_output, technical_indicators)
+    technical_indicators_markdown_output.parent.mkdir(parents=True, exist_ok=True)
+    technical_indicators_markdown_output.write_text(render_technical_indicators_markdown(technical_indicators), encoding="utf-8")
     candidate_pool = run_merge(
         trend_candidates_output,
         value_quality_candidates_output,
@@ -114,6 +126,7 @@ def run_pipeline(
         event_catalyst_candidates_output if event_catalyst_candidates is not None else None,
         universe_path,
         industry_strength_output if industry_strength is not None else None,
+        technical_indicators_output,
     )
     candidate_portfolio_fit = None
     if position_patterns:
@@ -148,6 +161,13 @@ def run_pipeline(
             "value_quality_candidates": value_quality_candidates,
             "event_catalyst_candidates": event_catalyst_candidates,
             "industry_strength": industry_strength,
+            "technical_indicators": {
+                "output": str(technical_indicators_output),
+                "markdown_output": str(technical_indicators_markdown_output),
+                "code_count": technical_indicators["source"]["code_count"],
+                "periods": technical_indicators["indicator_policy"]["periods"],
+                "indicators": technical_indicators["indicator_policy"]["indicators"],
+            },
             "candidate_pool": candidate_pool,
             "candidate_portfolio_fit": candidate_portfolio_fit,
             "candidate_pool_check": candidate_pool_check,
@@ -159,6 +179,8 @@ def run_pipeline(
             "value_quality_candidates": str(value_quality_candidates_output),
             "event_catalyst_candidates": str(event_catalyst_candidates_output) if event_catalyst_candidates is not None else None,
             "industry_strength": str(industry_strength_output) if industry_strength is not None else None,
+            "technical_indicators": str(technical_indicators_output),
+            "technical_indicators_markdown": str(technical_indicators_markdown_output),
             "candidate_pool": str(candidate_pool_output),
             "candidate_portfolio_fit": str(candidate_portfolio_fit_metadata) if candidate_portfolio_fit else None,
             "watchlist_report": str(report_output),
@@ -178,6 +200,7 @@ def print_summary(metadata: dict[str, Any]) -> None:
         print(f"event catalyst candidates: {steps['event_catalyst_candidates']['candidate_count']}")
     if steps.get("industry_strength"):
         print(f"industry strength factors: {steps['industry_strength']['row_count']}")
+    print(f"technical indicators: {steps['technical_indicators']['code_count']}")
     print(f"candidate pool: {steps['candidate_pool']['candidate_count']}")
     if steps.get("candidate_portfolio_fit"):
         print(f"portfolio fit: {steps['candidate_portfolio_fit']['status_counts']}")
@@ -212,6 +235,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--event-catalyst-candidates-metadata", default="data/metadata/event_catalyst_candidates.json", help="Output event catalyst candidate metadata JSON.")
     parser.add_argument("--industry-strength-output", default="data/processed/industry_strength_factors.csv", help="Output industry strength factor CSV.")
     parser.add_argument("--industry-strength-metadata", default="data/metadata/industry_strength_factors.json", help="Output industry strength metadata JSON.")
+    parser.add_argument("--technical-indicators-output", default="data/metadata/technical-indicators.json", help="Output multi-period technical indicators JSON.")
+    parser.add_argument("--technical-indicators-markdown-output", default="reports/technical-indicators.md", help="Output multi-period technical indicators Markdown.")
     parser.add_argument("--candidate-pool-output", default="data/processed/candidate_pool.csv", help="Output candidate pool CSV.")
     parser.add_argument("--candidate-pool-metadata", default="data/metadata/candidate_pool.json", help="Output candidate pool metadata JSON.")
     parser.add_argument("--candidate-portfolio-fit-metadata", default="data/metadata/candidate_portfolio_fit.json", help="Output candidate portfolio fit metadata JSON.")
@@ -245,6 +270,8 @@ def main() -> int:
             Path(args.event_catalyst_candidates_metadata),
             Path(args.industry_strength_output),
             Path(args.industry_strength_metadata),
+            Path(args.technical_indicators_output),
+            Path(args.technical_indicators_markdown_output),
             Path(args.candidate_pool_output),
             Path(args.candidate_pool_metadata),
             Path(args.candidate_portfolio_fit_metadata),

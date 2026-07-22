@@ -6,6 +6,7 @@ const candidateState = {
   strategy: "",
   portfolio_fit_status: "",
   data_quality_status: "",
+  technical_health_status: "",
   sort: "combined_score",
   direction: "desc",
   lastFilters: null,
@@ -31,6 +32,13 @@ const candidateLabels = {
     partial: "部分",
     weak: "偏弱",
   },
+  technical_health_status: {
+    strong: "强",
+    watch: "观察",
+    weak: "偏弱",
+    blocked: "拦截",
+    insufficient: "样本不足",
+  },
   strategy: {
     trend_strength: "趋势强度",
     value_quality: "价值质量",
@@ -45,7 +53,7 @@ const candidateLabel = (group, value) => candidateLabels[group]?.[value] || valu
 
 function candidateQuery() {
   const params = new URLSearchParams();
-  ["search", "exchange", "board", "industry", "strategy", "portfolio_fit_status", "data_quality_status", "sort", "direction"].forEach(key => {
+  ["search", "exchange", "board", "industry", "strategy", "portfolio_fit_status", "data_quality_status", "technical_health_status", "sort", "direction"].forEach(key => {
     if (candidateState[key]) params.set(key, candidateState[key]);
   });
   params.set("limit", "300");
@@ -77,6 +85,7 @@ function syncFilterOptions(filters) {
   setOptions(document.querySelector("#candidateStrategyFilter"), filters.strategy, "strategy", "全部策略");
   setOptions(document.querySelector("#candidatePortfolioFilter"), filters.portfolio_fit_status, "portfolio_fit_status", "全部组合状态");
   setOptions(document.querySelector("#candidateQualityFilter"), filters.data_quality_status, "data_quality_status", "全部质量");
+  setOptions(document.querySelector("#candidateTechnicalFilter"), filters.technical_health_status, "technical_health_status", "全部技术面");
 }
 
 function statusClass(status) {
@@ -85,6 +94,16 @@ function statusClass(status) {
     watch: "candidate-watch",
     deferred_by_portfolio: "candidate-deferred",
   }[status] || "candidate-unknown";
+}
+
+function technicalClass(status) {
+  return {
+    strong: "candidate-tech-strong",
+    watch: "candidate-tech-watch",
+    weak: "candidate-tech-weak",
+    blocked: "candidate-tech-blocked",
+    insufficient: "candidate-tech-insufficient",
+  }[status] || "candidate-tech-insufficient";
 }
 
 function strategiesText(item) {
@@ -96,6 +115,7 @@ function candidateEvidence(item) {
     item.strategy_confluence_evidence,
     item.data_quality_evidence,
     item.risk_penalty_evidence,
+    item.technical_health_evidence,
     item.portfolio_fit_evidence,
   ].filter(Boolean);
   return parts.length ? parts.join(" | ") : "暂无扩展证据。";
@@ -103,6 +123,7 @@ function candidateEvidence(item) {
 
 function candidateRow(item) {
   const status = item.portfolio_fit_status || "";
+  const technicalStatus = item.technical_health_status || "";
   return `<tr class="candidate-row ${statusClass(status)}">
     <td><strong>${candidateEscape(item.code)}</strong><span>${candidateEscape(item.name || "-")}</span><em>${candidateEscape(item.industry || "-")}</em></td>
     <td>${candidateEscape(candidateLabel("exchange", item.exchange))}<br><span>${candidateEscape(candidateLabel("board", item.board))}</span></td>
@@ -111,21 +132,24 @@ function candidateRow(item) {
     <td class="number">${candidateNumber(item.industry_strength_score)}</td>
     <td class="number">${candidateNumber(item.liquidity_score)}</td>
     <td class="number">${candidateNumber(item.risk_penalty_score)}</td>
+    <td><span class="candidate-status-pill ${technicalClass(technicalStatus)}">${candidateEscape(candidateLabel("technical_health_status", technicalStatus))}</span><br><span class="number">${candidateNumber(item.technical_health_score)}</span></td>
     <td class="number">${candidatePct(item.expected_total_position_pct_after_buy)}</td>
     <td><span class="candidate-status-pill">${candidateEscape(candidateLabel("portfolio_fit_status", status))}</span></td>
   </tr>
   <tr class="candidate-evidence-row">
-    <td colspan="9">${candidateEscape(candidateEvidence(item))}</td>
+    <td colspan="10">${candidateEscape(candidateEvidence(item))}</td>
   </tr>`;
 }
 
 function candidateCard(item) {
   const status = item.portfolio_fit_status || "";
+  const technicalStatus = item.technical_health_status || "";
   return `<article class="candidate-card ${statusClass(status)}">
     <div><strong>${candidateEscape(item.code)} ${candidateEscape(item.name || "")}</strong><span>${candidateEscape(candidateLabel("portfolio_fit_status", status))}</span></div>
     <p>${candidateEscape(item.industry || "-")} · ${candidateEscape(candidateLabel("board", item.board))} · 综合分 ${candidateNumber(item.combined_score)}</p>
     <dl>
       <dt>策略</dt><dd>${candidateEscape(strategiesText(item))}</dd>
+      <dt>技术面</dt><dd>${candidateEscape(candidateLabel("technical_health_status", technicalStatus))} ${candidateNumber(item.technical_health_score)}</dd>
       <dt>流动性</dt><dd>${candidateNumber(item.liquidity_score)}</dd>
       <dt>风险扣分</dt><dd>${candidateNumber(item.risk_penalty_score)}</dd>
       <dt>买入后总仓位</dt><dd>${candidatePct(item.expected_total_position_pct_after_buy)}</dd>
@@ -177,6 +201,7 @@ function initCandidateList() {
     ["#candidateStrategyFilter", "strategy"],
     ["#candidatePortfolioFilter", "portfolio_fit_status"],
     ["#candidateQualityFilter", "data_quality_status"],
+    ["#candidateTechnicalFilter", "technical_health_status"],
   ].forEach(([selector, key]) => {
     document.querySelector(selector)?.addEventListener("change", event => updateCandidateFilter(key, event.target.value));
   });

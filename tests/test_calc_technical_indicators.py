@@ -70,6 +70,8 @@ class CalcTechnicalIndicatorsTest(unittest.TestCase):
         for name in ("macd", "boll", "rsi", "kdj", "atr", "volume"):
             self.assertEqual(daily[name]["status"], "ok")
         self.assertIsNotNone(daily["macd"]["histogram"])
+        self.assertIn(daily["macd"]["cross_status"], {"bullish", "bearish", "turning_weak", "golden_cross", "dead_cross", "neutral"})
+        self.assertIsNotNone(daily["macd"]["histogram_delta"])
         self.assertIsNotNone(daily["boll"]["percent_b"])
         self.assertIsNotNone(daily["rsi"]["rsi14"])
         self.assertIsNotNone(daily["kdj"]["j"])

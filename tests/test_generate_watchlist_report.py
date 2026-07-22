@@ -66,6 +66,10 @@ class GenerateWatchlistReportTest(unittest.TestCase):
                 "liquidity_evidence": "趋势窗口平均成交额 10090000000",
                 "industry_strength_score": "15",
                 "industry_strength_evidence": "行业近 2 日收益率 1.52%",
+                "technical_health_score": "12.5",
+                "technical_health_status": "watch",
+                "technical_health_evidence": "daily MACD偏强；weekly RSI14健康",
+                "technical_risk_flags": "",
                 "portfolio_fit_status": "ready_for_plan",
                 "portfolio_fit_action": "prepare_trade_plan",
                 "portfolio_fit_evidence": "组合仓位、行业暴露和策略健康检查未发现阻断。",
@@ -94,6 +98,8 @@ class GenerateWatchlistReportTest(unittest.TestCase):
         self.assertIn("趋势窗口平均成交额", report)
         self.assertIn("行业强度分：15", report)
         self.assertIn("行业近 2 日收益率", report)
+        self.assertIn("技术健康状态：watch", report)
+        self.assertIn("daily MACD偏强", report)
         self.assertIn("组合适配状态：ready_for_plan", report)
         self.assertIn("买入后总仓位：35.0", report)
         self.assertIn("[value_quality] 质量好。", report)
