@@ -417,6 +417,57 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertEqual(alert["active_path"], "path2_rebound")
         self.assertEqual(alert["severity"], "action")
 
+    def test_near_stop_path3_recovery_downgrades_exit_risk_state(self) -> None:
+        portfolio = portfolio_result(actions=[{"code": "stop_loss_triggered", "message": "旧持仓价触发止损。"}])
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 9.50
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_confirmed"] = True
+        item = intraday_item()
+        item["quote"]["latest_price"] = 10.02
+        item["technicals"]["ma5"] = 9.90
+        report = build_report(
+            {"items": [item]},
+            portfolio,
+            t_result(blockers=[{"code": "near_stop_loss", "message": "距离止损不足1%。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            None,
+            minute_bars=positive_minute_bars(),
+            generated_at=datetime(2026, 7, 16, 9, 40, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(report["intraday_trigger_alerts"][0]["active_path"], "path3_recover")
+        self.assertEqual(report["intraday_trigger_alerts"][0]["action_label"], "风险降级观察")
+        self.assertEqual(card["state"], "risk_downgrade_watch")
+        self.assertEqual(card["state_label"], "风险降级观察")
+        self.assertEqual(card["manual_execution_plan"]["status_label"], "风险降级观察")
+        self.assertFalse(card["decision"]["execution_allowed"])
+        self.assertFalse(any("距离止损不足" in item for item in card["blockers"]))
+
+    def test_near_stop_without_minute_confirmation_keeps_exit_risk_state(self) -> None:
+        portfolio = portfolio_result()
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 9.50
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_confirmed"] = True
+        item = intraday_item()
+        item["quote"]["latest_price"] = 10.02
+        item["technicals"]["ma5"] = 9.90
+        report = build_report(
+            {"items": [item]},
+            portfolio,
+            t_result(blockers=[{"code": "near_stop_loss", "message": "距离止损不足1%。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            None,
+            generated_at=datetime(2026, 7, 16, 9, 40, 0),
+        )
+
+        card = report["cards"][0]
+
+        self.assertEqual(card["state"], "exit_risk_review")
+        self.assertEqual(card["state_label"], "退出风险优先")
+        self.assertEqual(report["intraday_trigger_alerts"][0]["active_path"], None)
+
     def test_unconfirmed_imported_stop_reference_does_not_take_exit_priority(self) -> None:
         portfolio = portfolio_result()
         result = portfolio["positions"][0]["result"]

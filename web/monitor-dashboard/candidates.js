@@ -249,17 +249,13 @@ function updateCandidateSort(key) {
   }
 
   const existing = candidateState.sorts.find(item => item.key === key);
-  if (existing) {
-    existing.direction = existing.direction === "asc" ? "desc" : "asc";
-  } else {
-    candidateState.sorts = [
-      ...candidateState.sorts.filter(item => item.key !== key),
-      {key, direction: defaultSortDirection(key)},
-    ];
-  }
-  if (!candidateState.sorts.some(item => item.key === "combined_score")) {
-    candidateState.sorts.unshift({key: "combined_score", direction: "desc"});
-  }
+  const nextDirection = existing ? (existing.direction === "asc" ? "desc" : "asc") : defaultSortDirection(key);
+  const remainingSorts = candidateState.sorts.filter(item => item.key !== key && item.key !== "combined_score");
+  candidateState.sorts = [
+    {key, direction: nextDirection},
+    {key: "combined_score", direction: "desc"},
+    ...remainingSorts,
+  ];
   void refreshCandidateList();
 }
 

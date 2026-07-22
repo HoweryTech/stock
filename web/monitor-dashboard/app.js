@@ -35,6 +35,7 @@ const labels = {
   market_wait: "等待时段",
   risk_review: "风险处置",
   exit_risk_review: "退出风险",
+  risk_downgrade_watch: "风险降级观察",
   risk_reduction_review: "仓位复核",
   data_insufficient: "数据不足",
   positive_t_watch: "正T观察",

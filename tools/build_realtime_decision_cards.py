@@ -22,6 +22,7 @@ STATE_LABELS = {
     "market_wait": "非交易时段，等待行情",
     "data_stale": "行情过期，暂停盘中判断",
     "exit_risk_review": "退出风险优先",
+    "risk_downgrade_watch": "风险降级观察",
     "reverse_buyback_review": "反T回补复核",
     "data_insufficient": "数据不足，暂不决策",
     "risk_reduction_review": "仓位风险复核",
@@ -35,6 +36,7 @@ ACTION_LABELS = {
     "wait_for_market_session": "等待交易时段刷新",
     "pause_intraday_decision": "暂停实时决策，等待行情刷新",
     "create_exit_or_risk_review": "止损风险优先：不补仓、不做T",
+    "watch_risk_downgrade": "风险已降级：观察复核",
     "review_reverse_t_buyback": "反T回补复核：只处理已卖出腿",
     "complete_data_before_decision": "补齐行情、止损和样本数据",
     "review_position_reduction": "仓位超限：核算减仓",
@@ -372,11 +374,31 @@ def decision_priority(state: str) -> int:
         "market_wait": 75,
         "data_insufficient": 70,
         "risk_reduction_review": 60,
+        "risk_downgrade_watch": 55,
         "positive_t_watch": 45,
         "reverse_t_watch": 40,
         "hold_no_add": 50,
         "observe": 10,
     }.get(state, 0)
+
+
+def near_stop_path3_recovered(
+    intraday: dict[str, Any],
+    portfolio: dict[str, Any] | None,
+    minute_confirmation: dict[str, Any] | None = None,
+) -> bool:
+    calculations = (portfolio or {}).get("calculations", {})
+    current = as_float(value_at(intraday, "quote.latest_price"))
+    stop_loss = as_float(calculations.get("stop_loss_price"))
+    stop_loss_confirmed = bool(calculations.get("stop_loss_confirmed", stop_loss is not None))
+    ma5 = as_float(value_at(intraday, "technicals.ma5"))
+    minute_status = str((minute_confirmation or {}).get("status") or "")
+    if current is None or stop_loss is None or not stop_loss_confirmed or current <= stop_loss or minute_status != "confirm":
+        return False
+    recover_price = stop_loss * 1.012
+    if ma5 is not None:
+        recover_price = max(recover_price, ma5)
+    return current >= recover_price
 
 
 def indicator_value(period_data: dict[str, Any], path: str) -> float | None:
@@ -1889,6 +1911,7 @@ def choose_state(
     technical_assessment: dict[str, Any] | None = None,
     t_performance_gate: dict[str, Any] | None = None,
     execution_quality_gate: dict[str, Any] | None = None,
+    minute_confirmation: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     signal_codes = {item.get("code") for item in intraday.get("signals", [])}
     portfolio_action_codes = {item.get("code") for item in (portfolio or {}).get("actions", [])}
@@ -1914,8 +1937,19 @@ def choose_state(
             states.append(("data_stale", "行情、日线或分钟线存在过期数据，不能给实时执行建议。"))
     if quality_status in QUALITY_BLOCKER_STATUSES:
         states.append(("data_insufficient", "行情、日线或分钟线数据缺失或样本不足，不能验证盘中建议。"))
-    if portfolio_action_codes & {"stop_loss_triggered"} or t_blockers & HARD_T_BLOCKERS:
+    recovered_from_near_stop = near_stop_path3_recovered(intraday, portfolio, minute_confirmation)
+    current = as_float(value_at(intraday, "quote.latest_price"))
+    stop_loss = as_float(value_at(portfolio or {}, "calculations.stop_loss_price"))
+    confirmed_value = value_at(portfolio or {}, "calculations.stop_loss_confirmed")
+    stop_loss_confirmed = bool(stop_loss is not None if confirmed_value is None else confirmed_value)
+    live_stop_loss_triggered = current is not None and stop_loss is not None and stop_loss_confirmed and current <= stop_loss
+    stale_stop_loss_signal = bool(portfolio_action_codes & {"stop_loss_triggered"} and not live_stop_loss_triggered)
+    hard_exit_triggered = bool(live_stop_loss_triggered or t_blockers & {"limit_down", "stock_suspended"})
+    near_stop_triggered = bool(stale_stop_loss_signal or t_blockers & {"near_stop_loss"})
+    if hard_exit_triggered or (near_stop_triggered and not recovered_from_near_stop):
         states.append(("exit_risk_review", "触发或逼近硬风控，退出风险优先于做T。"))
+    if near_stop_triggered and recovered_from_near_stop:
+        states.append(("risk_downgrade_watch", "已站上恢复价且分钟确认，退出风险降级为观察复核。"))
     if has_open_reverse_leg or reverse_status in {"buyback_ready", "buyback_wait"}:
         states.append(("reverse_buyback_review", "已有反T卖出腿，当前优先复核是否按回补价买回。"))
     hard_data_blockers = t_blockers & DATA_BLOCKERS
@@ -2143,6 +2177,7 @@ def build_evidence(
 
 def build_blockers(
     intraday: dict[str, Any],
+    portfolio: dict[str, Any] | None,
     t_check: dict[str, Any] | None,
     reverse_backtest: dict[str, Any] | None,
     data_quality: dict[str, Any] | None,
@@ -2151,6 +2186,7 @@ def build_blockers(
     execution_quality_gate: dict[str, Any] | None = None,
     liquidity_activity_gate: dict[str, Any] | None = None,
     daily_trade_rhythm: dict[str, Any] | None = None,
+    minute_confirmation: dict[str, Any] | None = None,
 ) -> list[str]:
     blockers: list[str] = []
     if data_quality_status(data_quality) in QUALITY_BLOCKER_STATUSES:
@@ -2160,8 +2196,11 @@ def build_blockers(
     if source_consistency_status(data_quality) == "conflict":
         blockers.extend((data_quality or {}).get("source_consistency", {}).get("issues") or [])
     blockers.extend(signal.get("message") for signal in intraday.get("signals", []) if signal.get("severity") in {"block", "risk"})
+    recovered_from_near_stop = near_stop_path3_recovered(intraday, portfolio, minute_confirmation)
     for item in (t_check or {}).get("blockers", []):
         if data_quality_status(data_quality) == LIMITED_HISTORY_STATUS and item.get("code") == "insufficient_daily_bars":
+            continue
+        if recovered_from_near_stop and item.get("code") == "near_stop_loss":
             continue
         blockers.append(item.get("message"))
     if (technical_assessment or {}).get("label") == "bearish":
@@ -2194,6 +2233,8 @@ def build_next_step(state: str, action_backtest: dict[str, Any] | None, levels: 
         if current is not None and near_block is not None and current <= near_block:
             return f"现价 {current:.2f} 已进入做T阻断区 {near_block:.2f} 附近：先做退出/减仓复核，不做T；若跌破止损价立即转止损退出。"
         return "退出风险优先：本轮不买、不做T；先核对止损价、持仓数量和可卖数量，再决定是否生成止损退出或降风险卖出计划。"
+    if state == "risk_downgrade_watch":
+        return "路径3站稳并分钟确认，退出风险降级为观察复核；本轮不主动卖出，也不补仓、不做T。"
     if state == "reverse_buyback_review":
         buyback = as_float(levels.get("reverse_t_buyback_max_price"))
         if buyback is None:
@@ -2393,7 +2434,7 @@ def build_near_stop_risk_plan(
     stop_loss_confirmed = bool(levels.get("stop_loss_confirmed", stop_loss is not None))
     current_shares = int(as_float(position.get("shares"), 0.0) or 0)
     if (
-        state != "exit_risk_review"
+        state not in {"exit_risk_review", "risk_downgrade_watch"}
         or current is None
         or stop_loss is None
         or not stop_loss_confirmed
@@ -2428,10 +2469,13 @@ def build_near_stop_risk_plan(
     minute_label = str((minute_confirmation or {}).get("status_label") or minute_status)
     distance_text = "-" if distance_pct is None else f"{distance_pct:.2f}%"
     post_trade_shares = max(0, current_shares - shares)
+    recovered = near_stop_path3_recovered({"quote": {"latest_price": current}, "technicals": {"ma5": ma5}}, {"calculations": {"stop_loss_price": stop_loss, "stop_loss_confirmed": stop_loss_confirmed}}, minute_confirmation)
     reason = (
         f"现价距离硬止损仅 {distance_text}，先停止补仓和做T；"
         "按下破、反抽、站稳三条路径等待盘中确认。"
     )
+    if recovered:
+        reason = "路径3已触发：价格站上恢复价且分钟确认通过，本轮退出风险降级为观察复核；不主动卖出。"
     steps = [
         f"路径1-下破：现价小于等于硬止损 {stop_text} 时，立刻转入止损减仓/硬退出计划，不再等待反T或正T信号。",
         f"路径2-反抽：若价格反抽到 {rebound_text} 但技术仍未修复，卖出 {shares} 股风控减仓；成交后预计剩余 {post_trade_shares} 股。",
@@ -2447,9 +2491,9 @@ def build_near_stop_risk_plan(
         "applicable": True,
         "candidate": "risk_exit",
         "plan_type": "near_stop_playbook",
-        "status": "near_stop_review",
-        "status_label": "近硬止损盘中预案",
-        "action_label": "止损风险复核",
+        "status": "path3_recovered" if recovered else "near_stop_review",
+        "status_label": "风险降级观察" if recovered else "近硬止损盘中预案",
+        "action_label": "风险降级观察" if recovered else "止损风险复核",
         "side": "sell",
         "side_label": "卖出",
         "trade_intent": "risk_exit_reduce",
@@ -2900,6 +2944,16 @@ def build_action_steps(
         if blockers:
             steps.append(f"本轮主要提示：{blockers[0]}")
         return steps
+    if state == "risk_downgrade_watch":
+        steps = [
+            "路径3已触发：价格站上恢复价且分钟确认通过，本轮退出风险降级为观察复核。",
+            "这不是交易执行信号；当前不主动卖出，不补仓，不做正T或反T。",
+            "继续刷新决策卡；只有后续重新跌回下破/反抽路径，才再处理风控卖出预案。",
+        ]
+        risk_plan = manual_execution_plan if (manual_execution_plan or {}).get("candidate") == "risk_exit" else {}
+        if risk_plan.get("post_trade_plan"):
+            steps.append(f"后续监控口径：{risk_plan['post_trade_plan']}")
+        return steps
     if state == "exit_risk_review":
         steps = ["本轮禁止买入、补仓、做T；只允许处理卖出风险。"]
         if rhythm_status != "clear":
@@ -3160,6 +3214,8 @@ def build_price_action_table(
         row_status = "ready" if plan_status == "ready_for_manual_confirm" else "watch"
         if plan_status == "near_stop_review":
             row_status = "blocked"
+        if plan_status == "path3_recovered":
+            row_status = "watch"
         if state == "reverse_buyback_review":
             row_status = "watch"
         if not stop_plan:
@@ -3167,6 +3223,7 @@ def build_price_action_table(
         row_status_label = (
             "可执行" if row_status == "ready" and stop_plan else
             "等反弹" if plan_status == "wait_rebound_reduce" else
+            "风险降级观察" if plan_status == "path3_recovered" else
             "近硬止损" if plan_status == "near_stop_review" else
             "近硬止损" if row_status == "blocked" and state == "exit_risk_review" else
             "风险复核" if state == "reverse_buyback_review" else
@@ -3377,6 +3434,8 @@ def build_action_arbitration(
         summary = f"{primary_action}优先；这是已打开的反T卖出腿闭环，不等同于新增补仓。"
     elif state == "exit_risk_review":
         summary = f"{primary_action}优先；正T、反T和补仓全部让位于硬止损风险。"
+    elif state == "risk_downgrade_watch":
+        summary = "风险已降级为观察复核；路径3不等同于交易执行信号。"
     elif mode != "tradable":
         summary = f"{decision_mode.get('label') or '只观察'}优先；数据或交易时段未支持盘中人工确认。"
     elif minute_status != "confirm":
@@ -3449,6 +3508,8 @@ def build_structured_conclusion(
         current_action = f"先复核{primary_action}，不新增卖出腿"
     elif state == "exit_risk_review":
         current_action = f"先处理{primary_action}，不做其他交易"
+    elif state == "risk_downgrade_watch":
+        current_action = "风险降级为观察复核，不主动交易"
     elif state in {"market_wait", "data_stale", "data_insufficient"}:
         current_action = "先刷新/修复数据，不交易"
     elif primary_status == "blocked":
@@ -3461,6 +3522,8 @@ def build_structured_conclusion(
         forbidden_actions.append("禁止新增反T卖出、补仓和追买；只允许处理已卖出腿的回补，或确认转为减仓。")
     if state == "exit_risk_review":
         forbidden_actions.append("禁止补仓、禁止正T、禁止反T，卖出风险优先。")
+    if state == "risk_downgrade_watch":
+        forbidden_actions.append("路径3只是解除退出风险优先，不代表可以买入、补仓或做T。")
     if decision_mode.get("mode") != "tradable":
         forbidden_actions.append(f"盘中可信度为“{mode_label}”时，禁止人工确认交易。")
     if (minute_confirmation or {}).get("status") != "confirm":
@@ -3492,7 +3555,7 @@ def build_structured_conclusion(
 
 
 def confidence_for(state: str, evidence: list[str], blockers: list[str]) -> str:
-    if state in {"exit_risk_review", "reverse_buyback_review", "data_stale", "market_wait", "data_insufficient"}:
+    if state in {"exit_risk_review", "reverse_buyback_review", "risk_downgrade_watch", "data_stale", "market_wait", "data_insufficient"}:
         return "high"
     if blockers:
         return "medium"
@@ -3517,6 +3580,8 @@ def queue_category(card: dict[str, Any]) -> tuple[str, str, int]:
         return "risk_exit", "先复核硬止损风险", 99
     if primary_action == "反弹减仓":
         return "risk_exit", "等待反弹减仓", 98
+    if state == "risk_downgrade_watch":
+        return "observe", "风险降级观察", 58
     if state == "exit_risk_review":
         return "risk_exit", "优先处理卖出风险", 95
     if state in {"data_stale", "market_wait", "data_insufficient"}:
@@ -3622,7 +3687,17 @@ def build_card(
     t_performance_gate = build_t_performance_gate(intraday)
     execution_quality_gate = build_execution_quality_gate(intraday)
     liquidity_activity_gate = build_liquidity_activity_gate(intraday, technical_assessment, data_quality)
-    state, reason = choose_state(intraday, portfolio, t_check, reverse_backtest, data_quality, technical_assessment, t_performance_gate, execution_quality_gate)
+    state, reason = choose_state(
+        intraday,
+        portfolio,
+        t_check,
+        reverse_backtest,
+        data_quality,
+        technical_assessment,
+        t_performance_gate,
+        execution_quality_gate,
+        minute_confirmation,
+    )
     evidence = build_evidence(
         intraday,
         portfolio,
@@ -3641,6 +3716,7 @@ def build_card(
     daily_trade_rhythm = intraday.get("daily_trade_rhythm") or {}
     blockers = build_blockers(
         intraday,
+        portfolio,
         t_check,
         reverse_backtest,
         data_quality,
@@ -3649,6 +3725,7 @@ def build_card(
         execution_quality_gate,
         liquidity_activity_gate,
         daily_trade_rhythm,
+        minute_confirmation,
     )
     levels = price_levels(portfolio, t_check, intraday, reverse_forecast, generated_at, technical_assessment)
     technical_operation["post_unlock_review"] = build_post_unlock_review(
@@ -3733,6 +3810,7 @@ def build_card(
         "market_wait": "wait_for_market_session",
         "data_stale": "pause_intraday_decision",
         "exit_risk_review": "create_exit_or_risk_review",
+        "risk_downgrade_watch": "watch_risk_downgrade",
         "reverse_buyback_review": "review_reverse_t_buyback",
         "data_insufficient": "complete_data_before_decision",
         "risk_reduction_review": "review_position_reduction",
