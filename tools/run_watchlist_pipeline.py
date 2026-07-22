@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.apply_candidate_portfolio_fit import apply_portfolio_fit
     from tools.calc_industry_strength import run_calculation as run_industry_strength_calculation
     from tools.calc_trend_factors import parse_windows, run_calculation
     from tools.check_candidate_pool import run_check as run_candidate_pool_check
@@ -22,6 +23,7 @@ try:
     from tools.screen_trend_strength import trend_screening_config
     from tools.screen_value_quality import run_screen as run_value_quality_screen
 except ModuleNotFoundError:
+    from apply_candidate_portfolio_fit import apply_portfolio_fit
     from calc_industry_strength import run_calculation as run_industry_strength_calculation
     from calc_trend_factors import parse_windows, run_calculation
     from check_candidate_pool import run_check as run_candidate_pool_check
@@ -68,8 +70,12 @@ def run_pipeline(
     industry_strength_metadata: Path,
     candidate_pool_output: Path,
     candidate_pool_metadata: Path,
+    candidate_portfolio_fit_metadata: Path,
     report_output: Path,
     pipeline_metadata_output: Path,
+    position_patterns: list[str] | None = None,
+    planned_position_pct: float = 5.0,
+    strategy_health_path: Path | None = None,
 ) -> dict[str, Any]:
     profile = load_yaml(profile_path)
     windows = resolve_windows(profile, windows_override)
@@ -109,6 +115,17 @@ def run_pipeline(
         universe_path,
         industry_strength_output if industry_strength is not None else None,
     )
+    candidate_portfolio_fit = None
+    if position_patterns:
+        candidate_portfolio_fit = apply_portfolio_fit(
+            profile_path,
+            candidate_pool_output,
+            candidate_pool_output,
+            candidate_portfolio_fit_metadata,
+            position_patterns,
+            planned_position_pct,
+            strategy_health_path,
+        )
     candidate_pool_check = run_candidate_pool_check(candidate_pool_output, universe_path)
     report = run_report(candidate_pool_output, report_output)
 
@@ -121,6 +138,8 @@ def run_pipeline(
             "valuation_metrics": str(valuation_metrics_path),
             "event_catalyst_events": str(event_catalyst_events_path) if event_catalyst_events_path else None,
             "universe": str(universe_path) if universe_path else None,
+            "positions": position_patterns,
+            "strategy_health": str(strategy_health_path) if strategy_health_path else None,
         },
         "windows": windows,
         "steps": {
@@ -130,6 +149,7 @@ def run_pipeline(
             "event_catalyst_candidates": event_catalyst_candidates,
             "industry_strength": industry_strength,
             "candidate_pool": candidate_pool,
+            "candidate_portfolio_fit": candidate_portfolio_fit,
             "candidate_pool_check": candidate_pool_check,
             "watchlist_report": report,
         },
@@ -140,6 +160,7 @@ def run_pipeline(
             "event_catalyst_candidates": str(event_catalyst_candidates_output) if event_catalyst_candidates is not None else None,
             "industry_strength": str(industry_strength_output) if industry_strength is not None else None,
             "candidate_pool": str(candidate_pool_output),
+            "candidate_portfolio_fit": str(candidate_portfolio_fit_metadata) if candidate_portfolio_fit else None,
             "watchlist_report": str(report_output),
         },
     }
@@ -158,6 +179,8 @@ def print_summary(metadata: dict[str, Any]) -> None:
     if steps.get("industry_strength"):
         print(f"industry strength factors: {steps['industry_strength']['row_count']}")
     print(f"candidate pool: {steps['candidate_pool']['candidate_count']}")
+    if steps.get("candidate_portfolio_fit"):
+        print(f"portfolio fit: {steps['candidate_portfolio_fit']['status_counts']}")
     print(f"candidate pool check: {steps['candidate_pool_check']['conclusion']}")
     print(f"watchlist report: {metadata['outputs']['watchlist_report']}")
 
@@ -191,6 +214,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--industry-strength-metadata", default="data/metadata/industry_strength_factors.json", help="Output industry strength metadata JSON.")
     parser.add_argument("--candidate-pool-output", default="data/processed/candidate_pool.csv", help="Output candidate pool CSV.")
     parser.add_argument("--candidate-pool-metadata", default="data/metadata/candidate_pool.json", help="Output candidate pool metadata JSON.")
+    parser.add_argument("--candidate-portfolio-fit-metadata", default="data/metadata/candidate_portfolio_fit.json", help="Output candidate portfolio fit metadata JSON.")
+    parser.add_argument("--positions", nargs="+", help="Optional position YAML paths or glob patterns for portfolio fit.")
+    parser.add_argument("--planned-position-pct", type=float, default=5.0, help="Assumed new position percent for portfolio fit.")
+    parser.add_argument("--strategy-health", default="data/metadata/strategy-health.json", help="Optional strategy health JSON for portfolio fit.")
     parser.add_argument("--report-output", default="reports/watchlist.md", help="Output watchlist report Markdown.")
     parser.add_argument("--metadata-output", default="data/metadata/watchlist_pipeline.json", help="Output pipeline metadata JSON.")
     parser.add_argument("--json", action="store_true", help="Print pipeline metadata as JSON.")
@@ -220,8 +247,12 @@ def main() -> int:
             Path(args.industry_strength_metadata),
             Path(args.candidate_pool_output),
             Path(args.candidate_pool_metadata),
+            Path(args.candidate_portfolio_fit_metadata),
             Path(args.report_output),
             Path(args.metadata_output),
+            args.positions,
+            args.planned_position_pct,
+            Path(args.strategy_health) if args.strategy_health else None,
         )
     except Exception as exc:
         print(f"watchlist pipeline failed: {exc}", file=sys.stderr)

@@ -64,6 +64,12 @@ class GenerateWatchlistReportTest(unittest.TestCase):
                 "liquidity_evidence": "趋势窗口平均成交额 10090000000",
                 "industry_strength_score": "15",
                 "industry_strength_evidence": "行业近 2 日收益率 1.52%",
+                "portfolio_fit_status": "ready_for_plan",
+                "portfolio_fit_action": "prepare_trade_plan",
+                "portfolio_fit_evidence": "组合仓位、行业暴露和策略健康检查未发现阻断。",
+                "expected_stock_position_pct_after_buy": "5.0",
+                "expected_industry_position_pct_after_buy": "10.0",
+                "expected_total_position_pct_after_buy": "35.0",
                 "trade_date": "2026-07-02",
                 "report_period": "2026-03-31",
                 "reasons": "[trend_strength] 趋势强。 | [value_quality] 质量好。",
@@ -84,6 +90,8 @@ class GenerateWatchlistReportTest(unittest.TestCase):
         self.assertIn("趋势窗口平均成交额", report)
         self.assertIn("行业强度分：15", report)
         self.assertIn("行业近 2 日收益率", report)
+        self.assertIn("组合适配状态：ready_for_plan", report)
+        self.assertIn("买入后总仓位：35.0", report)
         self.assertIn("[value_quality] 质量好。", report)
 
     def test_run_report_writes_markdown_from_candidate_csv(self) -> None:

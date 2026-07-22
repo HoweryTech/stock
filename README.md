@@ -65,6 +65,7 @@
 - [观察池报告](./docs/观察池报告.md)
 - [观察池流水线](./docs/观察池流水线.md)
 - [候选池质量检查](./docs/候选池质量检查.md)
+- [候选池组合适配](./docs/候选池组合适配.md)
 - [候选池入池后表现跟踪](./docs/候选池入池后表现跟踪.md)
 - [候选股生成交易计划草稿](./docs/候选股生成交易计划草稿.md)
 - [交易计划补全辅助](./docs/交易计划补全辅助.md)
@@ -255,6 +256,26 @@ python3 tools/generate_watchlist_report.py \
   --output reports/watchlist.md
 ```
 
+### 接入组合适配
+
+```bash
+python3 tools/apply_candidate_portfolio_fit.py \
+  --candidates data/processed/candidate_pool.csv \
+  --positions 'positions/*.yaml' \
+  --strategy-health data/metadata/strategy-health.json \
+  --planned-position-pct 5 \
+  --output data/processed/candidate_pool.portfolio_fit.csv \
+  --metadata-output data/metadata/candidate_portfolio_fit.json
+```
+
+查看带组合适配状态的选股列表：
+
+```bash
+python3 tools/generate_watchlist_report.py \
+  --candidates data/processed/candidate_pool.portfolio_fit.csv \
+  --output reports/watchlist.md
+```
+
 ### 检查候选池质量
 
 ```bash
@@ -284,6 +305,8 @@ python3 tools/run_watchlist_pipeline.py \
   --valuation-metrics data/processed/valuation_metrics.csv \
   --event-catalyst-events data/processed/event_catalyst_events.csv \
   --universe data/processed/tradable_universe.csv \
+  --positions 'positions/*.yaml' \
+  --planned-position-pct 5 \
   --report-output reports/watchlist.md
 ```
 
