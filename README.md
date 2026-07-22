@@ -245,6 +245,8 @@ python3 tools/merge_candidate_pool.py \
   --metadata-output data/metadata/candidate_pool.json
 ```
 
+合并后的 `combined_score` 由策略共振、趋势、价值质量、事件催化、行业强度、流动性、数据质量和风险扣分共同决定，并保留对应解释字段。
+
 ### 生成观察池报告
 
 ```bash

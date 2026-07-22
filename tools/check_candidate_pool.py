@@ -56,6 +56,16 @@ def text_contains(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
+def parse_float(value: str) -> float | None:
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
 def evidence_dimensions(candidate: dict[str, str], strategies: list[str], reasons: list[str], risks: list[str]) -> set[str]:
     text = " ".join(reasons + risks + strategies)
     dimensions: set[str] = set()
@@ -111,6 +121,32 @@ def check_candidate(candidate: dict[str, str], context: CheckContext | None = No
         items.append(CheckItem(code, "blocker", "事件催化候选缺少事件日期。"))
     if has_strategy(candidate, "event_catalyst") and not candidate.get("event_score"):
         items.append(CheckItem(code, "blocker", "事件催化候选缺少事件分。"))
+
+    score_fields = {
+        "combined_score": "综合排序分",
+        "strategy_confluence_score": "策略共振分",
+        "strategy_confluence_evidence": "策略共振证据",
+        "data_quality_score": "数据质量分",
+        "data_quality_status": "数据质量状态",
+        "data_quality_evidence": "数据质量证据",
+        "risk_penalty_score": "风险扣分",
+        "risk_penalty_evidence": "风险扣分证据",
+    }
+    missing_score_fields = [label for field, label in score_fields.items() if not candidate.get(field)]
+    if missing_score_fields:
+        items.append(CheckItem(code, "warning", f"缺少评分解释字段：{', '.join(missing_score_fields)}。"))
+
+    data_quality_status = candidate.get("data_quality_status")
+    if data_quality_status == "weak":
+        items.append(CheckItem(code, "warning", "数据质量状态为 weak，需补齐缺失证据后再进入交易计划。"))
+
+    risk_penalty = parse_float(candidate.get("risk_penalty_score", ""))
+    if risk_penalty is not None and risk_penalty <= -20:
+        items.append(CheckItem(code, "warning", f"风险扣分 {risk_penalty:.2f} 较高，需优先复核反证和风险。"))
+
+    liquidity_score = parse_float(candidate.get("liquidity_score", ""))
+    if liquidity_score is not None and liquidity_score < 20:
+        items.append(CheckItem(code, "warning", f"流动性评分 {liquidity_score:.2f} 偏低，需确认买卖可执行性。"))
 
     if context.as_of is not None and has_strategy(candidate, "trend_strength") and candidate.get("trade_date"):
         trade_date = parse_date(candidate.get("trade_date", ""))

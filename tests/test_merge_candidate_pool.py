@@ -89,7 +89,10 @@ class MergeCandidatePoolTest(unittest.TestCase):
 
         self.assertEqual(candidates[0]["industry_strength_score"], "15")
         self.assertEqual(candidates[0]["industry_strength_evidence"], "行业近 2 日收益率 1.52%")
-        self.assertEqual(candidates[0]["combined_score"], 235.5)
+        self.assertEqual(candidates[0]["strategy_confluence_score"], 200.0)
+        self.assertEqual(candidates[0]["data_quality_status"], "weak")
+        self.assertEqual(candidates[0]["risk_penalty_score"], 0.0)
+        self.assertEqual(candidates[0]["combined_score"], 243.5)
 
     def test_merges_event_catalyst_as_third_strategy(self) -> None:
         candidates = merge_candidates(
@@ -111,7 +114,9 @@ class MergeCandidatePoolTest(unittest.TestCase):
         self.assertEqual(candidates[0]["event_score"], "46")
         self.assertEqual(candidates[0]["event_date"], "2026-07-02")
         self.assertEqual(candidates[0]["event_type"], "major_order")
-        self.assertEqual(candidates[0]["combined_score"], 378.5)
+        self.assertEqual(candidates[0]["strategy_confluence_evidence"], "命中 3 个策略：event_catalyst, trend_strength, value_quality")
+        self.assertEqual(candidates[0]["risk_penalty_score"], -3.0)
+        self.assertEqual(candidates[0]["combined_score"], 385.5)
 
     def test_run_merge_writes_csv_and_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -153,6 +158,9 @@ class MergeCandidatePoolTest(unittest.TestCase):
         self.assertEqual(rows[0]["name"], "宁德时代")
         self.assertEqual(rows[0]["industry"], "电力设备")
         self.assertEqual(rows[0]["industry_strength_score"], "15")
+        self.assertEqual(rows[0]["strategy_confluence_score"], "200.0")
+        self.assertEqual(rows[0]["data_quality_status"], "complete")
+        self.assertEqual(rows[0]["risk_penalty_score"], "0.0")
 
 
 if __name__ == "__main__":

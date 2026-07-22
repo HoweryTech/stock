@@ -25,6 +25,8 @@ OUTPUT_FIELDS = [
     "strategy_count",
     "combined_score",
     "primary_strategy",
+    "strategy_confluence_score",
+    "strategy_confluence_evidence",
     "trend_score",
     "value_quality_score",
     "event_score",
@@ -34,6 +36,11 @@ OUTPUT_FIELDS = [
     "liquidity_evidence",
     "industry_strength_score",
     "industry_strength_evidence",
+    "data_quality_score",
+    "data_quality_status",
+    "data_quality_evidence",
+    "risk_penalty_score",
+    "risk_penalty_evidence",
     "trade_date",
     "report_period",
     "reasons",
@@ -125,15 +132,6 @@ def add_strategy_candidate(pool: dict[str, dict[str, Any]], strategy: str, row: 
     candidate["risks"].extend(prefixed_text(strategy, row.get("risks", "")))
 
 
-def combined_score(candidate: dict[str, Any]) -> float:
-    strategy_count = len(candidate["strategies"])
-    trend_score = as_float(candidate.get("trend_score"), 0.0) or 0.0
-    value_quality_score = as_float(candidate.get("value_quality_score"), 0.0) or 0.0
-    event_score = as_float(candidate.get("event_score"), 0.0) or 0.0
-    industry_strength_score = as_float(candidate.get("industry_strength_score"), 0.0) or 0.0
-    return round(strategy_count * 100.0 + trend_score + value_quality_score + event_score + industry_strength_score * 0.2, 6)
-
-
 def primary_strategy(candidate: dict[str, Any]) -> str:
     strategies = sorted(candidate["strategies"])
     if len(strategies) > 1:
@@ -158,6 +156,105 @@ def liquidity_fields(candidate: dict[str, Any], universe_row: dict[str, str] | N
     return str(round(score, 6)), "；".join(evidence_parts)
 
 
+def strategy_confluence_fields(strategies: list[str]) -> tuple[float, str]:
+    strategy_count = len(strategies)
+    score = strategy_count * 100.0
+    if strategy_count >= 2:
+        evidence = f"命中 {strategy_count} 个策略：{', '.join(strategies)}"
+    elif strategy_count == 1:
+        evidence = f"单策略来源：{strategies[0]}"
+    else:
+        evidence = "缺少策略来源"
+    return score, evidence
+
+
+def risk_penalty_fields(candidate: dict[str, Any]) -> tuple[float, str]:
+    risks = candidate.get("risks") or []
+    if not risks:
+        return 0.0, "未提供显式风险，门禁会要求人工补充。"
+
+    risk_text = " ".join(str(item) for item in risks)
+    penalty = min(len(risks) * 3.0, 12.0)
+    severe_keywords = ("退市", "ST", "停牌", "减持", "解禁", "问询", "延期", "高估", "追高", "流动性")
+    matched = [keyword for keyword in severe_keywords if keyword in risk_text]
+    if matched:
+        penalty += min(len(matched) * 4.0, 16.0)
+    evidence = f"风险提示 {len(risks)} 条"
+    if matched:
+        evidence += f"，命中高关注关键词：{', '.join(matched)}"
+    return round(-penalty, 6), evidence
+
+
+def data_quality_fields(
+    candidate: dict[str, Any],
+    strategies: list[str],
+    universe_row: dict[str, str],
+    industry_row: dict[str, str],
+    liquidity_score: str,
+) -> tuple[float, str, str]:
+    checks: list[tuple[bool, str]] = [
+        (bool(candidate.get("reasons")), "入选证据"),
+        (bool(candidate.get("risks")), "风险提示"),
+        (bool(universe_row.get("name")), "股票名称"),
+        (bool(universe_row.get("industry")), "行业"),
+        (bool(liquidity_score), "流动性"),
+        (bool(industry_row.get("industry_strength_score")), "行业强度"),
+    ]
+    if "trend_strength" in strategies:
+        checks.extend(
+            [
+                (bool(candidate.get("trend_score")), "趋势分"),
+                (bool(candidate.get("trade_date")), "趋势交易日"),
+            ]
+        )
+    if "value_quality" in strategies:
+        checks.extend(
+            [
+                (bool(candidate.get("value_quality_score")), "价值质量分"),
+                (bool(candidate.get("report_period")), "报告期"),
+            ]
+        )
+    if "event_catalyst" in strategies:
+        checks.extend(
+            [
+                (bool(candidate.get("event_score")), "事件分"),
+                (bool(candidate.get("event_date")), "事件日期"),
+            ]
+        )
+
+    passed = [label for ok, label in checks if ok]
+    missing = [label for ok, label in checks if not ok]
+    score = round(len(passed) / len(checks) * 20.0, 6) if checks else 0.0
+    if score >= 18:
+        status = "complete"
+    elif score >= 14:
+        status = "partial"
+    else:
+        status = "weak"
+    evidence = f"已具备：{', '.join(passed) if passed else '-'}"
+    if missing:
+        evidence += f"；缺失：{', '.join(missing)}"
+    return score, status, evidence
+
+
+def score_component(value: Any, weight: float = 1.0) -> float:
+    return (as_float(value, 0.0) or 0.0) * weight
+
+
+def combined_score_from_components(candidate: dict[str, Any]) -> float:
+    return round(
+        score_component(candidate.get("strategy_confluence_score"))
+        + score_component(candidate.get("trend_score"))
+        + score_component(candidate.get("value_quality_score"))
+        + score_component(candidate.get("event_score"))
+        + score_component(candidate.get("industry_strength_score"), 0.2)
+        + score_component(candidate.get("liquidity_score"), 0.1)
+        + score_component(candidate.get("data_quality_score"))
+        + score_component(candidate.get("risk_penalty_score")),
+        6,
+    )
+
+
 def finalize_candidate(
     candidate: dict[str, Any],
     universe_row: dict[str, str] | None = None,
@@ -167,16 +264,33 @@ def finalize_candidate(
     universe_row = universe_row or {}
     industry_row = industry_row or {}
     liquidity_score, liquidity_evidence = liquidity_fields(candidate, universe_row)
-    enriched_candidate = dict(candidate)
-    enriched_candidate["industry_strength_score"] = industry_row.get("industry_strength_score", "")
+    strategy_confluence_score, strategy_confluence_evidence = strategy_confluence_fields(strategies)
+    data_quality_score, data_quality_status, data_quality_evidence = data_quality_fields(
+        candidate,
+        strategies,
+        universe_row,
+        industry_row,
+        liquidity_score,
+    )
+    risk_penalty_score, risk_penalty_evidence = risk_penalty_fields(candidate)
+    enriched_candidate = {
+        **candidate,
+        "strategy_confluence_score": strategy_confluence_score,
+        "liquidity_score": liquidity_score,
+        "industry_strength_score": industry_row.get("industry_strength_score", ""),
+        "data_quality_score": data_quality_score,
+        "risk_penalty_score": risk_penalty_score,
+    }
     return {
         "code": candidate["code"],
         "name": universe_row.get("name", ""),
         "industry": universe_row.get("industry", ""),
         "strategies": "|".join(strategies),
         "strategy_count": len(strategies),
-        "combined_score": combined_score(enriched_candidate),
+        "combined_score": combined_score_from_components(enriched_candidate),
         "primary_strategy": primary_strategy(candidate),
+        "strategy_confluence_score": strategy_confluence_score,
+        "strategy_confluence_evidence": strategy_confluence_evidence,
         "trend_score": candidate.get("trend_score", ""),
         "value_quality_score": candidate.get("value_quality_score", ""),
         "event_score": candidate.get("event_score", ""),
@@ -186,6 +300,11 @@ def finalize_candidate(
         "liquidity_evidence": liquidity_evidence,
         "industry_strength_score": industry_row.get("industry_strength_score", ""),
         "industry_strength_evidence": industry_row.get("industry_strength_evidence", ""),
+        "data_quality_score": data_quality_score,
+        "data_quality_status": data_quality_status,
+        "data_quality_evidence": data_quality_evidence,
+        "risk_penalty_score": risk_penalty_score,
+        "risk_penalty_evidence": risk_penalty_evidence,
         "trade_date": candidate.get("trade_date", ""),
         "report_period": candidate.get("report_period", ""),
         "reasons": " | ".join(candidate["reasons"]),
