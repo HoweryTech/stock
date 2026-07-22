@@ -4,6 +4,11 @@ const storedCandidateExcludeBoardVersion = localStorage.getItem("candidateExclud
 const storedCandidateExcludeBoards = storedCandidateExcludeBoardVersion === candidateExcludeBoardVersion
   ? JSON.parse(localStorage.getItem("candidateExcludeBoards") || "[]")
   : candidateExcludeBoardDefaults;
+const candidateFocusOnlyVersion = "20260722-focus-technical-v1";
+const storedCandidateFocusOnlyVersion = localStorage.getItem("candidateFocusOnlyVersion");
+const storedCandidateFocusOnly = storedCandidateFocusOnlyVersion === candidateFocusOnlyVersion
+  ? localStorage.getItem("candidateFocusOnly") !== "false"
+  : true;
 
 const candidateState = {
   search: "",
@@ -15,6 +20,7 @@ const candidateState = {
   data_quality_status: "",
   technical_health_status: "",
   exclude_board: new Set(storedCandidateExcludeBoards),
+  focus_only: storedCandidateFocusOnly,
   sorts: [{key: "combined_score", direction: "desc"}],
   lastFilters: null,
 };
@@ -75,6 +81,9 @@ function candidateQuery() {
   ["search", "exchange", "board", "industry", "strategy", "portfolio_fit_status", "data_quality_status", "technical_health_status"].forEach(key => {
     if (candidateState[key]) params.set(key, candidateState[key]);
   });
+  if (candidateState.focus_only && !candidateState.technical_health_status) {
+    params.set("technical_health_status", "strong,watch");
+  }
   params.set("sort", candidateState.sorts.map(item => `${item.key}:${item.direction}`).join(","));
   candidateState.exclude_board.forEach(board => params.append("exclude_board", board));
   params.set("limit", "all");
@@ -202,9 +211,11 @@ function renderCandidateList(data) {
     candidateState.sorts = data.sort.items;
   }
   const items = data.items || [];
+  const focusText = candidateState.focus_only && !candidateState.technical_health_status ? "重点观察：技术面强/观察" : "全部技术状态";
   document.querySelector("#candidateSummary").innerHTML = `
     <strong>${candidateEscape(String(data.filtered_count || 0))}</strong>
     <span> / ${candidateEscape(String(data.total_count || 0))} 只候选</span>
+    <span>${candidateEscape(focusText)}</span>
     <span>显示 ${candidateEscape(String(items.length))} 只，排序：${candidateEscape(sortSummary(data.sort?.items))}</span>
     <em>来源：${candidateEscape(data.source || "-")}</em>`;
   document.querySelector("#candidateTableBody").innerHTML = items.map(candidateRow).join("");
@@ -234,6 +245,13 @@ function updateCandidateExcludeBoard(board, excluded) {
   }
   localStorage.setItem("candidateExcludeBoards", JSON.stringify([...candidateState.exclude_board]));
   localStorage.setItem("candidateExcludeBoardsVersion", candidateExcludeBoardVersion);
+  void refreshCandidateList();
+}
+
+function updateCandidateFocusOnly(enabled) {
+  candidateState.focus_only = enabled;
+  localStorage.setItem("candidateFocusOnly", enabled ? "true" : "false");
+  localStorage.setItem("candidateFocusOnlyVersion", candidateFocusOnlyVersion);
   void refreshCandidateList();
 }
 
@@ -276,6 +294,11 @@ function initCandidateList() {
     input.checked = candidateState.exclude_board.has(input.dataset.candidateExcludeBoard);
     input.addEventListener("change", event => updateCandidateExcludeBoard(event.target.dataset.candidateExcludeBoard, event.target.checked));
   });
+  const focusOnlyInput = document.querySelector("#candidateFocusOnly");
+  if (focusOnlyInput) {
+    focusOnlyInput.checked = candidateState.focus_only;
+    focusOnlyInput.addEventListener("change", event => updateCandidateFocusOnly(event.target.checked));
+  }
   document.querySelectorAll("[data-candidate-sort]").forEach(button => button.addEventListener("click", () => {
     updateCandidateSort(button.dataset.candidateSort);
   }));

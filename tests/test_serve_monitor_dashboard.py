@@ -14,6 +14,7 @@ from tools.serve_monitor_dashboard import (
     handle_stop_loss_confirmation,
     handle_intraday_trigger_refresh,
     handle_trigger_review_status,
+    filtered_candidates,
     load_json,
     market_wait_refresh_status,
     monitor_status,
@@ -25,6 +26,22 @@ from tools.serve_monitor_dashboard import (
 
 
 class ServeMonitorDashboardTest(unittest.TestCase):
+    def test_filtered_candidates_accepts_multiple_technical_statuses(self) -> None:
+        rows = [
+            {"code": "000001", "combined_score": 80.0, "technical_health_status": "strong", "board": "szse_main", "strategies_list": ["trend_strength"]},
+            {"code": "000002", "combined_score": 90.0, "technical_health_status": "watch", "board": "szse_main", "strategies_list": ["trend_strength"]},
+            {"code": "000003", "combined_score": 100.0, "technical_health_status": "blocked", "board": "szse_main", "strategies_list": ["trend_strength"]},
+        ]
+
+        with (
+            patch("tools.serve_monitor_dashboard.candidate_pool_path", return_value=Path("candidate_pool.csv")),
+            patch("tools.serve_monitor_dashboard.read_candidate_pool", return_value=rows),
+        ):
+            payload = filtered_candidates({"technical_health_status": ["strong,watch"], "sort": ["combined_score:desc"]})
+
+        self.assertEqual([item["code"] for item in payload["items"]], ["000002", "000001"])
+        self.assertEqual(payload["filtered_count"], 2)
+
     def test_recent_events_returns_newest_first(self) -> None:
         class FakePath:
             def exists(self):

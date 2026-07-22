@@ -206,12 +206,20 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
     items = read_candidate_pool(path)
     search = (query.get("search", [""])[0] or "").strip().lower()
     filter_fields = {
-        "exchange": query.get("exchange", [""])[0],
-        "board": query.get("board", [""])[0],
-        "industry": query.get("industry", [""])[0],
-        "portfolio_fit_status": query.get("portfolio_fit_status", [""])[0],
-        "data_quality_status": query.get("data_quality_status", [""])[0],
-        "technical_health_status": query.get("technical_health_status", [""])[0],
+        field: {
+            value
+            for raw in query.get(field, [""])
+            for value in str(raw or "").split(",")
+            if value
+        }
+        for field in (
+            "exchange",
+            "board",
+            "industry",
+            "portfolio_fit_status",
+            "data_quality_status",
+            "technical_health_status",
+        )
     }
     strategy = query.get("strategy", [""])[0]
     excluded_boards = {
@@ -226,8 +234,8 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
             haystack = " ".join(str(item.get(field) or "") for field in ("code", "name", "industry")).lower()
             if search not in haystack:
                 return False
-        for field, value in filter_fields.items():
-            if value and str(item.get(field) or "") != value:
+        for field, values in filter_fields.items():
+            if values and str(item.get(field) or "") not in values:
                 return False
         if excluded_boards and str(item.get("board") or "") in excluded_boards:
             return False

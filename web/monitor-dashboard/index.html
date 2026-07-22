@@ -101,6 +101,10 @@
 	          <label><input type="checkbox" data-candidate-exclude-board="chinext">创业板</label>
 	          <label><input type="checkbox" data-candidate-exclude-board="bse">北交所</label>
 	        </fieldset>
+	        <label class="candidate-focus-toggle">
+	          <input id="candidateFocusOnly" type="checkbox">
+	          <span>重点观察</span>
+	        </label>
 	        <label>
 	          <span>行业</span>
 	          <select id="candidateIndustryFilter"></select>
@@ -186,7 +190,7 @@
   <script src="/preflight.js?v=20260720-preflight" defer></script>
 	  <script src="/blockers.js?v=20260719-blockers" defer></script>
 	  <script src="/capital.js?v=20260719-capital" defer></script>
-	  <script src="/candidates.js?v=20260722-candidates" defer></script>
+	  <script src="/candidates.js?v=20260722-focus-candidates" defer></script>
 	  <script src="/app.js?v=20260722-lean-home" defer></script>
 </body>
 </html>
