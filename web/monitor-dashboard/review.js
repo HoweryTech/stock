@@ -13,6 +13,25 @@
     return (queue || []).filter(item => !["handled", "ignored"].includes(item.review_resolution));
   }
 
+  function queueClosureStats(queue) {
+    const items = queue || [];
+    const handled = items.filter(item => item.review_resolution === "handled").length;
+    const ignored = items.filter(item => item.review_resolution === "ignored").length;
+    const viewed = items.filter(item => item.review_resolution === "viewed").length;
+    const open = items.filter(item => !item.review_resolution || item.review_resolution === "open").length;
+    const active = items.length - handled - ignored;
+    return {
+      total: items.length,
+      active,
+      open,
+      viewed,
+      handled,
+      ignored,
+      closed: handled + ignored,
+      pendingClosure: open + viewed,
+    };
+  }
+
   function itemLabel(item) {
     return item?.name && item?.code ? `${item.name} ${item.code}` : item?.name || item?.code || "--";
   }
@@ -31,6 +50,7 @@
 
   function classify({cards = [], triggerReviewQueue = [], report = {}} = {}) {
     const queue = activeQueue(triggerReviewQueue);
+    const closure = queueClosureStats(triggerReviewQueue);
     const expired = queue.filter(item => item.expired);
     const action = queue.filter(item => item.status === "action_required" && !item.expired);
     const review = queue.filter(item => item.status === "review_required" && !item.expired);
@@ -141,7 +161,7 @@
       ...watch.map(item => ({type: "detail", tone: "observe", label: "只观察", item, text: item.after_label || "只观察。"})),
     ].slice(0, 4);
 
-    return {primary, buckets, tasks};
+    return {primary, buckets, tasks, closure};
   }
 
   function primaryButton(primary) {
@@ -162,6 +182,12 @@
       return `<button class="secondary-action" type="button" data-review-desk-action="refresh_item" ${reviewAttrs(task.item)}>刷新</button>`;
     }
     return `<button class="secondary-action" type="button" data-review-desk-action="open_detail" data-review-code="${escapeHtml(task.item.code || "")}" data-review-target="${escapeHtml(task.item.target || "decision-card")}">详情</button>`;
+  }
+
+  function taskReviewLabel(item) {
+    const label = item?.review_resolution_label || (item?.review_resolution === "viewed" ? "已查看" : "待处理");
+    if (["handled", "ignored"].includes(item?.review_resolution)) return label;
+    return `${label} · 未闭环`;
   }
 
   function renderIntradayReviewDesk(input) {
@@ -190,9 +216,15 @@
             <span>${escapeHtml(task.label)}</span>
             <strong>${escapeHtml(itemLabel(task.item))}</strong>
             <p>${escapeHtml(task.text)}</p>
+            <em>${escapeHtml(taskReviewLabel(task.item))}</em>
           </div>
           ${taskButton(task)}
         </article>`).join("") : `<p class="secondary">当前没有触发队列待办；继续保持监控。</p>`}
+      </div>
+      <div class="review-closure-strip" aria-label="触发处理闭环">
+        <span>处理闭环</span>
+        <strong>${escapeHtml(desk.closure.pendingClosure)} 未闭环</strong>
+        <em>${escapeHtml(desk.closure.open)} 待处理 · ${escapeHtml(desk.closure.viewed)} 已查看 · ${escapeHtml(desk.closure.handled)} 已处理 · ${escapeHtml(desk.closure.ignored)} 暂不处理</em>
       </div>
     </section>`;
   }
@@ -241,6 +273,7 @@
         <span>盘中必须处理</span>
         <strong>${escapeHtml(primary.title)}</strong>
         <p>${escapeHtml(primary.action)}</p>
+        <em>${escapeHtml(desk.closure.pendingClosure)} 个触发未闭环：${escapeHtml(desk.closure.open)} 待处理 / ${escapeHtml(desk.closure.viewed)} 已查看。</em>
       </div>
       <div class="global-review-actions">
         <button class="primary-action" type="button" ${primaryData}>${escapeHtml(label)}</button>

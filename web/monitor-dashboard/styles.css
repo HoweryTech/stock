@@ -88,6 +88,7 @@ button { cursor: pointer; }
 .global-review-bar span { display: block; margin-bottom: 2px; color: var(--red); font-size: 11px; font-weight: 800; }
 .global-review-bar strong { display: block; font-size: 16px; line-height: 1.25; }
 .global-review-bar p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.global-review-bar em { display: block; margin-top: 3px; color: var(--red); font-size: 12px; font-style: normal; font-weight: 700; line-height: 1.35; }
 .global-review-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; flex: 0 0 auto; }
 
 main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
@@ -153,6 +154,19 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 .review-desk-tasks { padding: 14px 16px; min-width: 0; }
 .review-desk-main,
 .review-desk-buckets { border-right: 1px solid var(--line); }
+.review-closure-strip {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.76);
+}
+.review-closure-strip span { color: var(--muted); font-size: 11px; font-weight: 800; }
+.review-closure-strip strong { color: var(--text); font-size: 13px; }
+.review-closure-strip em { color: var(--muted); font-size: 12px; font-style: normal; }
 .review-desk-main > span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 800; }
 .review-desk-main strong { display: block; font-size: 21px; line-height: 1.22; }
 .review-desk-main p { margin: 7px 0 0; line-height: 1.45; }
@@ -195,6 +209,7 @@ main { padding: 18px 24px 36px; max-width: 1600px; margin: 0 auto; }
 .review-task span { display: block; margin-bottom: 3px; color: var(--muted); font-size: 11px; font-weight: 800; }
 .review-task strong { display: block; line-height: 1.35; }
 .review-task p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.review-task em { display: inline-block; margin-top: 5px; padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.82); color: var(--text); font-size: 11px; font-style: normal; font-weight: 700; }
 
 .summary-band {
   display: grid;
@@ -1367,6 +1382,7 @@ th:nth-child(8) { width: 100px; }
   .review-desk { grid-template-columns: 1fr; }
   .review-desk-main,
   .review-desk-buckets { border-right: 0; border-bottom: 1px solid var(--line); }
+  .review-closure-strip { align-items: flex-start; flex-direction: column; gap: 4px; }
   .review-desk-buckets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .review-task { grid-template-columns: 1fr; }
   .review-task button,
