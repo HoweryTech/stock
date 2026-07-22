@@ -18,6 +18,91 @@ def load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def load_optional_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    return load_json(path)
+
+
+def split_strategy_names(value: str) -> list[str]:
+    names = [item.strip() for item in value.replace(",", "|").split("|")]
+    return [item for item in names if item]
+
+
+def summarize_candidate_observation(candidate_performance: dict[str, Any] | None) -> dict[str, Any]:
+    if not candidate_performance:
+        return {"available": False, "candidate_count": 0, "horizons": [], "by_strategy": {}}
+
+    items = candidate_performance.get("items") or []
+    if not isinstance(items, list):
+        items = []
+    raw_horizons = candidate_performance.get("horizons") or []
+    horizons = [str(item) for item in raw_horizons] if isinstance(raw_horizons, list) else []
+    if not horizons:
+        horizon_set = {
+            str(horizon)
+            for item in items
+            if isinstance(item, dict)
+            for horizon in (item.get("horizons") or {}).keys()
+        }
+        horizons = sorted(horizon_set, key=lambda item: int(item) if item.isdigit() else item)
+
+    buckets: dict[str, dict[str, Any]] = {}
+    returns_by_strategy: dict[str, dict[str, list[float]]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        strategies = split_strategy_names(str(item.get("strategies") or ""))
+        primary_strategy = str(item.get("primary_strategy") or "").strip()
+        if primary_strategy and primary_strategy not in strategies:
+            strategies.append(primary_strategy)
+        if not strategies:
+            continue
+        item_horizons = item.get("horizons") or {}
+        for strategy in strategies:
+            bucket = buckets.setdefault(
+                strategy,
+                {
+                    "strategy": strategy,
+                    "candidate_count": 0,
+                    "horizons": {},
+                },
+            )
+            bucket["candidate_count"] += 1
+            returns_by_strategy.setdefault(strategy, {horizon: [] for horizon in horizons})
+            for horizon in horizons:
+                horizon_data = item_horizons.get(horizon) or {}
+                if horizon_data.get("status") != "complete":
+                    continue
+                return_pct = horizon_data.get("return_pct")
+                if isinstance(return_pct, (int, float)):
+                    returns_by_strategy[strategy].setdefault(horizon, []).append(float(return_pct))
+
+    for strategy, bucket in buckets.items():
+        for horizon in horizons:
+            returns = returns_by_strategy.get(strategy, {}).get(horizon, [])
+            if returns:
+                bucket["horizons"][horizon] = {
+                    "completed_count": len(returns),
+                    "average_return_pct": round(sum(returns) / len(returns), 6),
+                    "win_rate_pct": round(sum(1 for value in returns if value > 0) / len(returns) * 100, 6),
+                }
+            else:
+                bucket["horizons"][horizon] = {
+                    "completed_count": 0,
+                    "average_return_pct": None,
+                    "win_rate_pct": None,
+                }
+
+    return {
+        "available": True,
+        "generated_at": candidate_performance.get("generated_at"),
+        "candidate_count": len(items),
+        "horizons": horizons,
+        "by_strategy": dict(sorted(buckets.items())),
+    }
+
+
 def is_loss_making_exception(item: dict[str, Any], strategy: str) -> bool:
     if item.get("strategy") != strategy:
         return False
@@ -176,6 +261,7 @@ def classify_config_version(
 def check_strategy_health(
     analysis: dict[str, Any],
     cooldown: dict[str, Any],
+    candidate_performance: dict[str, Any] | None = None,
     *,
     min_trades: int = 3,
     min_win_rate_pct: float = 40.0,
@@ -184,6 +270,7 @@ def check_strategy_health(
     strategies = analysis.get("by_strategy") or {}
     config_versions = analysis.get("by_config_version") or {}
     discipline = analysis.get("discipline") or {}
+    candidate_observation = summarize_candidate_observation(candidate_performance)
     rows = [
         classify_strategy(
             strategy,
@@ -229,7 +316,12 @@ def check_strategy_health(
         },
         "strategies": rows,
         "config_versions": config_rows,
+        "candidate_observation": candidate_observation,
     }
+
+
+def format_pct(value: Any) -> str:
+    return "-" if value is None else f"{float(value):.2f}%"
 
 
 def render_health(result: dict[str, Any]) -> str:
@@ -267,6 +359,27 @@ def render_health(result: dict[str, Any]) -> str:
         )
         for action in row["actions"]:
             lines.append(f"  - [{action['code']}] {action['message']}")
+    observation = result.get("candidate_observation") or {}
+    lines.extend(["", "## 候选观察表现", ""])
+    if not observation.get("available"):
+        lines.append("- 未读取候选池入池后表现数据。")
+    else:
+        lines.append("- 说明：候选观察表现只来自入池后价格跟踪，不参与真实交易健康状态判定。")
+        lines.append(f"- 候选数量：{observation.get('candidate_count', 0)}")
+        if observation.get("generated_at"):
+            lines.append(f"- 候选表现生成时间：{observation['generated_at']}")
+        if not observation.get("by_strategy"):
+            lines.append("- 无可归因策略。")
+        for strategy, row in observation.get("by_strategy", {}).items():
+            parts = []
+            for horizon in observation.get("horizons", []):
+                data = row.get("horizons", {}).get(str(horizon), {})
+                parts.append(
+                    f"{horizon}日 completed={data.get('completed_count', 0)} "
+                    f"avg={format_pct(data.get('average_return_pct'))} "
+                    f"win_rate={format_pct(data.get('win_rate_pct'))}"
+                )
+            lines.append(f"- {strategy}: candidates={row.get('candidate_count', 0)} | " + " | ".join(parts))
     return "\n".join(lines)
 
 
@@ -284,6 +397,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check strategy health from review analysis and cooldown results.")
     parser.add_argument("--analysis", default="data/metadata/review-analysis.json", help="Review analysis JSON.")
     parser.add_argument("--cooldown", default="data/metadata/review-cooldown.json", help="Review cooldown JSON.")
+    parser.add_argument(
+        "--candidate-performance",
+        default="data/metadata/candidate-performance.json",
+        help="Optional candidate performance JSON.",
+    )
     parser.add_argument("--output", default="reports/strategy-health.md", help="Output Markdown health report.")
     parser.add_argument("--json-output", default="data/metadata/strategy-health.json", help="Output JSON health report.")
     parser.add_argument("--min-trades", type=int, default=3, help="Minimum review sample size for statistical warnings.")
@@ -299,6 +417,7 @@ def main() -> int:
         result = check_strategy_health(
             load_json(Path(args.analysis)),
             load_json(Path(args.cooldown)),
+            load_optional_json(Path(args.candidate_performance)),
             min_trades=args.min_trades,
             min_win_rate_pct=args.min_win_rate_pct,
             min_avg_return_pct=args.min_avg_return_pct,

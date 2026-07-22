@@ -143,6 +143,62 @@ class CheckStrategyHealthTest(unittest.TestCase):
         self.assertIn("配置版本明细", content)
         self.assertIn("CONFIG-VERSION-RISK", content)
 
+    def test_includes_candidate_observation_without_changing_health_status(self) -> None:
+        analysis = {
+            "by_strategy": {
+                "trend_strength": {
+                    "count": 3,
+                    "win_count": 2,
+                    "loss_count": 1,
+                    "win_rate_pct": 66.6667,
+                    "avg_trade_return_pct": 0.8,
+                    "total_portfolio_return_pct": 0.2,
+                }
+            }
+        }
+        candidate_performance = {
+            "generated_at": "2026-07-22T10:00:00",
+            "horizons": [5, 10],
+            "items": [
+                {
+                    "code": "600000",
+                    "strategies": "trend_strength|value_quality",
+                    "primary_strategy": "trend_strength",
+                    "horizons": {
+                        "5": {"status": "complete", "return_pct": 6.0},
+                        "10": {"status": "complete", "return_pct": -2.0},
+                    },
+                },
+                {
+                    "code": "000001",
+                    "strategies": "trend_strength",
+                    "horizons": {
+                        "5": {"status": "complete", "return_pct": 2.0},
+                        "10": {"status": "insufficient_future_bars", "return_pct": None},
+                    },
+                },
+            ],
+        }
+
+        result = check_strategy_health(
+            analysis,
+            {"conclusion": "normal", "threshold": 3, "strategy_losing_streaks": {}},
+            candidate_performance,
+        )
+        content = render_health(result)
+
+        self.assertEqual(result["conclusion"], "healthy")
+        observation = result["candidate_observation"]
+        self.assertTrue(observation["available"])
+        self.assertEqual(observation["candidate_count"], 2)
+        trend = observation["by_strategy"]["trend_strength"]
+        self.assertEqual(trend["candidate_count"], 2)
+        self.assertEqual(trend["horizons"]["5"]["completed_count"], 2)
+        self.assertEqual(trend["horizons"]["5"]["average_return_pct"], 4.0)
+        self.assertEqual(trend["horizons"]["10"]["completed_count"], 1)
+        self.assertIn("候选观察表现", content)
+        self.assertIn("不参与真实交易健康状态判定", content)
+
 
 if __name__ == "__main__":
     unittest.main()

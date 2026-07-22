@@ -271,6 +271,8 @@ python3 tools/track_candidate_performance.py \
   --markdown-output reports/candidate-performance.md
 ```
 
+该 JSON 会被策略健康检查作为候选观察输入读取，用于按策略复查选股入口质量。
+
 ### 一键生成观察池
 
 ```bash
@@ -758,7 +760,8 @@ python3 tools/check_review_cooldown.py \
 
 ```bash
 python3 tools/run_review_pipeline.py \
-  --reviews reviews/*.yaml
+  --reviews reviews/*.yaml \
+  --candidate-performance data/metadata/candidate-performance.json
 ```
 
 ### 新建交易复盘草稿

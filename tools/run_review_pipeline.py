@@ -13,14 +13,14 @@ from typing import Any
 try:
     from tools.analyze_trade_reviews import analyze_reviews, expand_paths, render_analysis, write_text
     from tools.check_review_cooldown import check_cooldown
-    from tools.check_strategy_health import check_strategy_health, render_health
+    from tools.check_strategy_health import check_strategy_health, load_optional_json, render_health
     from tools.generate_strategy_review_tasks import build_tasks as build_strategy_review_tasks
     from tools.generate_strategy_review_tasks import render_tasks as render_strategy_review_tasks
     from tools.risk_check import load_yaml
 except ModuleNotFoundError:
     from analyze_trade_reviews import analyze_reviews, expand_paths, render_analysis, write_text
     from check_review_cooldown import check_cooldown
-    from check_strategy_health import check_strategy_health, render_health
+    from check_strategy_health import check_strategy_health, load_optional_json, render_health
     from generate_strategy_review_tasks import build_tasks as build_strategy_review_tasks
     from generate_strategy_review_tasks import render_tasks as render_strategy_review_tasks
     from risk_check import load_yaml
@@ -35,9 +35,11 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     review_paths = expand_paths(args.reviews)
     analysis = analyze_reviews(review_paths)
     cooldown = check_cooldown(load_yaml(Path(args.profile)), review_paths)
+    candidate_performance = load_optional_json(Path(args.candidate_performance))
     strategy_health = check_strategy_health(
         analysis,
         cooldown,
+        candidate_performance,
         min_trades=args.min_trades,
         min_win_rate_pct=args.min_win_rate_pct,
         min_avg_return_pct=args.min_avg_return_pct,
@@ -75,6 +77,11 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 "pause_count": strategy_health["pause_count"],
                 "needs_review_count": strategy_health["needs_review_count"],
                 "needs_review_config_version_count": strategy_health.get("needs_review_config_version_count", 0),
+                "candidate_performance": args.candidate_performance,
+                "candidate_observation_available": strategy_health.get("candidate_observation", {}).get(
+                    "available",
+                    False,
+                ),
             },
             "strategy_review_tasks": {
                 "output": args.strategy_review_tasks_output,
@@ -98,6 +105,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strategy-health-json-output", default="data/metadata/strategy-health.json", help="Output JSON strategy health report.")
     parser.add_argument("--strategy-review-tasks-output", default="reports/strategy-review-tasks.md", help="Output Markdown strategy review task list.")
     parser.add_argument("--strategy-review-tasks-json-output", default="data/metadata/strategy-review-tasks.json", help="Output JSON strategy review task list.")
+    parser.add_argument(
+        "--candidate-performance",
+        default="data/metadata/candidate-performance.json",
+        help="Optional candidate performance JSON.",
+    )
     parser.add_argument("--metadata-output", default="data/metadata/review-pipeline.json", help="Output pipeline metadata JSON.")
     parser.add_argument("--min-trades", type=int, default=3, help="Minimum review sample size for strategy health warnings.")
     parser.add_argument("--min-win-rate-pct", type=float, default=40.0, help="Minimum acceptable strategy win rate.")
