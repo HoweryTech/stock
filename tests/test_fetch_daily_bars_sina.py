@@ -9,6 +9,7 @@ class FetchDailyBarsSinaTest(unittest.TestCase):
         self.assertEqual(symbol_for_code("000001"), "sz000001")
         self.assertEqual(symbol_for_code("300750"), "sz300750")
         self.assertEqual(symbol_for_code("830799"), "bj830799")
+        self.assertEqual(symbol_for_code("920079"), "bj920079")
 
     def test_normalize_sina_rows_outputs_standard_daily_bar_fields(self) -> None:
         rows = normalize_sina_rows(

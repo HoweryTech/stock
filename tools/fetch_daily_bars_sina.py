@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -15,9 +16,11 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 try:
+    from tools.data_retention import retain_file_snapshot
     from tools.import_daily_bars import STANDARD_FIELDS
     from tools.risk_check import load_yaml, value_at
 except ModuleNotFoundError:
+    from data_retention import retain_file_snapshot
     from import_daily_bars import STANDARD_FIELDS
     from risk_check import load_yaml, value_at
 
@@ -27,12 +30,12 @@ SINA_KLINE_URL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.p
 
 def market_prefix_for_code(code: str) -> str:
     code = code.strip()
+    if code.startswith(("4", "8", "92")):
+        return "bj"
     if code.startswith(("6", "9")):
         return "sh"
     if code.startswith(("0", "2", "3")):
         return "sz"
-    if code.startswith(("4", "8")):
-        return "bj"
     raise ValueError(f"unsupported A-share code: {code}")
 
 
@@ -166,30 +169,66 @@ def extract_codes_from_positions(paths: list[str]) -> list[str]:
     return codes
 
 
-def fetch_daily_bars(codes: list[str], output: Path, datalen: int, merge_existing: bool = True) -> dict[str, Any]:
+def extract_codes_from_csv(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        if not reader.fieldnames or "code" not in reader.fieldnames:
+            raise ValueError(f"codes file must contain a code column: {path}")
+        return [str(row.get("code") or "").strip() for row in reader if str(row.get("code") or "").strip()]
+
+
+def fetch_daily_bars(
+    codes: list[str],
+    output: Path,
+    datalen: int,
+    merge_existing: bool = True,
+    archive_root: Path | None = Path("data/raw/snapshots"),
+    workers: int = 1,
+    progress_every: int = 0,
+) -> dict[str, Any]:
     fetched: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
-    for code in codes:
-        try:
-            fetched.extend(fetch_sina_kline(code, datalen=datalen))
-        except Exception as exc:
-            errors.append({"code": code, "message": str(exc)})
+    started_at = datetime.now()
+    if workers <= 1:
+        for index, code in enumerate(codes, start=1):
+            try:
+                fetched.extend(fetch_sina_kline(code, datalen=datalen))
+            except Exception as exc:
+                errors.append({"code": code, "message": str(exc)})
+            if progress_every and index % progress_every == 0:
+                print(f"progress: {index}/{len(codes)} codes", file=sys.stderr)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(fetch_sina_kline, code, datalen): code for code in codes}
+            for index, future in enumerate(as_completed(futures), start=1):
+                code = futures[future]
+                try:
+                    fetched.extend(future.result())
+                except Exception as exc:
+                    errors.append({"code": code, "message": str(exc)})
+                if progress_every and index % progress_every == 0:
+                    print(f"progress: {index}/{len(codes)} codes", file=sys.stderr)
 
     existing = read_existing_daily_bars(output) if merge_existing else []
     rows = merge_rows(existing, fetched)
     write_daily_bars(output, rows)
+    retained = retain_file_snapshot(output, "daily_bars", archive_root) if archive_root is not None else None
     dates = sorted({row["trade_date"] for row in fetched})
     return {
         "fetched_at": datetime.now().isoformat(timespec="seconds"),
         "source": "sina_kline",
         "codes": codes,
         "requested_code_count": len(codes),
+        "success_code_count": len(codes) - len(errors),
         "fetched_row_count": len(fetched),
         "output_row_count": len(rows),
         "start_date": dates[0] if dates else None,
         "end_date": dates[-1] if dates else None,
         "output": str(output),
         "errors": errors,
+        "retained_snapshot": retained,
+        "workers": workers,
+        "duration_seconds": round((datetime.now() - started_at).total_seconds(), 3),
     }
 
 
@@ -200,7 +239,13 @@ def write_metadata(path: Path, metadata: dict[str, Any]) -> None:
 
 def print_summary(metadata: dict[str, Any]) -> None:
     print(f"source: {metadata['source']}")
-    print(f"codes: {', '.join(metadata['codes']) or '-'}")
+    codes = metadata["codes"]
+    if len(codes) <= 20:
+        codes_text = ", ".join(codes) or "-"
+    else:
+        codes_text = f"{len(codes)} codes ({', '.join(codes[:10])}, ...)"
+    print(f"codes: {codes_text}")
+    print(f"success codes: {metadata.get('success_code_count', metadata['requested_code_count'])}/{metadata['requested_code_count']}")
     print(f"fetched rows: {metadata['fetched_row_count']}")
     print(f"date range: {metadata['start_date'] or '-'} -> {metadata['end_date'] or '-'}")
     print(f"output: {metadata['output']}")
@@ -208,16 +253,23 @@ def print_summary(metadata: dict[str, Any]) -> None:
         print("errors:")
         for item in metadata["errors"]:
             print(f"- {item['code']}: {item['message']}")
+    if metadata.get("retained_snapshot"):
+        print(f"retained snapshot: {metadata['retained_snapshot']['path']}")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fetch A-share daily bars from Sina.")
     parser.add_argument("--codes", nargs="*", default=[], help="6-digit stock codes.")
+    parser.add_argument("--codes-file", help="CSV file with a code column, for example data/processed/tradable_universe.csv.")
     parser.add_argument("--positions", nargs="*", default=[], help="Position YAML files; stock.code will be fetched.")
     parser.add_argument("--datalen", type=int, default=120, help="Number of daily bars per code.")
     parser.add_argument("--output", default="data/processed/daily_bars.csv", help="Standard daily bars CSV output.")
     parser.add_argument("--metadata-output", default="data/metadata/daily_bars.fetch.json", help="Fetch metadata JSON.")
     parser.add_argument("--replace", action="store_true", help="Replace output instead of merging with existing rows.")
+    parser.add_argument("--archive-root", default="data/raw/snapshots")
+    parser.add_argument("--no-archive", action="store_true", help="Do not retain a raw snapshot copy.")
+    parser.add_argument("--workers", type=int, default=1, help="Concurrent fetch workers. Keep modest to avoid hammering public endpoints.")
+    parser.add_argument("--progress-every", type=int, default=0, help="Print progress to stderr every N completed codes.")
     parser.add_argument("--json", action="store_true", help="Print metadata as JSON.")
     return parser.parse_args()
 
@@ -225,10 +277,19 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        codes = list(dict.fromkeys(args.codes + extract_codes_from_positions(args.positions)))
+        file_codes = extract_codes_from_csv(Path(args.codes_file)) if args.codes_file else []
+        codes = list(dict.fromkeys(args.codes + file_codes + extract_codes_from_positions(args.positions)))
         if not codes:
             raise ValueError("provide --codes or --positions")
-        metadata = fetch_daily_bars(codes, Path(args.output), datalen=args.datalen, merge_existing=not args.replace)
+        metadata = fetch_daily_bars(
+            codes,
+            Path(args.output),
+            datalen=args.datalen,
+            merge_existing=not args.replace,
+            archive_root=None if args.no_archive else Path(args.archive_root),
+            workers=args.workers,
+            progress_every=args.progress_every,
+        )
         write_metadata(Path(args.metadata_output), metadata)
     except Exception as exc:
         print(f"fetch daily bars failed: {exc}", file=sys.stderr)

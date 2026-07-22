@@ -1,0 +1,67 @@
+timezone: Asia/Shanghai
+snapshot_archive_root: data/raw/snapshots
+
+jobs:
+  stock_universe:
+    priority: high
+    cadence: trading_day_after_close
+    suggested_time: "17:10"
+    command: >
+      .venv/bin/python tools/fetch_eastmoney_stock_universe.py
+      --output data/processed/stock_universe.csv
+      --metadata-output data/metadata/stock_universe.fetch.json
+    retention: retain_every_run
+    rationale: "股票池、交易状态、ST/停牌和当日成交额会变化，选股前需要每日刷新。"
+
+  tradable_universe:
+    priority: high
+    cadence: after_stock_universe
+    suggested_time: "17:15"
+    command: >
+      .venv/bin/python tools/filter_universe.py
+      --profile config/investment-profile.example.yaml
+      --input data/processed/stock_universe.csv
+      --output data/processed/tradable_universe.csv
+      --report-output data/metadata/tradable_universe.filter.json
+    retention: metadata_only
+    rationale: "由股票池和投资规则派生，可重复生成。"
+
+  daily_bars:
+    priority: high
+    cadence: trading_day_after_close
+    suggested_time: "17:30"
+    command: >
+      .venv/bin/python tools/fetch_daily_bars_sina.py
+      --codes-file data/processed/tradable_universe.csv
+      --datalen 500
+      --output data/processed/market_daily_bars.csv
+      --metadata-output data/metadata/market_daily_bars.fetch.json
+    retention: retain_every_run
+    rationale: "行情数据是趋势、技术指标、行业强度和回测的基础，每个交易日都要更新。"
+
+  valuation_metrics:
+    priority: high
+    cadence: weekly_after_friday_close
+    suggested_time: "18:20"
+    command: >
+      .venv/bin/python tools/fetch_eastmoney_valuation_metrics.py
+      --output data/processed/valuation_metrics.csv
+      --metadata-output data/metadata/valuation_metrics.fetch.json
+    retention: retain_every_run
+    rationale: "PE TTM、PB、PS、PCF、股息率和市值类数据不需要盘中实时刷新；周频足够支撑观察池排序和风险提示。"
+
+  financial_metrics:
+    priority: high
+    cadence: quarterly_and_reporting_season_daily
+    suggested_time: "19:00"
+    command: "TODO: add financial metrics fetcher"
+    retention: retain_every_run
+    rationale: "财务指标跟随定期报告和业绩预告变化，常规季度刷新，财报密集期每日补拉。"
+
+  industry_valuation_percentiles:
+    priority: high
+    cadence: monthly_first_trading_day_after_close
+    suggested_time: "19:20"
+    command: "TODO: calculate industry valuation percentiles from retained valuation history"
+    retention: retain_every_run
+    rationale: "行业估值分位需要跨行业和历史窗口，月频重算即可；遇到市场剧烈波动可手动补跑。"

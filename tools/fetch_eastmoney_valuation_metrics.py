@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch A-share stock universe from Eastmoney public quote list."""
+"""Fetch A-share valuation metrics from Eastmoney public quote list."""
 
 from __future__ import annotations
 
@@ -11,21 +11,20 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 try:
     from tools.data_retention import retain_file_snapshot
-    from tools.import_stock_universe import STANDARD_FIELDS
+    from tools.import_valuation_metrics import STANDARD_FIELDS
 except ModuleNotFoundError:
     from data_retention import retain_file_snapshot
-    from import_stock_universe import STANDARD_FIELDS
+    from import_valuation_metrics import STANDARD_FIELDS
 
 
 EASTMONEY_LIST_URL = "https://push2delay.eastmoney.com/api/qt/clist/get"
-DEFAULT_FIELDS = "f12,f14,f13,f100,f2,f3,f5,f6,f20,f21,f15,f16,f17,f18,f26,f107,f115,f152"
 DEFAULT_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
+DEFAULT_FIELDS = "f12,f14,f9,f23,f20,f21,f115,f152"
 
 
 def as_number(value: Any) -> float | None:
@@ -37,40 +36,30 @@ def as_number(value: Any) -> float | None:
         return None
 
 
-def exchange_from_market(code: str, market: Any) -> str:
-    market_code = str(market)
-    if code.startswith(("4", "8", "92")):
-        return "BSE"
-    if market_code == "1" or code.startswith(("6", "9")):
-        return "SSE"
-    if market_code == "0" or code.startswith(("0", "2", "3")):
-        return "SZSE"
-    return "UNKNOWN"
-
-
-def normalize_listing_date(value: Any) -> str:
-    raw = str(value or "").strip()
-    if len(raw) != 8 or not raw.isdigit():
+def format_number(value: float | None) -> str:
+    if value is None:
         return ""
-    return f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    rounded = round(value, 6)
+    return str(int(rounded)) if float(rounded).is_integer() else str(rounded)
 
 
-def normalize_row(row: dict[str, Any], updated_at: str) -> dict[str, Any]:
-    code = str(row.get("f12") or "").strip()
-    name = str(row.get("f14") or "").strip()
-    current_turnover = as_number(row.get("f6")) or 0.0
-    listing_date = normalize_listing_date(row.get("f26"))
+def normalize_row(row: dict[str, Any], trade_date: str, updated_at: str) -> dict[str, str]:
+    pe_ttm = as_number(row.get("f115"))
+    pe_dynamic = as_number(row.get("f9"))
     return {
-        "code": code,
-        "name": name,
-        "exchange": exchange_from_market(code, row.get("f13")),
-        "industry": str(row.get("f100") or "").strip() or "UNKNOWN",
-        "is_st": "ST" in name.upper() or "退" in name,
-        "is_suspended": row.get("f2") in (None, "-", ""),
-        "has_delisting_risk": "退" in name,
-        "abnormal_trading_status": False,
-        "listing_date": listing_date,
-        "avg_daily_turnover_cny": round(current_turnover, 2),
+        "trade_date": trade_date,
+        "code": str(row.get("f12") or "").strip(),
+        "pe_ttm": format_number(pe_ttm if pe_ttm is not None else pe_dynamic),
+        "pb": format_number(as_number(row.get("f23"))),
+        "ps_ttm": "",
+        "pcf_ttm": "",
+        "dividend_yield": "",
+        "market_cap": format_number(as_number(row.get("f20"))),
+        "float_market_cap": format_number(as_number(row.get("f21"))),
+        "pe_percentile": "",
+        "pb_percentile": "",
+        "industry_pe_percentile": "",
+        "industry_pb_percentile": "",
         "data_source": "eastmoney_quote_list",
         "updated_at": updated_at,
     }
@@ -106,25 +95,27 @@ def fetch_page(page: int, page_size: int, timeout: float, retries: int = 3) -> d
             last_error = exc
             if attempt < retries:
                 time.sleep(0.4 * attempt)
-    raise RuntimeError(f"failed to fetch Eastmoney stock universe page {page}: {last_error}") from last_error
+    raise RuntimeError(f"failed to fetch Eastmoney valuation page {page}: {last_error}") from last_error
 
 
-def fetch_universe(page_size: int = 500, timeout: float = 15.0) -> list[dict[str, Any]]:
+def fetch_rows(page_size: int = 100, timeout: float = 15.0, trade_date: str | None = None) -> list[dict[str, str]]:
     first = fetch_page(1, page_size, timeout)
     data = first.get("data") or {}
     total = int(data.get("total") or 0)
-    rows = list(data.get("diff") or [])
-    effective_page_size = len(rows) or page_size
+    raw_rows = list(data.get("diff") or [])
+    effective_page_size = len(raw_rows) or page_size
     pages = (total + effective_page_size - 1) // effective_page_size
     for page in range(2, pages + 1):
         payload = fetch_page(page, page_size, timeout)
-        rows.extend((payload.get("data") or {}).get("diff") or [])
+        raw_rows.extend((payload.get("data") or {}).get("diff") or [])
+
+    valuation_date = trade_date or date.today().isoformat()
     updated_at = date.today().isoformat()
-    normalized = [normalize_row(row, updated_at) for row in rows if str(row.get("f12") or "").strip()]
-    return sorted(normalized, key=lambda item: item["code"])
+    rows = [normalize_row(row, valuation_date, updated_at) for row in raw_rows if str(row.get("f12") or "").strip()]
+    return sorted(rows, key=lambda item: item["code"])
 
 
-def write_universe(path: Path, rows: list[dict[str, Any]]) -> None:
+def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=STANDARD_FIELDS)
@@ -133,18 +124,27 @@ def write_universe(path: Path, rows: list[dict[str, Any]]) -> None:
             writer.writerow({field: row.get(field, "") for field in STANDARD_FIELDS})
 
 
-def build_metadata(rows: list[dict[str, Any]], output: Path, retained_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_metadata(rows: list[dict[str, str]], output: Path, retained_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    missing: dict[str, int] = {}
+    for field in ("pe_ttm", "pb", "ps_ttm", "pcf_ttm", "dividend_yield", "pe_percentile", "pb_percentile"):
+        missing[field] = sum(1 for row in rows if not row.get(field))
     return {
         "fetched_at": datetime.now().isoformat(timespec="seconds"),
         "source": "eastmoney_quote_list",
         "output": str(output),
         "row_count": len(rows),
-        "exchange_counts": {
-            exchange: sum(1 for row in rows if row.get("exchange") == exchange)
-            for exchange in sorted({str(row.get("exchange") or "UNKNOWN") for row in rows})
+        "trade_date": rows[0]["trade_date"] if rows else None,
+        "missing_by_field": missing,
+        "field_notes": {
+            "pe_ttm": "Eastmoney f115 when available, otherwise f9 dynamic PE fallback.",
+            "pb": "Eastmoney f23.",
+            "market_cap": "Eastmoney f20.",
+            "float_market_cap": "Eastmoney f21.",
+            "ps_ttm": "Reserved; not populated by quote list source.",
+            "pcf_ttm": "Reserved; not populated by quote list source.",
+            "dividend_yield": "Reserved; not populated by quote list source.",
+            "industry_percentiles": "Reserved for later industry distribution calculation.",
         },
-        "st_count": sum(1 for row in rows if row.get("is_st")),
-        "suspended_count": sum(1 for row in rows if row.get("is_suspended")),
         "retained_snapshot": retained_snapshot,
     }
 
@@ -155,9 +155,10 @@ def write_metadata(path: Path, metadata: dict[str, Any]) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fetch A-share stock universe from Eastmoney.")
-    parser.add_argument("--output", default="data/processed/stock_universe.csv")
-    parser.add_argument("--metadata-output", default="data/metadata/stock_universe.fetch.json")
+    parser = argparse.ArgumentParser(description="Fetch A-share valuation metrics from Eastmoney.")
+    parser.add_argument("--output", default="data/processed/valuation_metrics.csv")
+    parser.add_argument("--metadata-output", default="data/metadata/valuation_metrics.fetch.json")
+    parser.add_argument("--trade-date", help="Override valuation trade date, defaults to today.")
     parser.add_argument("--page-size", type=int, default=100)
     parser.add_argument("--timeout", type=float, default=15.0)
     parser.add_argument("--archive-root", default="data/raw/snapshots")
@@ -169,21 +170,21 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        rows = fetch_universe(args.page_size, args.timeout)
+        rows = fetch_rows(args.page_size, args.timeout, args.trade_date)
         output = Path(args.output)
-        write_universe(output, rows)
-        retained = None if args.no_archive else retain_file_snapshot(output, "stock_universe", Path(args.archive_root))
+        write_rows(output, rows)
+        retained = None if args.no_archive else retain_file_snapshot(output, "valuation_metrics", Path(args.archive_root))
         metadata = build_metadata(rows, output, retained)
         write_metadata(Path(args.metadata_output), metadata)
     except Exception as exc:
-        print(f"fetch Eastmoney stock universe failed: {exc}", file=sys.stderr)
+        print(f"fetch Eastmoney valuation metrics failed: {exc}", file=sys.stderr)
         return 2
 
     if args.json:
         print(json.dumps(metadata, ensure_ascii=False, indent=2))
     else:
-        print(f"stock universe rows: {metadata['row_count']}")
-        print(f"exchange counts: {metadata['exchange_counts']}")
+        print(f"valuation rows: {metadata['row_count']}")
+        print(f"trade date: {metadata['trade_date'] or '-'}")
         print(f"output: {metadata['output']}")
         if metadata.get("retained_snapshot"):
             print(f"retained snapshot: {metadata['retained_snapshot']['path']}")

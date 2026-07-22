@@ -20,10 +20,14 @@ STANDARD_FIELDS = [
     "pe_ttm",
     "pb",
     "ps_ttm",
+    "pcf_ttm",
     "dividend_yield",
     "market_cap",
+    "float_market_cap",
     "pe_percentile",
     "pb_percentile",
+    "industry_pe_percentile",
+    "industry_pb_percentile",
     "data_source",
     "updated_at",
 ]
@@ -33,10 +37,14 @@ NUMERIC_FIELDS = [
     "pe_ttm",
     "pb",
     "ps_ttm",
+    "pcf_ttm",
     "dividend_yield",
     "market_cap",
+    "float_market_cap",
     "pe_percentile",
     "pb_percentile",
+    "industry_pe_percentile",
+    "industry_pb_percentile",
 ]
 CODE_PATTERN = re.compile(r"^\d{6}$")
 
