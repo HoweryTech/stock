@@ -13,6 +13,7 @@ class MergeCandidatePoolTest(unittest.TestCase):
                 "code": "300750",
                 "trade_date": "2026-07-02",
                 "score": "12.5",
+                "close": "289.66",
                 "reasons": "趋势强。",
                 "risks": "追高风险。",
             }
@@ -32,6 +33,8 @@ class MergeCandidatePoolTest(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["code"], "300750")
         self.assertEqual(candidates[0]["primary_strategy"], "multi_strategy")
+        self.assertEqual(candidates[0]["latest_price"], "289.66")
+        self.assertEqual(candidates[0]["latest_price_date"], "2026-07-02")
         self.assertEqual(candidates[0]["strategies"], "trend_strength|value_quality")
         self.assertIn("[trend_strength] 趋势强。", candidates[0]["reasons"])
         self.assertIn("[value_quality] 质量较好。", candidates[0]["reasons"])
@@ -136,6 +139,35 @@ class MergeCandidatePoolTest(unittest.TestCase):
         self.assertIn("daily MACD偏弱", candidates[0]["technical_health_evidence"])
         self.assertIn("daily_macd_dead_cross", candidates[0]["technical_risk_flags"])
 
+    def test_uses_technical_daily_close_when_strategy_price_is_missing(self) -> None:
+        candidates = merge_candidates(
+            [{"code": "600000", "score": "7", "reasons": "趋势强。", "risks": ""}],
+            [],
+            technical_context={
+                "600000": {
+                    "code": "600000",
+                    "periods": {
+                        "daily": {
+                            "bar_count": 80,
+                            "latest_trade_date": "2026-07-21",
+                            "close": 9.87,
+                            "macd": {"status": "ok", "cross_status": "bullish", "histogram": 0.06},
+                            "boll": {"status": "ok", "middle": 9.2, "percent_b": 0.68},
+                            "rsi": {"status": "ok", "rsi14": 52},
+                            "kdj": {"status": "ok", "k": 55, "d": 48, "j": 69},
+                            "atr": {"status": "ok", "atr_pct": 2.4},
+                            "volume": {"status": "ok", "volume_ratio_20": 1.2},
+                        },
+                        "weekly": {"bar_count": 40, "macd": {"status": "insufficient"}},
+                        "monthly": {"bar_count": 6, "macd": {"status": "insufficient"}},
+                    },
+                }
+            },
+        )
+
+        self.assertEqual(candidates[0]["latest_price"], 9.87)
+        self.assertEqual(candidates[0]["latest_price_date"], "2026-07-21")
+
     def test_merges_event_catalyst_as_third_strategy(self) -> None:
         candidates = merge_candidates(
             [{"code": "300750", "score": "12.5", "reasons": "趋势强。", "risks": ""}],
@@ -170,9 +202,9 @@ class MergeCandidatePoolTest(unittest.TestCase):
             metadata_path = Path(tmp_dir) / "pool.json"
 
             with trend_path.open("w", encoding="utf-8", newline="") as file:
-                writer = csv.DictWriter(file, fieldnames=["code", "trade_date", "score", "turnover_avg", "reasons", "risks"])
+                writer = csv.DictWriter(file, fieldnames=["code", "trade_date", "score", "close", "turnover_avg", "reasons", "risks"])
                 writer.writeheader()
-                writer.writerow({"code": "300750", "trade_date": "2026-07-02", "score": "12.5", "turnover_avg": "10090000000", "reasons": "趋势强。", "risks": ""})
+                writer.writerow({"code": "300750", "trade_date": "2026-07-02", "score": "12.5", "close": "289.66", "turnover_avg": "10090000000", "reasons": "趋势强。", "risks": ""})
             with value_path.open("w", encoding="utf-8", newline="") as file:
                 writer = csv.DictWriter(file, fieldnames=["code", "report_period", "score", "reasons", "risks"])
                 writer.writeheader()
@@ -198,6 +230,8 @@ class MergeCandidatePoolTest(unittest.TestCase):
         self.assertEqual(metadata["industry_strength_scored_count"], 1)
         self.assertEqual(rows[0]["primary_strategy"], "multi_strategy")
         self.assertEqual(rows[0]["name"], "宁德时代")
+        self.assertEqual(rows[0]["latest_price"], "289.66")
+        self.assertEqual(rows[0]["latest_price_date"], "2026-07-02")
         self.assertEqual(rows[0]["industry"], "电力设备")
         self.assertEqual(rows[0]["industry_strength_score"], "15")
         self.assertEqual(rows[0]["strategy_confluence_score"], "200.0")

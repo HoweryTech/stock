@@ -56,6 +56,7 @@ const candidateLabels = {
     code: "证券",
     board: "板块",
     combined_score: "综合推荐度",
+    latest_price: "价格",
     strategy_count: "策略数量",
     industry_strength_score: "行业强度",
     liquidity_score: "流动性",
@@ -148,6 +149,7 @@ function candidateRow(item) {
     <td><strong>${candidateEscape(item.code)}</strong><span>${candidateEscape(item.name || "-")}</span><em>${candidateEscape(item.industry || "-")}</em></td>
     <td>${candidateEscape(candidateLabel("exchange", item.exchange))}<br><span>${candidateEscape(candidateLabel("board", item.board))}</span></td>
     <td class="number">${candidateNumber(item.combined_score)}</td>
+    <td class="number">${candidateNumber(item.latest_price, 2)}<br><span>${candidateEscape(item.latest_price_date || "-")}</span></td>
     <td>${candidateEscape(strategiesText(item))}</td>
     <td class="number">${candidateNumber(item.industry_strength_score)}</td>
     <td class="number">${candidateNumber(item.liquidity_score)}</td>
@@ -157,7 +159,7 @@ function candidateRow(item) {
     <td><span class="candidate-status-pill">${candidateEscape(candidateLabel("portfolio_fit_status", status))}</span></td>
   </tr>
   <tr class="candidate-evidence-row">
-    <td colspan="10">${candidateEscape(candidateEvidence(item))}</td>
+    <td colspan="11">${candidateEscape(candidateEvidence(item))}</td>
   </tr>`;
 }
 
@@ -166,8 +168,9 @@ function candidateCard(item) {
   const technicalStatus = item.technical_health_status || "";
   return `<article class="candidate-card ${statusClass(status)}">
     <div><strong>${candidateEscape(item.code)} ${candidateEscape(item.name || "")}</strong><span>${candidateEscape(candidateLabel("portfolio_fit_status", status))}</span></div>
-    <p>${candidateEscape(item.industry || "-")} · ${candidateEscape(candidateLabel("board", item.board))} · 综合分 ${candidateNumber(item.combined_score)}</p>
+    <p>${candidateEscape(item.industry || "-")} · ${candidateEscape(candidateLabel("board", item.board))} · 综合分 ${candidateNumber(item.combined_score)} · 价格 ${candidateNumber(item.latest_price, 2)}</p>
     <dl>
+      <dt>价格</dt><dd>${candidateNumber(item.latest_price, 2)}</dd>
       <dt>策略</dt><dd>${candidateEscape(strategiesText(item))}</dd>
       <dt>技术面</dt><dd>${candidateEscape(candidateLabel("technical_health_status", technicalStatus))} ${candidateNumber(item.technical_health_score)}</dd>
       <dt>流动性</dt><dd>${candidateNumber(item.liquidity_score)}</dd>

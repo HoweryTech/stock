@@ -29,6 +29,8 @@ OUTPUT_FIELDS = [
     "primary_strategy",
     "strategy_confluence_score",
     "strategy_confluence_evidence",
+    "latest_price",
+    "latest_price_date",
     "trend_score",
     "value_quality_score",
     "event_score",
@@ -140,6 +142,8 @@ def add_strategy_candidate(pool: dict[str, dict[str, Any]], strategy: str, row: 
             "event_date": "",
             "event_type": "",
             "trend_turnover_avg": "",
+            "latest_price": "",
+            "latest_price_date": "",
             "trade_date": "",
             "report_period": "",
             "reasons": [],
@@ -153,6 +157,8 @@ def add_strategy_candidate(pool: dict[str, dict[str, Any]], strategy: str, row: 
     if strategy == "trend_strength":
         candidate["trend_score"] = score
         candidate["trade_date"] = row.get("trade_date", candidate["trade_date"])
+        candidate["latest_price"] = row.get("close", candidate.get("latest_price", ""))
+        candidate["latest_price_date"] = row.get("trade_date", candidate.get("latest_price_date", ""))
         candidate["trend_turnover_avg"] = row.get("turnover_avg", candidate.get("trend_turnover_avg", ""))
     elif strategy == "value_quality":
         candidate["value_quality_score"] = score
@@ -451,6 +457,9 @@ def finalize_candidate(
     )
     risk_penalty_score, risk_penalty_evidence = risk_penalty_fields(candidate)
     technical_health_score, technical_health_status, technical_health_evidence, technical_risk_flags = technical_health_fields(technical_row)
+    daily_technical = (technical_row or {}).get("periods", {}).get("daily", {}) if technical_row else {}
+    latest_price = candidate.get("latest_price") or daily_technical.get("close") or ""
+    latest_price_date = candidate.get("latest_price_date") or daily_technical.get("latest_trade_date") or ""
     enriched_candidate = {
         **candidate,
         "strategy_confluence_score": strategy_confluence_score,
@@ -472,6 +481,8 @@ def finalize_candidate(
         "primary_strategy": primary_strategy(candidate),
         "strategy_confluence_score": strategy_confluence_score,
         "strategy_confluence_evidence": strategy_confluence_evidence,
+        "latest_price": latest_price,
+        "latest_price_date": latest_price_date,
         "trend_score": candidate.get("trend_score", ""),
         "value_quality_score": candidate.get("value_quality_score", ""),
         "event_score": candidate.get("event_score", ""),

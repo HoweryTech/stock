@@ -98,6 +98,7 @@ def read_candidate_pool(path: Path) -> list[dict[str, object]]:
                 "strategy_count",
                 "combined_score",
                 "strategy_confluence_score",
+                "latest_price",
                 "trend_score",
                 "value_quality_score",
                 "event_score",
@@ -182,6 +183,7 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
     direction = query.get("direction", ["desc"])[0]
     sortable_numeric = {
         "combined_score",
+        "latest_price",
         "strategy_count",
         "industry_strength_score",
         "liquidity_score",
