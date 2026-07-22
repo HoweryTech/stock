@@ -243,7 +243,8 @@ def screen_candidates(
             candidates.append(candidate)
 
     candidates.sort(key=lambda item: (-float(item["score"]), item["code"]))
-    return candidates[: int(config.get("max_candidates", 20))], exclusions
+    max_candidates = int(config.get("max_candidates", 20))
+    return (candidates if max_candidates <= 0 else candidates[:max_candidates]), exclusions
 
 
 def write_candidates(path: Path, candidates: list[dict[str, Any]]) -> None:

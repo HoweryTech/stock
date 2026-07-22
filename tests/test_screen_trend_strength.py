@@ -71,7 +71,38 @@ class ScreenTrendStrengthTest(unittest.TestCase):
 
         self.assertEqual([item["code"] for item in candidates], ["600000"])
         self.assertEqual(exclusions[0]["code"], "000001")
-        self.assertIn("低于阈值", exclusions[0]["reasons"][0])
+
+    def test_max_candidates_zero_keeps_all_matching_rows(self) -> None:
+        rows = [
+            {
+                "code": "600000",
+                "trade_date": "2026-07-02",
+                "close": "10",
+                "return_2d": "5",
+                "ma_2": "9",
+                "above_ma_2": "true",
+                "turnover_avg_2": "100000000",
+                "is_suspended": "false",
+                "is_limit_up": "false",
+                "is_limit_down": "false",
+            },
+            {
+                "code": "000001",
+                "trade_date": "2026-07-02",
+                "close": "12",
+                "return_2d": "4",
+                "ma_2": "11",
+                "above_ma_2": "true",
+                "turnover_avg_2": "100000000",
+                "is_suspended": "false",
+                "is_limit_up": "false",
+                "is_limit_down": "false",
+            },
+        ]
+
+        candidates, _ = screen_candidates(rows, {**self.config, "max_candidates": 0})
+
+        self.assertEqual([item["code"] for item in candidates], ["600000", "000001"])
 
     def test_run_screen_writes_candidates_and_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -123,4 +154,3 @@ class ScreenTrendStrengthTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

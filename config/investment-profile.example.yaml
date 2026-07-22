@@ -135,7 +135,7 @@ strategies:
       exclude_suspended: true
       exclude_limit_up: false
       exclude_limit_down: true
-      max_candidates: 20
+      max_candidates: 0
 
   event_catalyst:
     enabled: true

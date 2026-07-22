@@ -127,7 +127,7 @@ def screen_candidates(factor_rows: list[dict[str, str]], config: dict[str, Any])
 
     candidates.sort(key=lambda item: (-float(item["score"]), item["code"]))
     max_candidates = int(config.get("max_candidates", 20))
-    return candidates[:max_candidates], exclusions
+    return (candidates if max_candidates <= 0 else candidates[:max_candidates]), exclusions
 
 
 def write_candidates(path: Path, candidates: list[dict[str, Any]]) -> None:
@@ -236,4 +236,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

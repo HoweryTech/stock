@@ -156,6 +156,12 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
         "technical_health_status": query.get("technical_health_status", [""])[0],
     }
     strategy = query.get("strategy", [""])[0]
+    excluded_boards = {
+        value
+        for raw in query.get("exclude_board", [])
+        for value in str(raw or "").split(",")
+        if value
+    }
 
     def matches(item: dict[str, object]) -> bool:
         if search:
@@ -165,6 +171,8 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
         for field, value in filter_fields.items():
             if value and str(item.get(field) or "") != value:
                 return False
+        if excluded_boards and str(item.get("board") or "") in excluded_boards:
+            return False
         if strategy and strategy not in item.get("strategies_list", []):
             return False
         return True
@@ -193,10 +201,12 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
     else:
         filtered.sort(key=lambda item: (str(item.get(sort_key) or ""), str(item.get("code") or "")), reverse=direction != "asc")
 
+    default_limit = len(filtered) if filtered else len(items)
     try:
-        limit = min(500, max(1, int(query.get("limit", ["200"])[0])))
-    except ValueError:
-        limit = 200
+        raw_limit = query.get("limit", [str(default_limit)])[0]
+        limit = default_limit if str(raw_limit).lower() in ("", "all") else max(1, int(raw_limit))
+    except (TypeError, ValueError):
+        limit = default_limit
     return {
         "source": str(path),
         "available": path.exists(),

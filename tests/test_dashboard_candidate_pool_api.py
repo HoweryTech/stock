@@ -57,6 +57,20 @@ class DashboardCandidatePoolApiTest(unittest.TestCase):
                         "technical_health_score": "18",
                     }
                 )
+                writer.writerow(
+                    {
+                        "code": "920438",
+                        "name": "北交样例",
+                        "exchange": "BSE",
+                        "industry": "机械",
+                        "strategies": "trend_strength",
+                        "combined_score": "160",
+                        "portfolio_fit_status": "watch",
+                        "data_quality_status": "complete",
+                        "technical_health_status": "weak",
+                        "technical_health_score": "-6",
+                    }
+                )
 
             old_candidate = dashboard.CANDIDATE_POOL_FILE
             old_portfolio = dashboard.CANDIDATE_PORTFOLIO_FIT_FILE
@@ -80,10 +94,38 @@ class DashboardCandidatePoolApiTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["board"], "star")
         self.assertEqual(result["items"][0]["technical_health_status"], "weak")
         self.assertEqual(result["items"][0]["technical_health_score"], -12)
+        self.assertEqual(result["filters"]["board"]["bse"], 1)
         self.assertEqual(result["filters"]["board"]["chinext"], 1)
         self.assertEqual(result["filters"]["board"]["star"], 1)
         self.assertEqual(result["filters"]["technical_health_status"]["strong"], 1)
-        self.assertEqual(result["filters"]["technical_health_status"]["weak"], 1)
+        self.assertEqual(result["filters"]["technical_health_status"]["weak"], 2)
+
+    def test_excludes_multiple_boards_and_returns_all_matches_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            candidate_path = base / "candidate_pool.csv"
+            portfolio_path = base / "missing_portfolio_fit.csv"
+            with candidate_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["code", "name", "exchange", "combined_score"])
+                writer.writeheader()
+                writer.writerow({"code": "688001", "name": "科创样例", "exchange": "SSE", "combined_score": "180"})
+                writer.writerow({"code": "920438", "name": "北交样例", "exchange": "BSE", "combined_score": "160"})
+                writer.writerow({"code": "300750", "name": "宁德时代", "exchange": "SZSE", "combined_score": "220"})
+                writer.writerow({"code": "600000", "name": "浦发银行", "exchange": "SSE", "combined_score": "120"})
+
+            old_candidate = dashboard.CANDIDATE_POOL_FILE
+            old_portfolio = dashboard.CANDIDATE_PORTFOLIO_FIT_FILE
+            dashboard.CANDIDATE_POOL_FILE = candidate_path
+            dashboard.CANDIDATE_PORTFOLIO_FIT_FILE = portfolio_path
+            try:
+                result = dashboard.filtered_candidates({"exclude_board": ["star", "bse", "chinext"]})
+            finally:
+                dashboard.CANDIDATE_POOL_FILE = old_candidate
+                dashboard.CANDIDATE_PORTFOLIO_FIT_FILE = old_portfolio
+
+        self.assertEqual(result["filtered_count"], 1)
+        self.assertEqual([item["code"] for item in result["items"]], ["600000"])
+        self.assertEqual(result["sort"], {"key": "combined_score", "direction": "desc"})
 
 
 if __name__ == "__main__":

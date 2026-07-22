@@ -2,6 +2,25 @@ timezone: Asia/Shanghai
 snapshot_archive_root: data/raw/snapshots
 
 jobs:
+  preopen_market_sync:
+    priority: high
+    cadence: trading_day_before_open
+    suggested_time: "08:40"
+    command: >
+      .venv/bin/python tools/run_preopen_market_sync.py
+      --daily-datalen 10
+      --workers 8
+      --metadata-output data/metadata/preopen_market_sync.json
+    retention: retain_every_run_for_source_fetches
+    rationale: "开盘前同步昨日收盘后的股票池和最近日线样本，并重建选股列表；低频估值不默认每日刷新。"
+    macos_launch_agent:
+      install_command: >
+        .venv/bin/python tools/install_preopen_launch_agent.py
+        --hour 8
+        --minute 40
+        --daily-datalen 10
+        --workers 8
+
   stock_universe:
     priority: high
     cadence: trading_day_after_close

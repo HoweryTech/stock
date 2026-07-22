@@ -1,3 +1,10 @@
+const candidateExcludeBoardDefaults = ["star", "bse", "chinext"];
+const candidateExcludeBoardVersion = "20260722-no-permission-v2";
+const storedCandidateExcludeBoardVersion = localStorage.getItem("candidateExcludeBoardsVersion");
+const storedCandidateExcludeBoards = storedCandidateExcludeBoardVersion === candidateExcludeBoardVersion
+  ? JSON.parse(localStorage.getItem("candidateExcludeBoards") || "[]")
+  : candidateExcludeBoardDefaults;
+
 const candidateState = {
   search: "",
   exchange: "",
@@ -7,6 +14,7 @@ const candidateState = {
   portfolio_fit_status: "",
   data_quality_status: "",
   technical_health_status: "",
+  exclude_board: new Set(storedCandidateExcludeBoards),
   sort: "combined_score",
   direction: "desc",
   lastFilters: null,
@@ -44,6 +52,17 @@ const candidateLabels = {
     value_quality: "价值质量",
     event_catalyst: "事件催化",
   },
+  sort: {
+    code: "证券",
+    board: "板块",
+    combined_score: "综合推荐度",
+    strategy_count: "策略数量",
+    industry_strength_score: "行业强度",
+    liquidity_score: "流动性",
+    risk_penalty_score: "风险扣分",
+    technical_health_score: "技术面",
+    expected_total_position_pct_after_buy: "买入后总仓位",
+  },
 };
 
 const candidateEscape = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
@@ -56,7 +75,8 @@ function candidateQuery() {
   ["search", "exchange", "board", "industry", "strategy", "portfolio_fit_status", "data_quality_status", "technical_health_status", "sort", "direction"].forEach(key => {
     if (candidateState[key]) params.set(key, candidateState[key]);
   });
-  params.set("limit", "300");
+  candidateState.exclude_board.forEach(board => params.append("exclude_board", board));
+  params.set("limit", "all");
   return params.toString();
 }
 
@@ -172,6 +192,7 @@ function renderCandidateList(data) {
   document.querySelector("#candidateSummary").innerHTML = `
     <strong>${candidateEscape(String(data.filtered_count || 0))}</strong>
     <span> / ${candidateEscape(String(data.total_count || 0))} 只候选</span>
+    <span>显示 ${candidateEscape(String(items.length))} 只，按 ${candidateEscape(candidateLabel("sort", data.sort?.key) || "综合分")} ${data.sort?.direction === "asc" ? "升序" : "降序"}</span>
     <em>来源：${candidateEscape(data.source || "-")}</em>`;
   document.querySelector("#candidateTableBody").innerHTML = items.map(candidateRow).join("");
   document.querySelector("#candidateMobileList").innerHTML = items.map(candidateCard).join("");
@@ -192,6 +213,17 @@ function updateCandidateFilter(key, value) {
   void refreshCandidateList();
 }
 
+function updateCandidateExcludeBoard(board, excluded) {
+  if (excluded) {
+    candidateState.exclude_board.add(board);
+  } else {
+    candidateState.exclude_board.delete(board);
+  }
+  localStorage.setItem("candidateExcludeBoards", JSON.stringify([...candidateState.exclude_board]));
+  localStorage.setItem("candidateExcludeBoardsVersion", candidateExcludeBoardVersion);
+  void refreshCandidateList();
+}
+
 function initCandidateList() {
   document.querySelector("#candidateSearchInput")?.addEventListener("input", event => updateCandidateFilter("search", event.target.value.trim()));
   [
@@ -204,6 +236,10 @@ function initCandidateList() {
     ["#candidateTechnicalFilter", "technical_health_status"],
   ].forEach(([selector, key]) => {
     document.querySelector(selector)?.addEventListener("change", event => updateCandidateFilter(key, event.target.value));
+  });
+  document.querySelectorAll("[data-candidate-exclude-board]").forEach(input => {
+    input.checked = candidateState.exclude_board.has(input.dataset.candidateExcludeBoard);
+    input.addEventListener("change", event => updateCandidateExcludeBoard(event.target.dataset.candidateExcludeBoard, event.target.checked));
   });
   document.querySelectorAll("[data-candidate-sort]").forEach(button => button.addEventListener("click", () => {
     const key = button.dataset.candidateSort;
