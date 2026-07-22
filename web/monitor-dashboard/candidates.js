@@ -15,8 +15,7 @@ const candidateState = {
   data_quality_status: "",
   technical_health_status: "",
   exclude_board: new Set(storedCandidateExcludeBoards),
-  sort: "combined_score",
-  direction: "desc",
+  sorts: [{key: "combined_score", direction: "desc"}],
   lastFilters: null,
 };
 
@@ -73,9 +72,10 @@ const candidateLabel = (group, value) => candidateLabels[group]?.[value] || valu
 
 function candidateQuery() {
   const params = new URLSearchParams();
-  ["search", "exchange", "board", "industry", "strategy", "portfolio_fit_status", "data_quality_status", "technical_health_status", "sort", "direction"].forEach(key => {
+  ["search", "exchange", "board", "industry", "strategy", "portfolio_fit_status", "data_quality_status", "technical_health_status"].forEach(key => {
     if (candidateState[key]) params.set(key, candidateState[key]);
   });
+  params.set("sort", candidateState.sorts.map(item => `${item.key}:${item.direction}`).join(","));
   candidateState.exclude_board.forEach(board => params.append("exclude_board", board));
   params.set("limit", "all");
   return params.toString();
@@ -183,19 +183,29 @@ function candidateCard(item) {
 
 function renderCandidateSortIndicators() {
   document.querySelectorAll("[data-candidate-sort]").forEach(button => {
-    const active = button.dataset.candidateSort === candidateState.sort;
+    const sortIndex = candidateState.sorts.findIndex(item => item.key === button.dataset.candidateSort);
+    const active = sortIndex >= 0;
+    const sort = candidateState.sorts[sortIndex];
     button.classList.toggle("active-sort", active);
-    button.textContent = button.textContent.replace(/\s[↑↓]$/, "") + (active ? (candidateState.direction === "asc" ? " ↑" : " ↓") : "");
+    button.textContent = button.textContent.replace(/\s\[\d+[↑↓]\]$/, "") + (active ? ` [${sortIndex + 1}${sort.direction === "asc" ? "↑" : "↓"}]` : "");
   });
+}
+
+function sortSummary(sortItems) {
+  const items = sortItems?.length ? sortItems : candidateState.sorts;
+  return items.map((item, index) => `${index + 1}.${candidateLabel("sort", item.key)}${item.direction === "asc" ? "升序" : "降序"}`).join("，");
 }
 
 function renderCandidateList(data) {
   syncFilterOptions(data.filters || {});
+  if (data.sort?.items?.length) {
+    candidateState.sorts = data.sort.items;
+  }
   const items = data.items || [];
   document.querySelector("#candidateSummary").innerHTML = `
     <strong>${candidateEscape(String(data.filtered_count || 0))}</strong>
     <span> / ${candidateEscape(String(data.total_count || 0))} 只候选</span>
-    <span>显示 ${candidateEscape(String(items.length))} 只，按 ${candidateEscape(candidateLabel("sort", data.sort?.key) || "综合分")} ${data.sort?.direction === "asc" ? "升序" : "降序"}</span>
+    <span>显示 ${candidateEscape(String(items.length))} 只，排序：${candidateEscape(sortSummary(data.sort?.items))}</span>
     <em>来源：${candidateEscape(data.source || "-")}</em>`;
   document.querySelector("#candidateTableBody").innerHTML = items.map(candidateRow).join("");
   document.querySelector("#candidateMobileList").innerHTML = items.map(candidateCard).join("");
@@ -227,6 +237,32 @@ function updateCandidateExcludeBoard(board, excluded) {
   void refreshCandidateList();
 }
 
+function defaultSortDirection(key) {
+  return key === "code" || key === "board" ? "asc" : "desc";
+}
+
+function updateCandidateSort(key) {
+  if (key === "combined_score") {
+    candidateState.sorts = [{key: "combined_score", direction: "desc"}];
+    void refreshCandidateList();
+    return;
+  }
+
+  const existing = candidateState.sorts.find(item => item.key === key);
+  if (existing) {
+    existing.direction = existing.direction === "asc" ? "desc" : "asc";
+  } else {
+    candidateState.sorts = [
+      ...candidateState.sorts.filter(item => item.key !== key),
+      {key, direction: defaultSortDirection(key)},
+    ];
+  }
+  if (!candidateState.sorts.some(item => item.key === "combined_score")) {
+    candidateState.sorts.unshift({key: "combined_score", direction: "desc"});
+  }
+  void refreshCandidateList();
+}
+
 function initCandidateList() {
   document.querySelector("#candidateSearchInput")?.addEventListener("input", event => updateCandidateFilter("search", event.target.value.trim()));
   [
@@ -245,14 +281,7 @@ function initCandidateList() {
     input.addEventListener("change", event => updateCandidateExcludeBoard(event.target.dataset.candidateExcludeBoard, event.target.checked));
   });
   document.querySelectorAll("[data-candidate-sort]").forEach(button => button.addEventListener("click", () => {
-    const key = button.dataset.candidateSort;
-    if (candidateState.sort === key) {
-      candidateState.direction = candidateState.direction === "asc" ? "desc" : "asc";
-    } else {
-      candidateState.sort = key;
-      candidateState.direction = key === "code" || key === "board" ? "asc" : "desc";
-    }
-    void refreshCandidateList();
+    updateCandidateSort(button.dataset.candidateSort);
   }));
   document.querySelector('[data-view="candidates"]')?.addEventListener("click", () => refreshCandidateList());
   void refreshCandidateList();

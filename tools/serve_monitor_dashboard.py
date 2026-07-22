@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import functools
 import json
 import mimetypes
 import os
@@ -144,6 +145,62 @@ def candidate_filters(items: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
+SORTABLE_NUMERIC_FIELDS = {
+    "combined_score",
+    "latest_price",
+    "strategy_count",
+    "industry_strength_score",
+    "liquidity_score",
+    "risk_penalty_score",
+    "technical_health_score",
+    "expected_total_position_pct_after_buy",
+}
+
+
+def candidate_sort_specs(query: dict[str, list[str]]) -> list[dict[str, str]]:
+    raw_sort = query.get("sort", ["combined_score"])[0] or "combined_score"
+    fallback_direction = (query.get("direction", ["desc"])[0] or "desc").lower()
+    specs: list[dict[str, str]] = []
+    for part in str(raw_sort).split(","):
+        if not part:
+            continue
+        key, _, direction = part.partition(":")
+        key = key.strip()
+        if not key:
+            continue
+        specs.append({"key": key, "direction": (direction or fallback_direction or "desc").strip().lower()})
+    return specs or [{"key": "combined_score", "direction": "desc"}]
+
+
+def compare_candidate_items(left: dict[str, object], right: dict[str, object], specs: list[dict[str, str]]) -> int:
+    for spec in specs:
+        key = spec["key"]
+        direction = spec.get("direction") or "desc"
+        multiplier = 1 if direction == "asc" else -1
+        if key in SORTABLE_NUMERIC_FIELDS:
+            left_value = parse_number(left.get(key))
+            right_value = parse_number(right.get(key))
+            if left_value is None and right_value is None:
+                continue
+            if left_value is None:
+                return 1
+            if right_value is None:
+                return -1
+            if left_value != right_value:
+                return (-1 if left_value < right_value else 1) * multiplier
+        else:
+            left_text = str(left.get(key) or "")
+            right_text = str(right.get(key) or "")
+            if left_text != right_text:
+                return (-1 if left_text < right_text else 1) * multiplier
+
+    left_code = str(left.get("code") or "")
+    right_code = str(right.get("code") or "")
+    if left_code == right_code:
+        return 0
+    return -1 if left_code < right_code else 1
+
+
 def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
     path = candidate_pool_path()
     items = read_candidate_pool(path)
@@ -179,29 +236,8 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
         return True
 
     filtered = [item for item in items if matches(item)]
-    sort_key = query.get("sort", ["combined_score"])[0]
-    direction = query.get("direction", ["desc"])[0]
-    sortable_numeric = {
-        "combined_score",
-        "latest_price",
-        "strategy_count",
-        "industry_strength_score",
-        "liquidity_score",
-        "risk_penalty_score",
-        "technical_health_score",
-        "expected_total_position_pct_after_buy",
-    }
-    if sort_key in sortable_numeric:
-        filtered.sort(
-            key=lambda item: (
-                parse_number(item.get(sort_key)) is None,
-                parse_number(item.get(sort_key)) or 0,
-                str(item.get("code") or ""),
-            ),
-            reverse=direction != "asc",
-        )
-    else:
-        filtered.sort(key=lambda item: (str(item.get(sort_key) or ""), str(item.get("code") or "")), reverse=direction != "asc")
+    sort_specs = candidate_sort_specs(query)
+    filtered.sort(key=functools.cmp_to_key(lambda left, right: compare_candidate_items(left, right, sort_specs)))
 
     default_limit = len(filtered) if filtered else len(items)
     try:
@@ -216,7 +252,11 @@ def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
         "filtered_count": len(filtered),
         "items": filtered[:limit],
         "filters": candidate_filters(items),
-        "sort": {"key": sort_key, "direction": direction},
+        "sort": {
+            "key": sort_specs[0]["key"],
+            "direction": sort_specs[0]["direction"],
+            "items": sort_specs,
+        },
     }
 
 

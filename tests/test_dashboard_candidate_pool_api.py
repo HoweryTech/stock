@@ -130,7 +130,8 @@ class DashboardCandidatePoolApiTest(unittest.TestCase):
 
         self.assertEqual(result["filtered_count"], 1)
         self.assertEqual([item["code"] for item in result["items"]], ["600000"])
-        self.assertEqual(result["sort"], {"key": "combined_score", "direction": "desc"})
+        self.assertEqual(result["sort"]["key"], "combined_score")
+        self.assertEqual(result["sort"]["direction"], "desc")
 
     def test_sorts_by_latest_price(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -154,6 +155,34 @@ class DashboardCandidatePoolApiTest(unittest.TestCase):
                 dashboard.CANDIDATE_PORTFOLIO_FIT_FILE = old_portfolio
 
         self.assertEqual([item["code"] for item in result["items"]], ["600000", "002396"])
+
+    def test_supports_multi_sort_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            candidate_path = base / "candidate_pool.csv"
+            portfolio_path = base / "missing_portfolio_fit.csv"
+            with candidate_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["code", "name", "exchange", "combined_score", "latest_price"])
+                writer.writeheader()
+                writer.writerow({"code": "600000", "name": "浦发银行", "exchange": "SSE", "combined_score": "160", "latest_price": "9.87"})
+                writer.writerow({"code": "002396", "name": "星网锐捷", "exchange": "SZSE", "combined_score": "160", "latest_price": "28.35"})
+                writer.writerow({"code": "603118", "name": "共进股份", "exchange": "SSE", "combined_score": "150", "latest_price": "6.25"})
+
+            old_candidate = dashboard.CANDIDATE_POOL_FILE
+            old_portfolio = dashboard.CANDIDATE_PORTFOLIO_FIT_FILE
+            dashboard.CANDIDATE_POOL_FILE = candidate_path
+            dashboard.CANDIDATE_PORTFOLIO_FIT_FILE = portfolio_path
+            try:
+                result = dashboard.filtered_candidates({"sort": ["combined_score:desc,latest_price:asc"]})
+            finally:
+                dashboard.CANDIDATE_POOL_FILE = old_candidate
+                dashboard.CANDIDATE_PORTFOLIO_FIT_FILE = old_portfolio
+
+        self.assertEqual([item["code"] for item in result["items"]], ["600000", "002396", "603118"])
+        self.assertEqual(
+            result["sort"]["items"],
+            [{"key": "combined_score", "direction": "desc"}, {"key": "latest_price", "direction": "asc"}],
+        )
 
 
 if __name__ == "__main__":
