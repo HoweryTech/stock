@@ -50,6 +50,8 @@ def format_unified_candidate(candidate: dict[str, str], index: int) -> list[str]
         f"## {index}. {title}",
         "",
         f"- 行业：{industry or '-'}",
+        f"- 交易所：{candidate.get('exchange') or '-'}",
+        f"- 板块：{candidate.get('board') or '-'}",
         f"- 主策略：{strategy_label(primary_strategy)}",
         f"- 策略来源：{', '.join(strategies) if strategies else '-'}",
         f"- 策略数量：{candidate.get('strategy_count') or '-'}",

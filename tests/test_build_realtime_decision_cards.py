@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 
-from tools.build_realtime_decision_cards import build_report, build_technical_operation, build_technical_unlock_alert, render_markdown, technical_dimension_summary
+from tools.build_realtime_decision_cards import build_minute_confirmation, build_positive_timing, build_report, build_technical_operation, build_technical_unlock_alert, render_markdown, technical_dimension_summary
 
 
 def intraday_item(code: str = "600000", *, signals=None, reverse_status: str = "watch") -> dict:
@@ -159,7 +159,70 @@ def weak_minute_bars(code: str = "600000") -> dict[str, list[dict]]:
     return {code: bars}
 
 
+def early_session_minute_bars(code: str = "600000") -> list[dict]:
+    closes = [9.90, 9.92, 9.91, 9.93, 9.95, 9.96, 9.98, 10.00, 10.02, 10.03, 10.04, 10.05, 10.06, 10.07, 10.08, 10.09, 10.10, 10.12, 10.14, 10.16]
+    timestamps = [
+        "2026-07-15 13:45",
+        "2026-07-15 13:50",
+        "2026-07-15 13:55",
+        "2026-07-15 14:00",
+        "2026-07-15 14:05",
+        "2026-07-15 14:10",
+        "2026-07-15 14:15",
+        "2026-07-15 14:20",
+        "2026-07-15 14:25",
+        "2026-07-15 14:30",
+        "2026-07-15 14:35",
+        "2026-07-15 14:40",
+        "2026-07-15 14:45",
+        "2026-07-15 14:50",
+        "2026-07-15 14:55",
+        "2026-07-15 15:00",
+        "2026-07-16 09:35",
+        "2026-07-16 09:40",
+        "2026-07-16 09:45",
+        "2026-07-16 09:50",
+    ]
+    return [
+        {
+            "timestamp": timestamp,
+            "code": code,
+            "open": close - 0.01,
+            "high": close + 0.02,
+            "low": close - 0.02,
+            "close": close,
+            "volume": 1000 + index * 20,
+        }
+        for index, (timestamp, close) in enumerate(zip(timestamps, closes))
+    ]
+
+
 class RealtimeDecisionCardsTest(unittest.TestCase):
+    def test_minute_confirmation_uses_previous_session_warmup_early_in_day(self) -> None:
+        result = build_minute_confirmation(
+            {"quote": {"latest_price": 10.16}},
+            early_session_minute_bars(),
+            bullish_technical_doc()["items"][0],
+        )
+
+        self.assertNotEqual(result["status"], "not_available")
+        self.assertTrue(result["metrics"]["warmup_used"])
+        self.assertEqual(result["metrics"]["current_day_bar_count"], 4)
+        self.assertTrue(any("预热样本" in item for item in result["signals"]))
+
+    def test_positive_timing_uses_previous_session_warmup_early_in_day(self) -> None:
+        result = build_positive_timing(
+            {"quote": {"latest_price": 10.16}, "capital_flow": {"main_net_inflow_ratio_pct": 1.5}},
+            {"conclusion": "positive_t_candidate"},
+            early_session_minute_bars(),
+            bullish_technical_doc()["items"][0],
+        )
+
+        self.assertNotEqual(result["status"], "insufficient")
+        self.assertTrue(result["metrics"]["warmup_used"])
+        self.assertEqual(result["metrics"]["current_day_bar_count"], 4)
+        self.assertTrue(any("预热样本" in item for item in result["signals"]))
+
     def test_hard_t_blocker_takes_exit_risk_priority(self) -> None:
         portfolio = portfolio_result()
         portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 10.5
@@ -326,6 +389,33 @@ class RealtimeDecisionCardsTest(unittest.TestCase):
         self.assertIn("止损风险复核", structured["current_action"])
         self.assertIn("三路径", structured["trigger_condition"])
         self.assertTrue(any("禁止补仓" in item for item in structured["forbidden_actions"]))
+
+    def test_near_stop_rebound_zone_is_anchored_not_chasing_current_price(self) -> None:
+        portfolio = portfolio_result()
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_price"] = 9.95
+        portfolio["positions"][0]["result"]["calculations"]["stop_loss_confirmed"] = True
+        item = intraday_item()
+        item["quote"]["latest_price"] = 10.06
+        item["technicals"]["ma5"] = 10.04
+        item["technicals"]["ma20"] = 9.95
+        report = build_report(
+            {"items": [item]},
+            portfolio,
+            t_result(blockers=[{"code": "near_stop_loss", "message": "距离止损不足1%。"}]),
+            None,
+            {"items": [{"code": "600000", "verdict": "insufficient_sample", "verdict_label": "样本不足，禁止执行"}]},
+            None,
+            generated_at=datetime(2026, 7, 16, 9, 35, 0),
+        )
+
+        card = report["cards"][0]
+        plan = card["manual_execution_plan"]
+        alert = report["intraday_trigger_alerts"][0]
+
+        self.assertEqual(plan["plan_type"], "near_stop_playbook")
+        self.assertLessEqual(plan["price_zone"][0], item["quote"]["latest_price"])
+        self.assertEqual(alert["active_path"], "path2_rebound")
+        self.assertEqual(alert["severity"], "action")
 
     def test_unconfirmed_imported_stop_reference_does_not_take_exit_priority(self) -> None:
         portfolio = portfolio_result()

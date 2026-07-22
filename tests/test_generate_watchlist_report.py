@@ -51,6 +51,8 @@ class GenerateWatchlistReportTest(unittest.TestCase):
                 "code": "300750",
                 "name": "宁德时代",
                 "industry": "电力设备",
+                "exchange": "SZSE",
+                "board": "chinext",
                 "strategies": "event_catalyst|trend_strength|value_quality",
                 "strategy_count": "3",
                 "combined_score": "278.377248",
@@ -82,6 +84,8 @@ class GenerateWatchlistReportTest(unittest.TestCase):
         self.assertIn("主策略：多策略共振", report)
         self.assertIn("## 1. 300750 宁德时代", report)
         self.assertIn("行业：电力设备", report)
+        self.assertIn("交易所：SZSE", report)
+        self.assertIn("板块：chinext", report)
         self.assertIn("策略来源：事件催化, 趋势强度, 价值质量", report)
         self.assertIn("综合排序分：278.377248", report)
         self.assertIn("事件分：46", report)

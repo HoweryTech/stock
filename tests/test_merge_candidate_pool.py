@@ -63,6 +63,7 @@ class MergeCandidatePoolTest(unittest.TestCase):
             universe_context={
                 "300750": {
                     "name": "宁德时代",
+                    "exchange": "SZSE",
                     "industry": "电力设备",
                     "avg_daily_turnover_cny": "2850000000",
                 }
@@ -71,6 +72,8 @@ class MergeCandidatePoolTest(unittest.TestCase):
 
         self.assertEqual(candidates[0]["name"], "宁德时代")
         self.assertEqual(candidates[0]["industry"], "电力设备")
+        self.assertEqual(candidates[0]["exchange"], "SZSE")
+        self.assertEqual(candidates[0]["board"], "chinext")
         self.assertEqual(candidates[0]["liquidity_score"], "100.0")
         self.assertIn("趋势窗口平均成交额", candidates[0]["liquidity_evidence"])
         self.assertIn("股票池平均成交额", candidates[0]["liquidity_evidence"])

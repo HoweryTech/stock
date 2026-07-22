@@ -126,6 +126,33 @@ class ServeMonitorDashboardTest(unittest.TestCase):
         self.assertTrue(queue[0]["expired"])
         self.assertIn("刷新完整日内决策链", queue[0]["expiry_action"])
 
+    def test_near_stop_playbook_is_review_not_action_required(self) -> None:
+        events = [
+            {
+                "generated_at": "2026-07-17T10:01:00+08:00",
+                "trigger_action_snapshots": [
+                    {
+                        "code": "000723",
+                        "active_path": "price_action_ready",
+                        "after": {
+                            "available": True,
+                            "state": "exit_risk_review",
+                            "label": "近硬止损盘中预案",
+                            "plan_type": "near_stop_playbook",
+                            "plan_status": "near_stop_review",
+                            "manual_plan_trade_intent": "risk_exit_reduce",
+                            "primary_status": "blocked",
+                        },
+                    }
+                ],
+            }
+        ]
+
+        queue = build_trigger_review_queue(events, as_of=datetime.fromisoformat("2026-07-17T10:02:00+08:00"))
+
+        self.assertEqual(queue[0]["status"], "review_required")
+        self.assertEqual(queue[0]["target"], "decision-card")
+
     def test_build_trigger_review_queue_merges_review_statuses(self) -> None:
         events = [
             {

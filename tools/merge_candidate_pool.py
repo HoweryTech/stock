@@ -21,6 +21,8 @@ OUTPUT_FIELDS = [
     "code",
     "name",
     "industry",
+    "exchange",
+    "board",
     "strategies",
     "strategy_count",
     "combined_score",
@@ -88,6 +90,22 @@ def format_amount(value: float | None) -> str:
         return ""
     rounded = round(value, 2)
     return str(int(rounded)) if float(rounded).is_integer() else str(rounded)
+
+
+def infer_board(code: str, exchange: str = "") -> str:
+    code = (code or "").strip()
+    exchange = (exchange or "").strip().upper()
+    if exchange == "BSE":
+        return "bse"
+    if code.startswith(("688", "689")):
+        return "star"
+    if code.startswith(("300", "301")):
+        return "chinext"
+    if code.startswith(("600", "601", "603", "605")):
+        return "sse_main"
+    if code.startswith(("000", "001", "002", "003")):
+        return "szse_main"
+    return "unknown"
 
 
 def add_strategy_candidate(pool: dict[str, dict[str, Any]], strategy: str, row: dict[str, str]) -> None:
@@ -285,6 +303,8 @@ def finalize_candidate(
         "code": candidate["code"],
         "name": universe_row.get("name", ""),
         "industry": universe_row.get("industry", ""),
+        "exchange": universe_row.get("exchange", ""),
+        "board": infer_board(candidate["code"], universe_row.get("exchange", "")),
         "strategies": "|".join(strategies),
         "strategy_count": len(strategies),
         "combined_score": combined_score_from_components(enriched_candidate),

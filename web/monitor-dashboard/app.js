@@ -23,6 +23,7 @@ const state = {
   triggerConfirmations: new Map(),
   triggerRefreshInFlight: false,
   lastTriggerRefreshKey: "",
+  lastExpiredTriggerRefreshKey: "",
   lastTriggerRefresh: null,
   pendingDetailOpen: null,
   lastUrgentNotificationKey: "",
@@ -535,64 +536,106 @@ async function maybeRefreshTriggeredDecisionChain() {
 }
 
 async function refreshTriggerReviewItem(item, button = null) {
-  if (!item || state.triggerRefreshInFlight) return;
+  if (!item) return;
+  return refreshTriggerReviewItems([item], button, {openSingleDetail: true});
+}
+
+function activeExpiredTriggerReviewItems() {
+  return (state.triggerReviewQueue || [])
+    .filter(item => item.expired && !["handled", "ignored"].includes(item.review_resolution))
+    .sort(compareTriggerQueueItems);
+}
+
+function expiredTriggerRefreshKey(items) {
+  const parts = (items || []).map(item => [
+    item.code || "",
+    item.active_path || "",
+    item.event_generated_at || "",
+    item.decision_generated_at || "",
+    item.expires_at || "",
+  ].join("@"));
+  if (!parts.length) return "";
+  return [
+    state.snapshot?.generated_at || "",
+    state.decisionReport?.generated_at || "",
+    ...parts,
+  ].join("|");
+}
+
+function triggerPayloadFromReviewItem(item) {
+  return {
+    code: item.code,
+    name: item.name,
+    active_path: item.active_path,
+    current_price: item.current_price ?? item.confirmed_price,
+    title: item.title,
+    confirmation: {
+      status: "confirmed",
+      confirmed_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
+      confirmed_price: item.current_price ?? item.confirmed_price,
+    },
+  };
+}
+
+async function refreshTriggerReviewItems(items, button = null, options = {}) {
+  const refreshItems = (items || []).filter(Boolean);
+  if (!refreshItems.length || state.triggerRefreshInFlight) return;
+  const autoExpired = Boolean(options.autoExpired);
   const original = button?.textContent || "";
   if (button) {
     button.disabled = true;
     button.textContent = "刷新中...";
   }
+  const triggerSummary = triggerRefreshSummary(refreshItems);
   state.triggerRefreshInFlight = true;
   state.lastTriggerRefresh = {
     status: "running",
     started_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
-    trigger_count: 1,
-    trigger_summary: `${item.name || item.code || "--"} ${item.active_path || "--"}`,
-    message: "正在刷新这条触发后的完整决策链。",
+    trigger_count: refreshItems.length,
+    trigger_summary: triggerSummary,
+    message: autoExpired
+      ? `检测到 ${refreshItems.length} 条过期触发，正在自动刷新完整决策链。`
+      : (refreshItems.length === 1 ? "正在刷新这条触发后的完整决策链。" : `正在一次刷新 ${refreshItems.length} 条过期触发后的完整决策链。`),
   };
   renderRefreshAlert();
-  document.querySelector("#monitorStatus").textContent = "正在刷新这条触发后的决策链...";
+  document.querySelector("#monitorStatus").textContent = autoExpired
+    ? `正在自动刷新 ${refreshItems.length} 条过期触发...`
+    : (refreshItems.length === 1 ? "正在刷新这条触发后的决策链..." : `正在刷新 ${refreshItems.length} 条过期触发...`);
   try {
     const result = await postTriggerRefresh({
       snapshot_generated_at: state.snapshot?.generated_at || "",
-      decision_generated_at: state.decisionReport?.generated_at || item.decision_generated_at || "",
-      triggers: [{
-        code: item.code,
-        name: item.name,
-        active_path: item.active_path,
-        current_price: item.current_price ?? item.confirmed_price,
-        title: item.title,
-        confirmation: {
-          status: "confirmed",
-          confirmed_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
-          confirmed_price: item.current_price ?? item.confirmed_price,
-        },
-      }],
+      decision_generated_at: state.decisionReport?.generated_at || refreshItems[0]?.decision_generated_at || "",
+      triggers: refreshItems.map(triggerPayloadFromReviewItem),
     });
     state.lastTriggerRefresh = {
       status: "success",
       started_at: state.lastTriggerRefresh.started_at,
       finished_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
-      trigger_count: 1,
-      trigger_summary: `${item.name || item.code || "--"} ${item.active_path || "--"}`,
+      trigger_count: refreshItems.length,
+      trigger_summary: triggerSummary,
       generated_at: result.generated_at || "",
       state_counts: result.state_counts || {},
       diffs: result.diffs || [],
       trigger_action_snapshots: result.trigger_action_snapshots || [],
-      message: "已刷新这条触发后的完整决策链，正在打开刷新后的详情。",
+      message: autoExpired
+        ? `已自动刷新 ${refreshItems.length} 条过期触发，重新生成决策链。`
+        : (refreshItems.length === 1 ? "已刷新这条触发后的完整决策链，正在打开刷新后的详情。" : `已一次刷新 ${refreshItems.length} 条过期触发，重新生成决策链。`),
     };
-    state.pendingDetailOpen = {
-      code: item.code,
-      target: "decision-card",
-      reason: "trigger_refresh",
-    };
+    if (options.openSingleDetail && refreshItems.length === 1) {
+      state.pendingDetailOpen = {
+        code: refreshItems[0].code,
+        target: "decision-card",
+        reason: "trigger_refresh",
+      };
+    }
     await loadData();
   } catch (error) {
     state.lastTriggerRefresh = {
       status: "failed",
       started_at: state.lastTriggerRefresh?.started_at || new Date().toLocaleTimeString("zh-CN", {hour12: false}),
       finished_at: new Date().toLocaleTimeString("zh-CN", {hour12: false}),
-      trigger_count: 1,
-      trigger_summary: `${item.name || item.code || "--"} ${item.active_path || "--"}`,
+      trigger_count: refreshItems.length,
+      trigger_summary: triggerSummary,
       message: `触发后刷新失败：${error.message}`,
     };
     renderRefreshAlert();
@@ -604,6 +647,19 @@ async function refreshTriggerReviewItem(item, button = null) {
   } finally {
     state.triggerRefreshInFlight = false;
   }
+}
+
+function maybeAutoRefreshExpiredTriggerReviewItems() {
+  const expiredItems = activeExpiredTriggerReviewItems();
+  if (!expiredItems.length) {
+    state.lastExpiredTriggerRefreshKey = "";
+    return;
+  }
+  if (state.triggerRefreshInFlight) return;
+  const key = expiredTriggerRefreshKey(expiredItems);
+  if (!key || key === state.lastExpiredTriggerRefreshKey) return;
+  state.lastExpiredTriggerRefreshKey = key;
+  void refreshTriggerReviewItems(expiredItems, null, {autoExpired: true, openSingleDetail: false});
 }
 
 function notifyUrgentTriggers(alerts) {
@@ -929,145 +985,6 @@ function filteredItems() {
   });
 }
 
-function renderSummary() {
-  const items = state.snapshot?.items || [];
-  const marketValue = items.reduce((sum, item) => sum + Number(item.position.market_value || 0), 0);
-  const pnl = items.reduce((sum, item) => sum + Number(item.position.unrealized_pnl || 0), 0);
-  const risk = items.filter(item => item.state === "risk_review").length;
-  const noAdd = items.filter(item => item.state === "no_add_watch").length;
-  const decisionCards = [...state.decisionCards.values()];
-  const exitRisk = decisionCards.filter(card => card.state === "exit_risk_review").length;
-  const dataPaused = decisionCards.filter(card => ["market_wait", "data_stale", "data_insufficient"].includes(card.state)).length;
-  const marketWait = decisionCards.filter(card => card.state === "market_wait").length;
-  const qualityStale = decisionCards.filter(card => card.data_quality?.overall_status === "stale").length;
-  const qualityBlocked = decisionCards.filter(card => ["insufficient", "missing"].includes(card.data_quality?.overall_status)).length;
-  const trustHigh = decisionCards.filter(card => card.data_quality?.data_trust?.level === "high").length;
-  const trustLow = decisionCards.filter(card => card.data_quality?.data_trust?.level === "low").length;
-  const technicalWeak = decisionCards.filter(card => ["bearish", "slightly_bearish"].includes(card.technical_assessment?.label)).length;
-  const technicalStrong = decisionCards.filter(card => ["bullish", "slightly_bullish"].includes(card.technical_assessment?.label)).length;
-  const positiveT = decisionCards.filter(card => card.state === "positive_t_watch").length;
-  const reverseTByCard = decisionCards.filter(card => card.state === "reverse_t_watch").length;
-  const reviewCandidates = decisionCards.filter(card => card.post_unlock_review_summary?.status === "manual_candidate").length;
-  const reviewBlocked = decisionCards.filter(card => card.post_unlock_review_summary?.status === "blocked_after_unlock").length;
-  const maxLag = Math.max(0, ...items.map(item => Number(item.quote.quote_lag_seconds || 0)));
-  const reverseT = items.filter(isReverseTWatch).length;
-  const forecastAlerts = items.filter(item => state.forecasts.get(item.code)?.status === "early_warning").length;
-  const priceAlerts = items.filter(isReverseTPriceAlert).length;
-  const unlockAlerts = state.decisionReport?.technical_unlock_alerts?.length || 0;
-  const triggerAlerts = liveIntradayTriggerAlerts();
-  const triggeredNow = triggerAlerts.filter(alert => alert.severity === "action").length;
-  const blocks = [
-    ["账户总资产", money(state.snapshot?.total_assets), "持仓基准"],
-    ["持仓市值", money(marketValue), pct(marketValue / Number(state.snapshot?.total_assets || 1) * 100)],
-    ["浮动盈亏", money(pnl), "按最新快照估算"],
-    ["退出风险", `${exitRisk || risk} 只`, `${triggeredNow} 只触发 · ${triggerAlerts.length} 只盯盘`],
-    ["数据可信", `${trustHigh} 高 / ${trustLow} 低`, `${qualityStale} 过期 · ${qualityBlocked} 阻断`],
-    ["技术面", `${technicalStrong} 偏多 / ${technicalWeak} 偏弱`, `${unlockAlerts} 只接近解锁`],
-    ["T观察", `${positiveT} 正T / ${reverseTByCard || reverseT} 反T`, `${priceAlerts} 只价格提醒 · ${forecastAlerts} 只概率预警`],
-    ["复核链", `${reviewCandidates} 候选 / ${reviewBlocked} 阻断`, "自动复核后仍需人工确认"],
-    ["最大延迟", `${maxLag.toFixed(1)} 秒`, "超过60秒自动失效"],
-  ];
-  document.querySelector("#summaryBand").innerHTML = blocks.map(([label, value, sub]) => `
-    <div class="summary-item">
-      <div class="summary-label">${label}</div>
-      <div class="summary-value ${label === "浮动盈亏" ? tone(pnl) : ""}">${value}</div>
-      <div class="summary-sub">${sub}</div>
-    </div>`).join("");
-}
-
-function buildStrategyHealth() {
-  const cards = [...state.decisionCards.values()];
-  const activeQueue = (state.triggerReviewQueue || []).filter(item => !["handled", "ignored"].includes(item.review_resolution));
-  const actionableQueue = activeQueue.filter(item => item.status === "action_required" && !item.expired);
-  const reviewQueue = activeQueue.filter(item => item.status === "review_required" && !item.expired);
-  const expiredQueue = activeQueue.filter(item => item.expired);
-  const expiringQueue = activeQueue.filter(item => item.validity_status === "expiring" && !item.expired);
-  const triggerAlerts = liveIntradayTriggerAlerts();
-  const actionableAlerts = triggerAlerts.filter(alert => alert.severity === "action" && alert.active_path);
-  const exitRisk = cards.filter(card => card.state === "exit_risk_review").length;
-  const riskReduction = cards.filter(card => card.state === "risk_reduction_review").length;
-  const dataBlocked = cards.filter(card => ["market_wait", "data_stale", "data_insufficient"].includes(card.state)).length;
-  const lowTrust = cards.filter(card => card.data_quality?.data_trust?.level === "low").length;
-  const highTrust = cards.filter(card => card.data_quality?.data_trust?.level === "high").length;
-  const positiveT = cards.filter(card => card.state === "positive_t_watch").length;
-  const reverseT = cards.filter(card => card.state === "reverse_t_watch").length;
-  const manualCandidates = cards.filter(card => card.post_unlock_review_summary?.status === "manual_candidate").length;
-  const activeCandidates = positiveT + reverseT + manualCandidates;
-  const staleReport = Boolean(state.decisionReport?.stale_due_to_snapshot_date);
-  let toneClass = "observe";
-  let title = "观察为主";
-  let headline = "今天没有已确认的盘中执行信号，继续监控，不主动加仓或做T。";
-  const actions = [];
-
-  if (staleReport) {
-    toneClass = "blocked";
-    title = "先刷新决策链";
-    headline = "实时决策卡早于行情快照，旧结论已停用；刷新前不按页面旧计划交易。";
-    actions.push("先等待或手动触发完整日内决策链刷新。");
-  } else if (expiredQueue.length) {
-    toneClass = "blocked";
-    title = "过期计划先刷新";
-    headline = `${expiredQueue.length} 个触发后计划已过期，不能按旧价格区间执行。`;
-    actions.push("先刷新对应个股详情，再看新的可操作步骤。");
-  } else if (actionableQueue.length || actionableAlerts.length) {
-    toneClass = "risk";
-    title = "先处理触发队列";
-    headline = `${Math.max(actionableQueue.length, actionableAlerts.length)} 个盘中触发需要优先复核，先处理它们，再看其他机会。`;
-    actions.push("打开事件队列或今日处理顺序，逐个确认是否执行。");
-  } else if (exitRisk) {
-    toneClass = "risk";
-    title = "风控优先";
-    headline = `${exitRisk} 只股票处在退出风险复核，今天先看止损/减仓路径，不做补仓。`;
-    actions.push("先查看退出风险个股的硬止损、反抽区、站稳降级路径。");
-  } else if (riskReduction) {
-    toneClass = "caution";
-    title = "减仓复核";
-    headline = `${riskReduction} 只股票需要仓位风险复核，先处理仓位上限和减仓触发价。`;
-    actions.push("只在系统给出触发价和回落确认后执行减仓。");
-  } else if (dataBlocked || lowTrust) {
-    toneClass = "caution";
-    title = "谨慎观察";
-    headline = `${dataBlocked} 只数据阻断，${lowTrust} 只低可信；当前不适合放大仓位或频繁做T。`;
-    actions.push("数据恢复前只处理已确认风控，不新增主动交易。");
-  } else if (activeCandidates && highTrust) {
-    toneClass = "candidate";
-    title = "可小额候选";
-    headline = `${activeCandidates} 个候选信号可进入人工复核，但仍按单笔资金和确认窗口限制执行。`;
-    actions.push("只看详情页的唯一结论和执行前检查，通过后再挂限价单。");
-  } else {
-    actions.push("无触发时保持监控，等待价格进入系统区间。");
-  }
-
-  if (reviewQueue.length) actions.push(`${reviewQueue.length} 个计划需要人工复核，未复核前不要按它交易。`);
-  if (expiringQueue.length) actions.push(`${expiringQueue.length} 个计划接近过期，优先刷新或放弃旧计划。`);
-  if (!actions.some(action => action.includes("无触发")) && !actionableQueue.length && !expiredQueue.length && !staleReport) {
-    actions.push("没有待办后再看持仓列表，不从低优先级信息里找交易。");
-  }
-
-  return {
-    toneClass,
-    title,
-    headline,
-    actions: actions.slice(0, 3),
-  };
-}
-
-function renderStrategyHealth() {
-  const container = document.querySelector("#strategyHealth");
-  if (!container) return;
-  const health = buildStrategyHealth();
-  container.className = `strategy-health strategy-health-${health.toneClass}`;
-  container.innerHTML = `
-    <div class="strategy-health-main">
-      <span>今日策略状态</span>
-      <strong>${escapeHtml(health.title)}</strong>
-      <p>${escapeHtml(health.headline)}</p>
-    </div>
-    <div class="strategy-health-actions">
-      ${health.actions.map(action => `<div class="strategy-action">${escapeHtml(action)}</div>`).join("")}
-    </div>`;
-}
-
 function renderCapitalUsagePanel() {
   const container = document.querySelector("#capitalUsageMount");
   if (!container) return;
@@ -1144,6 +1061,10 @@ async function requestNotificationPermission(button) {
 
 function handleReviewDeskAction(button) {
   const action = button.dataset.reviewDeskAction;
+  if (action === "refresh_all_expired") {
+    void refreshTriggerReviewItems(activeExpiredTriggerReviewItems(), button, {openSingleDetail: false});
+    return true;
+  }
   if (action === "refresh_item") {
     const item = triggerReviewItemFromDataset(button.dataset);
     void refreshTriggerReviewItem(item, button);
@@ -1214,43 +1135,122 @@ function clearBlockerFocus() {
   renderPositions();
 }
 
-function renderPriorityQueue() {
+function focusToneFromUrgency(urgency) {
+  if (urgency === "high") return "risk";
+  if (urgency === "medium") return "warn";
+  return "observe";
+}
+
+function buildTodayFocusModel() {
+  const cards = [...state.decisionCards.values()];
   const queue = state.decisionReport?.priority_queue || {};
-  const items = queue.top_items || [];
-  const container = document.querySelector("#priorityQueue");
-  if (!items.length) {
-    container.hidden = true;
-    container.innerHTML = "";
+  const queueItems = (queue.top_items || queue.items || []).slice(0, 3);
+  const activeQueue = (state.triggerReviewQueue || []).filter(item => !["handled", "ignored"].includes(item.review_resolution));
+  const expiredQueue = activeQueue.filter(item => item.expired);
+  const actionQueue = activeQueue.filter(item => item.status === "action_required" && !item.expired);
+  const reviewQueue = activeQueue.filter(item => item.status === "review_required" && !item.expired);
+  const staleReport = Boolean(state.decisionReport?.stale_due_to_snapshot_date);
+  const exitRisk = cards.filter(card => card.state === "exit_risk_review");
+  const buyback = cards.filter(card => card.state === "reverse_buyback_review");
+  const candidates = cards.filter(card => ["positive_t_watch", "reverse_t_watch"].includes(card.state));
+  let toneClass = "observe";
+  let eyebrow = "当前优先事项";
+  let title = "先观察，不主动交易";
+  let summary = "没有强制执行信号；只按持仓列表里的唯一主动作观察，不从辅助信息里找交易。";
+  let next = "没有进入触发条件前，不追价、不补仓、不临时改方向。";
+  let primaryCode = queueItems[0]?.code || "";
+  let primaryTarget = "decision-card";
+
+  if (staleReport) {
+    toneClass = "blocked";
+    title = "先等决策链刷新";
+    summary = "行情快照已经新于决策卡，旧价格区间和旧步骤停用。";
+    next = "等待后台自动刷新完成后再看首页主结论。";
+  } else if (expiredQueue.length) {
+    toneClass = "blocked";
+    title = "先刷新过期触发";
+    summary = `${expiredQueue.length} 条触发计划已过期，系统会自动刷新；不能按旧价格直接操作。`;
+    next = "自动刷新完成后再看新的主结论；如果刷新失败，再去事件页手动重试。";
+    primaryCode = expiredQueue[0]?.code || primaryCode;
+    primaryTarget = "events";
+  } else if (actionQueue.length) {
+    toneClass = "risk";
+    title = "先处理强触发";
+    summary = `${actionQueue.length} 条触发仍在有效期内，先打开详情看执行前检查。`;
+    next = "只处理强触发；其它候选和观察项暂时不要管。";
+    primaryCode = actionQueue[0]?.code || primaryCode;
+    primaryTarget = actionQueue[0]?.target || "decision-card";
+  } else if (exitRisk.length) {
+    toneClass = "risk";
+    title = "风控优先，但多为预案";
+    summary = `${exitRisk.length} 只处在退出风险复核；当前先看止损/反抽/站稳三路径，不做补仓。`;
+    next = "优先打开首页前三项；没有 ready 状态前不直接卖。";
+  } else if (buyback.length) {
+    toneClass = "warn";
+    title = "先盯反T回补";
+    summary = `${buyback[0].name || buyback[0].code} 有开放反T卖出腿，只在回补价及以下买回同等股数。`;
+    next = buyback[0].decision?.next_step || "高于回补上限不追买。";
+    primaryCode = buyback[0].code;
+  } else if (reviewQueue.length) {
+    toneClass = "warn";
+    title = "有复核项，但不是立即执行";
+    summary = `${reviewQueue.length} 条触发后复核需要看原因；没有强触发时不急着下单。`;
+    next = "先看持仓列表的状态，复核项只作为背景确认。";
+    primaryCode = reviewQueue[0]?.code || primaryCode;
+  } else if (candidates.length) {
+    toneClass = "candidate";
+    title = "候选观察";
+    summary = `${candidates.length} 个T候选可观察；必须等分钟确认、价格区间和人工计划同时通过。`;
+    next = "候选不是下单指令，详情页显示 ready 前不操作。";
+  }
+
+  return {toneClass, eyebrow, title, summary, next, queueItems, primaryCode, primaryTarget};
+}
+
+function renderTodayFocus() {
+  const container = document.querySelector("#todayFocus");
+  if (!container) return;
+  const focus = buildTodayFocusModel();
+  const rows = focus.queueItems.map((item, index) => {
+    const card = state.decisionCards.get(item.code);
+    const target = detailTargetForCard(card);
+    const primary = item.primary_action || {};
+    return `<button class="focus-row focus-row-${escapeHtml(focusToneFromUrgency(item.urgency))}" type="button" data-focus-code="${escapeHtml(item.code || "")}" data-focus-target="${escapeHtml(target)}">
+      <span>${index + 1}</span>
+      <strong>${escapeHtml(item.name || item.code || "--")} <em>${escapeHtml(item.code || "")}</em></strong>
+      <small>${escapeHtml(item.category_label || item.state_label || "--")} · ${escapeHtml(primary.status_label || item.action_label || "--")}</small>
+      <b>${escapeHtml(primary.price || item.next_step || "--")}</b>
+    </button>`;
+  }).join("");
+  const primaryButton = focus.primaryCode
+    ? `<button class="primary-action" type="button" data-focus-code="${escapeHtml(focus.primaryCode)}" data-focus-target="${escapeHtml(focus.primaryTarget)}">打开优先详情</button>`
+    : `<button class="secondary-action" type="button" data-focus-events>看事件页</button>`;
+  container.className = `today-focus today-focus-${focus.toneClass}`;
+  container.innerHTML = `
+    <div class="focus-main">
+      <span>${escapeHtml(focus.eyebrow)}</span>
+      <strong>${escapeHtml(focus.title)}</strong>
+      <p>${escapeHtml(focus.summary)}</p>
+      <em>${escapeHtml(focus.next)}</em>
+      <div class="focus-actions">
+        ${primaryButton}
+        <button class="secondary-action" type="button" data-focus-secondary>辅助信息</button>
+      </div>
+    </div>
+    <div class="focus-list">
+      <div class="focus-list-head">今日只先看这几项</div>
+      ${rows || `<p class="secondary">暂无优先队列；继续观察持仓列表。</p>`}
+    </div>`;
+}
+
+function openTodayFocusTarget(code, target) {
+  if (target === "events") {
+    activateView("events");
+    document.querySelector("#eventList")?.scrollIntoView({behavior: "smooth", block: "start"});
     return;
   }
-  const displayItems = items.slice(0, 5);
-  const totalCount = (queue.items || items).length;
-  container.hidden = false;
-  container.innerHTML = `
-    <div class="queue-header">
-      <div>
-        <h2>今日处理顺序</h2>
-        <p>${escapeHtml(queue.summary || "按风险和候选优先级排序；不自动下单。")}</p>
-      </div>
-      <span>${displayItems.length}/${totalCount} 项</span>
-    </div>
-	    <div class="queue-list">
-	      ${displayItems.map((item, index) => {
-          const card = state.decisionCards.get(item.code);
-          const target = detailTargetForCard(card);
-          const distance = stopLossDistanceInfo(card);
-          return `
-	        <button class="queue-item queue-${escapeHtml(item.urgency || "low")}" type="button" data-queue-code="${escapeHtml(item.code || "")}" data-queue-target="${escapeHtml(target)}">
-	          <span class="queue-rank">${index + 1}</span>
-	          <span class="queue-main">
-	            <strong>${escapeHtml(item.name || "--")} <em>${escapeHtml(item.code || "")}</em></strong>
-	            <small>${escapeHtml(item.category_label || "--")} · ${escapeHtml(item.state_label || "--")}</small>
-	            <b>${escapeHtml(uniqueConclusionForCode(item.code, item.next_step || item.action_label || item.reason || "--"))}</b>
-              ${distance ? `<i class="queue-distance ${escapeHtml(distance.toneClass)}">${escapeHtml(distance.label)} · 硬止损 ${money(distance.stop)}</i>` : ""}
-	          </span>
-	        </button>`;
-        }).join("")}
-	    </div>`;
+  if (!code) return;
+  openDetail(code, {target: target || detailTargetForCode(code)});
 }
 
 function renderRefreshAlert() {
@@ -3601,7 +3601,7 @@ function compareTriggerQueueItems(left, right) {
   return String(right.event_generated_at || right.decision_generated_at || "").localeCompare(String(left.event_generated_at || left.decision_generated_at || ""));
 }
 
-function renderEventGroup({key, title, summary, items, bodyHtml}) {
+function renderEventGroup({key, title, summary, items, bodyHtml, actionHtml = ""}) {
   const count = items?.length ?? 0;
   if (!count && !bodyHtml) return "";
   return `<section class="event-group event-group-${escapeHtml(key)}">
@@ -3610,7 +3610,10 @@ function renderEventGroup({key, title, summary, items, bodyHtml}) {
         <h3>${escapeHtml(title)}</h3>
         <p>${escapeHtml(summary || "")}</p>
       </div>
-      <span>${count}项</span>
+      <div class="event-group-meta">
+        <span>${count}项</span>
+        ${actionHtml}
+      </div>
     </div>
     <div class="event-group-body">${bodyHtml || ""}</div>
   </section>`;
@@ -3690,6 +3693,9 @@ function renderEvents() {
       title: cards[0].group.title,
       summary: cards[0].group.summary,
       items: cards,
+      actionHtml: key === "expired" && cards.length > 1
+        ? `<button class="primary-action compact-action" type="button" data-trigger-refresh-all="expired">一键刷新全部</button>`
+        : "",
       bodyHtml: cards.map(card => card.html).join(""),
     });
   }).join("");
@@ -3907,15 +3913,14 @@ async function loadData() {
     notifyIntradayReviewDesk(reviewInput);
     renderIntradayReviewDesk(reviewInput);
     renderSessionPreflightPanel();
-    renderSummary();
-    renderStrategyHealth();
     renderBlockerSummaryPanel();
     renderCapitalUsagePanel();
-    renderPriorityQueue();
+    renderTodayFocus();
     renderPositions();
     renderEvents();
     if (state.selectedCode && state.snapshot?.generated_at !== state.detailRenderedAt) markDetailDirty();
     consumePendingDetailOpen();
+    maybeAutoRefreshExpiredTriggerReviewItems();
     void maybeRefreshTriggeredDecisionChain();
   } catch (error) {
     document.querySelector("#monitorStatus").textContent = "数据连接失败";
@@ -3946,6 +3951,25 @@ document.querySelector("#blockerSummaryMount").addEventListener("click", event =
 document.querySelector("#focusBar").addEventListener("click", event => {
   if (!event.target.closest("[data-clear-blocker-focus]")) return;
   clearBlockerFocus();
+});
+document.querySelector("#todayFocus").addEventListener("click", event => {
+  const focusItem = event.target.closest("[data-focus-code]");
+  if (focusItem) {
+    openTodayFocusTarget(focusItem.dataset.focusCode, focusItem.dataset.focusTarget);
+    return;
+  }
+  if (event.target.closest("[data-focus-secondary]")) {
+    const secondary = document.querySelector("#secondaryDashboard");
+    if (secondary) {
+      secondary.open = true;
+      secondary.scrollIntoView({behavior: "smooth", block: "start"});
+    }
+    return;
+  }
+  if (event.target.closest("[data-focus-events]")) {
+    activateView("events");
+    document.querySelector("#eventList")?.scrollIntoView({behavior: "smooth", block: "start"});
+  }
 });
 document.querySelector("#sessionPreflightMount").addEventListener("click", event => {
   const button = event.target.closest("[data-preflight-action]");
@@ -3994,12 +4018,12 @@ document.querySelector("#urgentTriggerAlert").addEventListener("click", async ev
   const notifyButton = event.target.closest("[data-enable-notifications]");
   if (notifyButton) await requestNotificationPermission(notifyButton);
 });
-document.querySelector("#priorityQueue").addEventListener("click", event => {
-  const item = event.target.closest("[data-queue-code]");
-  if (!item) return;
-  openDetail(item.dataset.queueCode, { target: item.dataset.queueTarget });
-});
 document.querySelector("#eventList").addEventListener("click", event => {
+  const refreshAllButton = event.target.closest("[data-trigger-refresh-all]");
+  if (refreshAllButton) {
+    void refreshTriggerReviewItems(activeExpiredTriggerReviewItems(), refreshAllButton, {openSingleDetail: false});
+    return;
+  }
   const refreshTriggerButton = event.target.closest("[data-trigger-refresh]");
   if (refreshTriggerButton) {
     event.stopPropagation();

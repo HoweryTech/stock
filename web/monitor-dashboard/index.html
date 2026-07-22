@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>持仓监控台</title>
-  <link rel="stylesheet" href="/styles.css?v=20260722-review-closure">
+  <link rel="stylesheet" href="/styles.css?v=20260722-focus">
 </head>
 <body>
   <header class="app-header">
@@ -20,21 +20,23 @@
   </header>
 
   <nav class="tabs" aria-label="视图切换">
-    <button class="tab active" data-view="positions">持仓</button>
-    <button class="tab" data-view="events">事件</button>
+	    <button class="tab active" data-view="positions">持仓</button>
+	    <button class="tab" data-view="candidates">选股</button>
+	    <button class="tab" data-view="events">事件</button>
   </nav>
   <section id="globalReviewBar" hidden></section>
 
   <main>
     <section class="urgent-trigger-alert" id="urgentTriggerAlert" hidden></section>
     <section class="refresh-alert" id="refreshAlert" hidden></section>
-    <section id="intradayReviewMount"></section>
-    <section id="sessionPreflightMount"></section>
-    <section class="summary-band" id="summaryBand" aria-label="账户汇总"></section>
-    <section class="strategy-health" id="strategyHealth" aria-label="盘中策略健康度"></section>
-    <section id="blockerSummaryMount"></section>
-    <section id="capitalUsageMount"></section>
-    <section class="priority-queue" id="priorityQueue" hidden aria-label="今日处理顺序"></section>
+    <section class="today-focus" id="todayFocus" aria-label="当前优先事项"></section>
+    <details class="secondary-dashboard" id="secondaryDashboard">
+      <summary><span>辅助信息</span><em>触发复核、自检、阻断原因和资金约束</em></summary>
+      <section id="intradayReviewMount"></section>
+      <section id="sessionPreflightMount"></section>
+      <section id="blockerSummaryMount"></section>
+      <section id="capitalUsageMount"></section>
+    </details>
 
     <section class="toolbar" id="positionsToolbar">
       <label class="search-box">
@@ -57,7 +59,7 @@
       <div class="focus-bar" id="focusBar" hidden></div>
     </section>
 
-    <section id="positionsView" class="view active">
+	    <section id="positionsView" class="view active">
       <div class="table-wrap">
         <table>
           <thead>
@@ -77,9 +79,63 @@
       </div>
       <div class="mobile-list" id="mobileList"></div>
       <div class="empty-state" id="emptyState" hidden>没有符合条件的持仓</div>
-    </section>
+	    </section>
 
-    <section id="eventsView" class="view">
+	    <section id="candidatesView" class="view">
+	      <section class="candidate-toolbar" aria-label="选股筛选">
+	        <label class="search-box">
+	          <span>搜索</span>
+	          <input id="candidateSearchInput" type="search" placeholder="代码、名称或行业" autocomplete="off">
+	        </label>
+	        <label>
+	          <span>交易所</span>
+	          <select id="candidateExchangeFilter"></select>
+	        </label>
+	        <label>
+	          <span>板块</span>
+	          <select id="candidateBoardFilter"></select>
+	        </label>
+	        <label>
+	          <span>行业</span>
+	          <select id="candidateIndustryFilter"></select>
+	        </label>
+	        <label>
+	          <span>策略</span>
+	          <select id="candidateStrategyFilter"></select>
+	        </label>
+	        <label>
+	          <span>组合状态</span>
+	          <select id="candidatePortfolioFilter"></select>
+	        </label>
+	        <label>
+	          <span>质量</span>
+	          <select id="candidateQualityFilter"></select>
+	        </label>
+	      </section>
+	      <section class="candidate-summary" id="candidateSummary"></section>
+	      <div class="table-wrap candidate-table-wrap">
+	        <table class="candidate-table">
+	          <thead>
+	            <tr>
+	              <th><button type="button" data-candidate-sort="code">证券</button></th>
+	              <th><button type="button" data-candidate-sort="board">板块</button></th>
+	              <th><button type="button" data-candidate-sort="combined_score">综合分</button></th>
+	              <th><button type="button" data-candidate-sort="strategy_count">策略</button></th>
+	              <th><button type="button" data-candidate-sort="industry_strength_score">行业强度</button></th>
+	              <th><button type="button" data-candidate-sort="liquidity_score">流动性</button></th>
+	              <th><button type="button" data-candidate-sort="risk_penalty_score">风险扣分</button></th>
+	              <th><button type="button" data-candidate-sort="expected_total_position_pct_after_buy">买入后总仓位</button></th>
+	              <th>组合状态</th>
+	            </tr>
+	          </thead>
+	          <tbody id="candidateTableBody"></tbody>
+	        </table>
+	      </div>
+	      <div class="mobile-list candidate-mobile-list" id="candidateMobileList"></div>
+	      <div class="empty-state" id="candidateEmptyState" hidden>没有符合条件的候选股</div>
+	    </section>
+
+	    <section id="eventsView" class="view">
       <div class="event-list" id="eventList"></div>
     </section>
   </main>
@@ -116,8 +172,9 @@
   <script src="/replay.js?v=20260718-replay" defer></script>
   <script src="/review.js?v=20260722-review-closure" defer></script>
   <script src="/preflight.js?v=20260720-preflight" defer></script>
-  <script src="/blockers.js?v=20260719-blockers" defer></script>
-  <script src="/capital.js?v=20260719-capital" defer></script>
-  <script src="/app.js?v=20260722-review-alert" defer></script>
+	  <script src="/blockers.js?v=20260719-blockers" defer></script>
+	  <script src="/capital.js?v=20260719-capital" defer></script>
+	  <script src="/candidates.js?v=20260722-candidates" defer></script>
+	  <script src="/app.js?v=20260722-lean-home" defer></script>
 </body>
 </html>

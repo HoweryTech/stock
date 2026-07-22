@@ -14,7 +14,7 @@
   }
 
   function queueClosureStats(queue) {
-    const items = queue || [];
+    const items = (queue || []).filter(item => item.expired || item.status === "action_required");
     const handled = items.filter(item => item.review_resolution === "handled").length;
     const ignored = items.filter(item => item.review_resolution === "ignored").length;
     const viewed = items.filter(item => item.review_resolution === "viewed").length;
@@ -166,7 +166,7 @@
 
   function primaryButton(primary) {
     if (primary.target === "expired" && primary.item) {
-      return `<button class="primary-action" type="button" data-review-desk-action="refresh_item" ${reviewAttrs(primary.item)}>刷新后看详情</button>`;
+      return `<button class="primary-action" type="button" data-review-desk-action="refresh_all_expired">刷新全部过期</button>`;
     }
     if (primary.target === "detail" && primary.item) {
       return `<button class="primary-action" type="button" data-review-desk-action="open_detail" data-review-code="${escapeHtml(primary.item.code || "")}" data-review-target="${escapeHtml(primary.item.target || "decision-card")}">打开详情</button>`;
@@ -179,7 +179,7 @@
 
   function taskButton(task) {
     if (task.type === "expired") {
-      return `<button class="secondary-action" type="button" data-review-desk-action="refresh_item" ${reviewAttrs(task.item)}>刷新</button>`;
+      return `<button class="secondary-action" type="button" data-review-desk-action="refresh_all_expired">刷新全部过期</button>`;
     }
     return `<button class="secondary-action" type="button" data-review-desk-action="open_detail" data-review-code="${escapeHtml(task.item.code || "")}" data-review-target="${escapeHtml(task.item.target || "decision-card")}">详情</button>`;
   }
@@ -187,6 +187,7 @@
   function taskReviewLabel(item) {
     const label = item?.review_resolution_label || (item?.review_resolution === "viewed" ? "已查看" : "待处理");
     if (["handled", "ignored"].includes(item?.review_resolution)) return label;
+    if (!item?.expired && item?.status !== "action_required") return label;
     return `${label} · 未闭环`;
   }
 
@@ -222,7 +223,7 @@
         </article>`).join("") : `<p class="secondary">当前没有触发队列待办；继续保持监控。</p>`}
       </div>
       <div class="review-closure-strip" aria-label="触发处理闭环">
-        <span>处理闭环</span>
+        <span>强触发闭环</span>
         <strong>${escapeHtml(desk.closure.pendingClosure)} 未闭环</strong>
         <em>${escapeHtml(desk.closure.open)} 待处理 · ${escapeHtml(desk.closure.viewed)} 已查看 · ${escapeHtml(desk.closure.handled)} 已处理 · ${escapeHtml(desk.closure.ignored)} 暂不处理</em>
       </div>
@@ -261,19 +262,19 @@
       ? `<button class="secondary-action" type="button" data-enable-review-notifications>启用桌面通知</button>`
       : "";
     const primaryData = primary.target === "expired" && primary.item
-      ? `data-review-desk-action="refresh_item" ${reviewAttrs(primary.item)}`
+      ? `data-review-desk-action="refresh_all_expired"`
       : primary.target === "refresh"
         ? `data-review-desk-action="refresh_alert"`
         : primary.item
           ? `data-review-desk-action="open_detail" data-review-code="${escapeHtml(primaryActionCode(primary))}" data-review-target="${escapeHtml(primaryActionTarget(primary))}"`
           : `data-review-desk-action="events"`;
-    const label = primary.target === "expired" ? "刷新后看详情" : primary.target === "refresh" ? "看刷新提醒" : "打开详情";
+    const label = primary.target === "expired" ? "刷新全部过期" : primary.target === "refresh" ? "看刷新提醒" : "打开详情";
     return `<section class="global-review-bar global-review-${escapeHtml(primary.tone)}" aria-label="盘中必须处理">
       <div>
         <span>盘中必须处理</span>
         <strong>${escapeHtml(primary.title)}</strong>
         <p>${escapeHtml(primary.action)}</p>
-        <em>${escapeHtml(desk.closure.pendingClosure)} 个触发未闭环：${escapeHtml(desk.closure.open)} 待处理 / ${escapeHtml(desk.closure.viewed)} 已查看。</em>
+        <em>${escapeHtml(desk.closure.pendingClosure)} 个强触发未闭环：${escapeHtml(desk.closure.open)} 待处理 / ${escapeHtml(desk.closure.viewed)} 已查看。</em>
       </div>
       <div class="global-review-actions">
         <button class="primary-action" type="button" ${primaryData}>${escapeHtml(label)}</button>

@@ -1426,17 +1426,20 @@ def build_minute_confirmation(
     minute_bars: list[dict[str, Any]] | None,
     technical_assessment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    day_bars = latest_day_bars(minute_bars or [])
+    analysis = minute_analysis_bars(minute_bars or [], 20)
+    day_bars = analysis["bars"]
+    current_day_count = int(analysis["current_day_bar_count"] or 0)
+    warmup_used = bool(analysis["warmup_used"])
     if len(day_bars) < 20:
         return {
             "available": False,
             "status": "not_available",
             "status_label": "分钟数据不足",
             "score": None,
-            "summary": f"最新交易日5分钟线只有 {len(day_bars)} 根，不能做分钟级二次确认。",
+            "summary": f"最新交易日5分钟线只有 {current_day_count} 根，且缓存不足以补齐20根分析样本，不能做分钟级二次确认。",
             "signals": [],
             "blockers": ["5分钟线不足20根，MA20、RSI、BOLL和量能确认不稳定。"],
-            "metrics": {"bar_count": len(day_bars)},
+            "metrics": {"bar_count": len(day_bars), "current_day_bar_count": current_day_count, "warmup_used": warmup_used},
         }
 
     closes = [as_float(bar.get("close")) for bar in day_bars]
@@ -1449,10 +1452,10 @@ def build_minute_confirmation(
             "status": "not_available",
             "status_label": "分钟价格不足",
             "score": None,
-            "summary": f"最新交易日5分钟有效收盘价只有 {len(closes)} 个，不能做分钟级二次确认。",
+            "summary": f"5分钟有效收盘价只有 {len(closes)} 个，不能做分钟级二次确认。",
             "signals": [],
             "blockers": ["5分钟线价格字段不完整，短线动能、BOLL和均线确认失效。"],
-            "metrics": {"bar_count": len(day_bars), "valid_close_count": len(closes)},
+            "metrics": {"bar_count": len(day_bars), "current_day_bar_count": current_day_count, "warmup_used": warmup_used, "valid_close_count": len(closes)},
         }
 
     current = as_float(value_at(intraday, "quote.latest_price"), closes[-1]) or closes[-1]
@@ -1479,6 +1482,8 @@ def build_minute_confirmation(
     score = 0.0
     signals: list[str] = []
     blockers: list[str] = []
+    if warmup_used:
+        signals.append(f"早盘仅有 {current_day_count} 根当日5分钟线，已用上一交易日尾盘补足20根预热样本。")
     if ma5 is not None and current >= ma5:
         score += 8
         signals.append("现价站在5分钟MA5上方，短线没有继续破位。")
@@ -1566,6 +1571,9 @@ def build_minute_confirmation(
         "latest_timestamp": day_bars[-1].get("timestamp"),
         "metrics": {
             "bar_count": len(day_bars),
+            "current_day_bar_count": current_day_count,
+            "warmup_bar_count": int(analysis["warmup_bar_count"] or 0),
+            "warmup_used": warmup_used,
             "last_close": rounded(current),
             "ma5": rounded(ma5),
             "ma20": rounded(ma20),
@@ -1588,6 +1596,27 @@ def latest_day_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [bar for bar in bars if str(bar.get("timestamp") or "").startswith(latest_date)]
 
 
+def minute_analysis_bars(bars: list[dict[str, Any]], min_count: int = 20) -> dict[str, Any]:
+    ordered = sorted((bar for bar in bars if isinstance(bar, dict)), key=lambda item: str(item.get("timestamp") or ""))
+    day_bars = latest_day_bars(ordered)
+    if len(day_bars) >= min_count:
+        return {
+            "bars": day_bars,
+            "current_day_bar_count": len(day_bars),
+            "warmup_bar_count": 0,
+            "warmup_used": False,
+            "latest_date": str(day_bars[-1].get("timestamp") or "")[:10] if day_bars else "",
+        }
+    warmup_bars = ordered[-min_count:] if len(ordered) >= min_count else ordered
+    return {
+        "bars": warmup_bars,
+        "current_day_bar_count": len(day_bars),
+        "warmup_bar_count": max(0, len(warmup_bars) - len(day_bars)),
+        "warmup_used": len(warmup_bars) >= min_count and len(day_bars) > 0,
+        "latest_date": str(day_bars[-1].get("timestamp") or "")[:10] if day_bars else "",
+    }
+
+
 def positive_t_blocker(code: str, label: str, current: str, reason: str, next_step: str) -> dict[str, str]:
     return {
         "code": code,
@@ -1607,13 +1636,16 @@ def build_positive_timing(
 ) -> dict[str, Any]:
     if not t_check or t_check.get("conclusion") != "positive_t_candidate":
         return {"available": False, "status": "not_applicable", "score": None, "signals": [], "blockers": [], "next_action": "当前不是正T候选，不评估正T买入腿。", "buy_zone": None, "target_sell_zone": None}
-    day_bars = latest_day_bars(minute_bars or [])
+    analysis = minute_analysis_bars(minute_bars or [], 20)
+    day_bars = analysis["bars"]
+    current_day_count = int(analysis["current_day_bar_count"] or 0)
+    warmup_used = bool(analysis["warmup_used"])
     if len(day_bars) < 20:
         return {
             "available": False,
             "status": "insufficient",
             "score": None,
-            "signals": [f"最新交易日5分钟线数量 {len(day_bars)} 少于20，不能确认正T买点。"],
+            "signals": [f"最新交易日5分钟线数量 {current_day_count} 少于20，且缓存不足以补齐20根分析样本，不能确认正T买点。"],
             "blockers": [
                 positive_t_blocker(
                     "minute_sample_insufficient",
@@ -1693,6 +1725,8 @@ def build_positive_timing(
 
     score = 0.0
     signals: list[str] = []
+    if warmup_used:
+        signals.append(f"早盘仅有 {current_day_count} 根当日5分钟线，已用上一交易日尾盘补足20根预热样本。")
     if ma20 is not None and current >= ma20:
         score += 15
         signals.append(f"现价仍在5分钟MA20上方，分时趋势未破。")
@@ -1821,6 +1855,10 @@ def build_positive_timing(
         "blockers": blockers,
         "next_action": next_action,
         "metrics": {
+            "bar_count": len(day_bars),
+            "current_day_bar_count": current_day_count,
+            "warmup_bar_count": int(analysis["warmup_bar_count"] or 0),
+            "warmup_used": warmup_used,
             "ma5": rounded(ma5),
             "ma20": rounded(ma20),
             "pullback_pct": rounded(pullback_pct),
@@ -2374,16 +2412,12 @@ def build_near_stop_risk_plan(
     shares = risk_exit_reduce_shares(current_shares)
     ma5 = as_float(levels.get("ma5"))
     ma20 = as_float(levels.get("ma20"))
-    rebound_low = max(current * 1.006, stop_loss * 1.01)
-    if ma5 is not None and ma5 > current:
-        rebound_high = min(ma5, current * 1.035)
-    elif ma20 is not None and ma20 > current:
-        rebound_high = min(ma20, current * 1.035)
-    else:
-        rebound_high = current * 1.018
+    rebound_low = stop_loss * 1.01
+    resistance_candidates = [value for value in (ma5, ma20) if value is not None and value >= rebound_low]
+    rebound_high = min(resistance_candidates) if resistance_candidates else stop_loss * 1.025
     rebound_high = max(rebound_low, rebound_high)
     rebound_zone = [rounded(rebound_low), rounded(rebound_high)]
-    recover_price = max(stop_loss * 1.012, current * 1.004)
+    recover_price = stop_loss * 1.012
     if ma5 is not None:
         recover_price = max(recover_price, ma5)
     failure_zone = [rounded(stop_loss), rounded(stop_loss)]

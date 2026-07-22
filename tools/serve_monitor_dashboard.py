@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import mimetypes
 import os
@@ -44,6 +45,163 @@ TRIGGER_REFRESH_EVENT_FILE = ROOT / "data" / "metadata" / "intraday-trigger-refr
 TRIGGER_REVIEW_STATUS_FILE = ROOT / "data" / "metadata" / "intraday-trigger-review-status.jsonl"
 FLOW_HISTORY_FILE = ROOT / "data" / "metadata" / "intraday-flow-history.jsonl"
 ARCHIVE_DIR = ROOT / "data" / "metadata" / "intraday-archive"
+CANDIDATE_POOL_FILE = ROOT / "data" / "processed" / "candidate_pool.csv"
+CANDIDATE_PORTFOLIO_FIT_FILE = ROOT / "data" / "processed" / "candidate_pool.portfolio_fit.csv"
+
+
+def infer_candidate_board(code: str, exchange: str = "") -> str:
+    code = (code or "").strip()
+    exchange = (exchange or "").strip().upper()
+    if exchange == "BSE":
+        return "bse"
+    if code.startswith(("688", "689")):
+        return "star"
+    if code.startswith(("300", "301")):
+        return "chinext"
+    if code.startswith(("600", "601", "603", "605")):
+        return "sse_main"
+    if code.startswith(("000", "001", "002", "003")):
+        return "szse_main"
+    return "unknown"
+
+
+def candidate_pool_path() -> Path:
+    return CANDIDATE_PORTFOLIO_FIT_FILE if CANDIDATE_PORTFOLIO_FIT_FILE.exists() else CANDIDATE_POOL_FILE
+
+
+def parse_number(value: object) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def split_pipe(value: str) -> list[str]:
+    return [part.strip() for part in (value or "").split("|") if part.strip()]
+
+
+def read_candidate_pool(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
+        rows: list[dict[str, object]] = []
+        for row in csv.DictReader(file):
+            exchange = (row.get("exchange") or "").strip().upper()
+            board = (row.get("board") or infer_candidate_board(row.get("code", ""), exchange)).strip()
+            item: dict[str, object] = dict(row)
+            item["exchange"] = exchange
+            item["board"] = board
+            item["strategies_list"] = split_pipe(row.get("strategies", ""))
+            for field in (
+                "strategy_count",
+                "combined_score",
+                "strategy_confluence_score",
+                "trend_score",
+                "value_quality_score",
+                "event_score",
+                "liquidity_score",
+                "industry_strength_score",
+                "data_quality_score",
+                "risk_penalty_score",
+                "current_stock_position_pct",
+                "current_industry_position_pct",
+                "current_total_position_pct",
+                "expected_stock_position_pct_after_buy",
+                "expected_industry_position_pct_after_buy",
+                "expected_total_position_pct_after_buy",
+            ):
+                item[field] = parse_number(row.get(field))
+            rows.append(item)
+        return rows
+
+
+def option_counts(items: list[dict[str, object]], field: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        values = item.get(field)
+        if isinstance(values, list):
+            parts = [str(value) for value in values if value]
+        else:
+            parts = [str(values)] if values else []
+        for value in parts:
+            counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def candidate_filters(items: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "exchange": option_counts(items, "exchange"),
+        "board": option_counts(items, "board"),
+        "industry": option_counts(items, "industry"),
+        "strategy": option_counts(items, "strategies_list"),
+        "portfolio_fit_status": option_counts(items, "portfolio_fit_status"),
+        "data_quality_status": option_counts(items, "data_quality_status"),
+    }
+
+
+def filtered_candidates(query: dict[str, list[str]]) -> dict[str, object]:
+    path = candidate_pool_path()
+    items = read_candidate_pool(path)
+    search = (query.get("search", [""])[0] or "").strip().lower()
+    filter_fields = {
+        "exchange": query.get("exchange", [""])[0],
+        "board": query.get("board", [""])[0],
+        "industry": query.get("industry", [""])[0],
+        "portfolio_fit_status": query.get("portfolio_fit_status", [""])[0],
+        "data_quality_status": query.get("data_quality_status", [""])[0],
+    }
+    strategy = query.get("strategy", [""])[0]
+
+    def matches(item: dict[str, object]) -> bool:
+        if search:
+            haystack = " ".join(str(item.get(field) or "") for field in ("code", "name", "industry")).lower()
+            if search not in haystack:
+                return False
+        for field, value in filter_fields.items():
+            if value and str(item.get(field) or "") != value:
+                return False
+        if strategy and strategy not in item.get("strategies_list", []):
+            return False
+        return True
+
+    filtered = [item for item in items if matches(item)]
+    sort_key = query.get("sort", ["combined_score"])[0]
+    direction = query.get("direction", ["desc"])[0]
+    sortable_numeric = {
+        "combined_score",
+        "strategy_count",
+        "industry_strength_score",
+        "liquidity_score",
+        "risk_penalty_score",
+        "expected_total_position_pct_after_buy",
+    }
+    if sort_key in sortable_numeric:
+        filtered.sort(
+            key=lambda item: (
+                parse_number(item.get(sort_key)) is None,
+                parse_number(item.get(sort_key)) or 0,
+                str(item.get("code") or ""),
+            ),
+            reverse=direction != "asc",
+        )
+    else:
+        filtered.sort(key=lambda item: (str(item.get(sort_key) or ""), str(item.get("code") or "")), reverse=direction != "asc")
+
+    try:
+        limit = min(500, max(1, int(query.get("limit", ["200"])[0])))
+    except ValueError:
+        limit = 200
+    return {
+        "source": str(path),
+        "available": path.exists(),
+        "total_count": len(items),
+        "filtered_count": len(filtered),
+        "items": filtered[:limit],
+        "filters": candidate_filters(items),
+        "sort": {"key": sort_key, "direction": direction},
+    }
 
 
 def dashboard_position_paths() -> list[str]:
@@ -143,6 +301,7 @@ def classify_trigger_review_item(snapshot: dict[str, Any]) -> dict[str, Any]:
     active_path = str(snapshot.get("active_path") or "")
     primary_status = str(after.get("primary_status") or "")
     plan_type = str(after.get("plan_type") or "")
+    plan_status = str(after.get("plan_status") or "")
     trade_intent = str(after.get("manual_plan_trade_intent") or "")
     if active_path == "path3_recover":
         return {
@@ -152,7 +311,11 @@ def classify_trigger_review_item(snapshot: dict[str, Any]) -> dict[str, Any]:
             "target": "manual-execution-plan",
             "priority": 2,
         }
-    if primary_status == "ready" or plan_type in {"risk_reduce", "hard_exit"} or trade_intent in {"risk_exit_reduce", "risk_exit_full"}:
+    if (
+        primary_status == "ready"
+        or plan_type in {"risk_reduce", "hard_exit"}
+        or (trade_intent in {"risk_exit_reduce", "risk_exit_full"} and plan_status == "ready_for_manual_confirm")
+    ):
         return {
             "status": "action_required",
             "status_label": "需要处理",
@@ -160,7 +323,13 @@ def classify_trigger_review_item(snapshot: dict[str, Any]) -> dict[str, Any]:
             "target": "manual-execution-plan",
             "priority": 0,
         }
-    if after.get("available"):
+    if after.get("available") and (
+        primary_status in {"blocked", "watch"}
+        and (
+            plan_status in {"near_stop_review", "watch", "wait_rebound_reduce"}
+            or after.get("state") in {"exit_risk_review", "risk_reduction_review", "reverse_buyback_review"}
+        )
+    ):
         return {
             "status": "review_required",
             "status_label": "需要复核",
@@ -813,6 +982,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/market-wait-refresh":
             self.send_json(market_wait_refresh_status())
+            return
+        if parsed.path == "/api/candidate-pool":
+            self.send_json(filtered_candidates(parse_qs(parsed.query)))
             return
         if parsed.path == "/api/events":
             query = parse_qs(parsed.query)
