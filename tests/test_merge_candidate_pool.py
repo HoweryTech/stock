@@ -136,6 +136,7 @@ class MergeCandidatePoolTest(unittest.TestCase):
 
         self.assertEqual(candidates[0]["technical_health_status"], "blocked")
         self.assertLess(candidates[0]["technical_health_score"], 0)
+        self.assertLess(candidates[0]["combined_score"], 0)
         self.assertIn("daily MACD偏弱", candidates[0]["technical_health_evidence"])
         self.assertIn("daily_macd_dead_cross", candidates[0]["technical_risk_flags"])
 

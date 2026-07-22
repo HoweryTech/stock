@@ -65,6 +65,34 @@ def normalize_row(row: dict[str, Any], trade_date: str, updated_at: str) -> dict
     }
 
 
+def percentile_rank(value: float, sorted_values: list[float]) -> float | None:
+    if not sorted_values:
+        return None
+    less_or_equal = 0
+    for item in sorted_values:
+        if item <= value:
+            less_or_equal += 1
+        else:
+            break
+    return less_or_equal / len(sorted_values) * 100
+
+
+def apply_cross_section_percentiles(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    pe_values = sorted(value for row in rows if (value := as_number(row.get("pe_ttm"))) is not None and value > 0)
+    pb_values = sorted(value for row in rows if (value := as_number(row.get("pb"))) is not None and value > 0)
+    enriched: list[dict[str, str]] = []
+    for row in rows:
+        enriched_row = dict(row)
+        pe = as_number(row.get("pe_ttm"))
+        pb = as_number(row.get("pb"))
+        if pe is not None and pe > 0:
+            enriched_row["pe_percentile"] = format_number(percentile_rank(pe, pe_values))
+        if pb is not None and pb > 0:
+            enriched_row["pb_percentile"] = format_number(percentile_rank(pb, pb_values))
+        enriched.append(enriched_row)
+    return enriched
+
+
 def fetch_page(page: int, page_size: int, timeout: float, retries: int = 3) -> dict[str, Any]:
     params = {
         "pn": page,
@@ -112,6 +140,7 @@ def fetch_rows(page_size: int = 100, timeout: float = 15.0, trade_date: str | No
     valuation_date = trade_date or date.today().isoformat()
     updated_at = date.today().isoformat()
     rows = [normalize_row(row, valuation_date, updated_at) for row in raw_rows if str(row.get("f12") or "").strip()]
+    rows = apply_cross_section_percentiles(rows)
     return sorted(rows, key=lambda item: item["code"])
 
 
@@ -143,6 +172,8 @@ def build_metadata(rows: list[dict[str, str]], output: Path, retained_snapshot: 
             "ps_ttm": "Reserved; not populated by quote list source.",
             "pcf_ttm": "Reserved; not populated by quote list source.",
             "dividend_yield": "Reserved; not populated by quote list source.",
+            "pe_percentile": "Current cross-section percentile among positive PE TTM rows.",
+            "pb_percentile": "Current cross-section percentile among positive PB rows.",
             "industry_percentiles": "Reserved for later industry distribution calculation.",
         },
         "retained_snapshot": retained_snapshot,

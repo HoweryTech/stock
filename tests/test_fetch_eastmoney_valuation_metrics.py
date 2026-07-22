@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from tools.fetch_eastmoney_valuation_metrics import build_metadata, normalize_row
+from tools.fetch_eastmoney_valuation_metrics import apply_cross_section_percentiles, build_metadata, normalize_row
 
 
 class FetchEastmoneyValuationMetricsTest(unittest.TestCase):
@@ -43,6 +43,23 @@ class FetchEastmoneyValuationMetricsTest(unittest.TestCase):
         self.assertEqual(metadata["row_count"], 1)
         self.assertEqual(metadata["missing_by_field"]["ps_ttm"], 1)
         self.assertEqual(metadata["missing_by_field"]["pcf_ttm"], 1)
+
+    def test_applies_cross_section_percentiles_for_positive_valuation_values(self) -> None:
+        rows = apply_cross_section_percentiles(
+            [
+                normalize_row({"f12": "600000", "f115": 5, "f23": 0.5}, "2026-07-22", "2026-07-22"),
+                normalize_row({"f12": "000001", "f115": 10, "f23": 1.0}, "2026-07-22", "2026-07-22"),
+                normalize_row({"f12": "300750", "f115": 20, "f23": 2.0}, "2026-07-22", "2026-07-22"),
+                normalize_row({"f12": "亏损", "f115": -3, "f23": "-"}, "2026-07-22", "2026-07-22"),
+            ]
+        )
+
+        by_code = {row["code"]: row for row in rows}
+        self.assertEqual(by_code["600000"]["pe_percentile"], "33.333333")
+        self.assertEqual(by_code["000001"]["pe_percentile"], "66.666667")
+        self.assertEqual(by_code["300750"]["pe_percentile"], "100")
+        self.assertEqual(by_code["亏损"]["pe_percentile"], "")
+        self.assertEqual(by_code["亏损"]["pb_percentile"], "")
 
 
 if __name__ == "__main__":

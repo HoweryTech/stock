@@ -422,6 +422,14 @@ def score_component(value: Any, weight: float = 1.0) -> float:
     return (as_float(value, 0.0) or 0.0) * weight
 
 
+def technical_status_adjustment(status: Any) -> float:
+    return {
+        "strong": 10.0,
+        "weak": -50.0,
+        "blocked": -180.0,
+    }.get(str(status or ""), 0.0)
+
+
 def combined_score_from_components(candidate: dict[str, Any]) -> float:
     return round(
         score_component(candidate.get("strategy_confluence_score"))
@@ -432,7 +440,8 @@ def combined_score_from_components(candidate: dict[str, Any]) -> float:
         + score_component(candidate.get("liquidity_score"), 0.1)
         + score_component(candidate.get("data_quality_score"))
         + score_component(candidate.get("risk_penalty_score"))
-        + score_component(candidate.get("technical_health_score"), 0.8),
+        + score_component(candidate.get("technical_health_score"), 0.8)
+        + technical_status_adjustment(candidate.get("technical_health_status")),
         6,
     )
 
@@ -468,6 +477,7 @@ def finalize_candidate(
         "data_quality_score": data_quality_score,
         "risk_penalty_score": risk_penalty_score,
         "technical_health_score": technical_health_score,
+        "technical_health_status": technical_health_status,
     }
     return {
         "code": candidate["code"],

@@ -7,6 +7,7 @@ from tools.risk_check import load_yaml
 from tools.screen_value_quality import (
     candidate_from_row,
     run_screen,
+    score_candidate,
     screen_candidates,
     value_quality_screening_config,
 )
@@ -98,6 +99,21 @@ class ScreenValueQualityTest(unittest.TestCase):
 
         self.assertIsNone(candidate)
         self.assertTrue(any("PE 分位" in reason for reason in exclusions))
+
+    def test_score_caps_extreme_growth_contribution(self) -> None:
+        row = {
+            "roe": "60",
+            "roa": "30",
+            "gross_margin": "300",
+            "debt_ratio": "20",
+            "operating_cash_flow": "1",
+            "revenue_growth_yoy": "5000",
+            "deducted_net_profit_growth_yoy": "6000",
+            "pe_percentile": "10",
+            "pb_percentile": "10",
+        }
+
+        self.assertEqual(score_candidate(row), 68.0)
 
     def test_uses_latest_report_per_code_and_limits_candidates(self) -> None:
         rows = [

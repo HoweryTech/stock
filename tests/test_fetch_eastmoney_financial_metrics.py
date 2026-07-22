@@ -25,7 +25,7 @@ class FetchEastmoneyFinancialMetricsTest(unittest.TestCase):
             {
                 "REPORT_DATE": "2026-03-31 00:00:00",
                 "ROEJQ": 5.21,
-                "ROAZZL": 1.32,
+                "ZZCJLL": 1.32,
                 "XSMLL": 42.5,
                 "XSJLL": 9.8,
                 "ZCFZL": 55.2,

@@ -88,7 +88,7 @@ def normalize_financial_row(row: dict[str, Any], code: str, updated_at: str) -> 
         "report_period": normalize_date(row.get("REPORT_DATE")),
         "code": code,
         "roe": format_number(row.get("ROEJQ")),
-        "roa": format_number(row.get("ROAZZL") if row.get("ROAZZL") is not None else row.get("ROA")),
+        "roa": format_number(row.get("ROAZZL") if row.get("ROAZZL") is not None else row.get("ROA") if row.get("ROA") is not None else row.get("ZZCJLL")),
         "gross_margin": format_number(row.get("XSMLL")),
         "net_margin": format_number(row.get("XSJLL")),
         "debt_ratio": format_number(row.get("ZCFZL")),

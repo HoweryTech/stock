@@ -123,6 +123,10 @@ def require_max(row: dict[str, str], field: str, threshold: float, label: str) -
     return None
 
 
+def capped_positive(value: float, cap: float) -> float:
+    return min(max(value, 0.0), cap)
+
+
 def score_candidate(row: dict[str, str]) -> float:
     roe = number_from_row(row, "roe") or 0.0
     roa = number_from_row(row, "roa") or 0.0
@@ -134,16 +138,16 @@ def score_candidate(row: dict[str, str]) -> float:
     pe_percentile = number_from_row(row, "pe_percentile") or 0.0
     pb_percentile = number_from_row(row, "pb_percentile") or 0.0
 
-    score = roe + roa
-    score += max(gross_margin, 0.0) * 0.05
-    score += max(revenue_growth, 0.0) * 0.2
-    score += max(deducted_growth, 0.0) * 0.2
+    score = capped_positive(roe, 20.0) + capped_positive(roa, 10.0)
+    score += capped_positive(gross_margin, 80.0) * 0.05
+    score += capped_positive(revenue_growth, 80.0) * 0.2
+    score += capped_positive(deducted_growth, 80.0) * 0.2
     score -= max(debt_ratio - 60.0, 0.0) * 0.1
     score -= max(pe_percentile - 50.0, 0.0) * 0.05
     score -= max(pb_percentile - 50.0, 0.0) * 0.05
     if operating_cash_flow > 0:
         score += 2.0
-    return round(score, 6)
+    return round(min(score, 80.0), 6)
 
 
 def candidate_from_row(row: dict[str, str], config: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
