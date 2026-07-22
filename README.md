@@ -65,6 +65,7 @@
 - [观察池报告](./docs/观察池报告.md)
 - [观察池流水线](./docs/观察池流水线.md)
 - [候选池质量检查](./docs/候选池质量检查.md)
+- [候选池入池后表现跟踪](./docs/候选池入池后表现跟踪.md)
 - [候选股生成交易计划草稿](./docs/候选股生成交易计划草稿.md)
 - [交易计划补全辅助](./docs/交易计划补全辅助.md)
 - [交易计划草稿质量检查](./docs/交易计划草稿质量检查.md)
@@ -257,6 +258,17 @@ python3 tools/generate_watchlist_report.py \
 ```bash
 python3 tools/check_candidate_pool.py \
   --candidates data/processed/candidate_pool.csv
+```
+
+### 跟踪候选池入池后表现
+
+```bash
+python3 tools/track_candidate_performance.py \
+  --candidates data/processed/candidate_pool.csv \
+  --daily-bars data/processed/daily_bars.csv \
+  --horizons 5,10,20 \
+  --output data/metadata/candidate-performance.json \
+  --markdown-output reports/candidate-performance.md
 ```
 
 ### 一键生成观察池
