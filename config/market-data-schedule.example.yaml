@@ -83,6 +83,20 @@ jobs:
     retention: retain_every_run
     rationale: "财务指标跟随定期报告和业绩预告变化，常规季度刷新，财报密集期每日补拉。"
 
+  event_catalyst_events:
+    priority: high
+    cadence: trading_day_after_close
+    suggested_time: "18:40"
+    command: >
+      .venv/bin/python tools/fetch_eastmoney_announcements.py
+      --codes-file data/processed/tradable_universe.csv
+      --lookback-days 7
+      --output data/processed/event_catalyst_events.csv
+      --metadata-output data/metadata/event_catalyst_events.fetch.json
+      --workers 4
+    retention: retain_every_run
+    rationale: "公告和事件每天增量抓取，按公告 ID 去重；正向事件进入事件催化筛选，风险事件进入复核。"
+
   industry_valuation_percentiles:
     priority: high
     cadence: monthly_first_trading_day_after_close
