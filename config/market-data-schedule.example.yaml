@@ -73,7 +73,13 @@ jobs:
     priority: high
     cadence: quarterly_and_reporting_season_daily
     suggested_time: "19:00"
-    command: "TODO: add financial metrics fetcher"
+    command: >
+      .venv/bin/python tools/fetch_eastmoney_financial_metrics.py
+      --codes-file data/processed/tradable_universe.csv
+      --report-count 1
+      --output data/processed/financial_metrics.csv
+      --metadata-output data/metadata/financial_metrics.fetch.json
+      --workers 4
     retention: retain_every_run
     rationale: "财务指标跟随定期报告和业绩预告变化，常规季度刷新，财报密集期每日补拉。"
 
